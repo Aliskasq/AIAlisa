@@ -12,7 +12,7 @@ from agent.analyzer import ask_ai_analysis
 import agent.analyzer  
 import agent.square_publisher
 from agent.skills import post_to_binance_square
-SCAN_SCHEDULE = {"hour": 14, "minute": 25}
+SCAN_SCHEDULE = {"hour": 3, "minute": 0}
 
 # --- Import all skills ---
 from agent.skills import (
