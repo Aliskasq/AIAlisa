@@ -143,7 +143,7 @@ async def telegram_polling_loop(app_session):
                                 user_id = cq.get("from", {}).get("id")
                                 chat_type = cq.get("message", {}).get("chat", {}).get("type", "")
                                 
-                                is_admin = True
+                                user_is_admin = True
                                 if chat_type in ["group", "supergroup"]:
                                     admin_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember?chat_id={chat_id}&user_id={user_id}"
                                     async with app_session.get(admin_url) as chk_resp:
@@ -151,9 +151,9 @@ async def telegram_polling_loop(app_session):
                                             chk_data = await chk_resp.json()
                                             status = chk_data.get("result", {}).get("status", "")
                                             if status not in ["creator", "administrator"]:
-                                                is_admin = False
+                                                user_is_admin = False
                                 
-                                if not is_admin:
+                                if not user_is_admin:
                                     await app_session.post(
                                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
                                         json={"callback_query_id": cq_id, "text": "⛔️ Only Group Admins can post to Square!", "show_alert": True}
