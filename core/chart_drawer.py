@@ -11,10 +11,7 @@ import logging
 import uuid
 from config import BOT_TOKEN, GROUP_CHAT_ID
 
-try:
-    from core.tg_listener import SQUARE_CACHE
-except ImportError:
-    SQUARE_CACHE = {}
+SQUARE_CACHE_FILE = "data/square_cache.json"
 
 async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text=""):
     # FIX: Sync view limit perfectly with scanner (199)
@@ -131,13 +128,17 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     # --- PREPARE BINANCE SQUARE PUBLICATION ---
     post_id = str(uuid.uuid4())[:8]
     square_text = f"🚀 ${symbol} Technical Breakout Alert!\n\nTimeframe: {tf}\nCurrent Price: ${current_price:.4f}\n\n{ai_text}\n\n#AIBinance #BinanceSquare #Write2Earn"
-    SQUARE_CACHE[post_id] = square_text
-    # Persist cache to disk
+    # Save to file-based cache (no circular import needed)
     try:
-        from core.tg_listener import _save_square_cache
-        _save_square_cache()
-    except Exception:
-        pass
+        cache = {}
+        if os.path.exists(SQUARE_CACHE_FILE):
+            with open(SQUARE_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+        cache[post_id] = square_text
+        with open(SQUARE_CACHE_FILE, 'w') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"❌ Failed to save square cache: {e}")
 
     # --- TELEGRAM MESSAGE DESIGN ---
     short_symbol = symbol.replace('USDT', '')

@@ -15,26 +15,49 @@ import agent.analyzer
 import agent.square_publisher
 from agent.square_publisher import set_coins, set_times, get_coins, get_times, get_status_text
 from agent.skills import post_to_binance_square
-# --- SQUARE CACHE (must be defined BEFORE chart_drawer import due to circular dependency) ---
+# --- SQUARE CACHE (file-based, no shared dict issues) ---
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
-def _load_square_cache():
+def square_cache_put(post_id: str, text: str):
+    """Save text to square cache file."""
+    try:
+        cache = {}
+        if os.path.exists(SQUARE_CACHE_FILE):
+            with open(SQUARE_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+        cache[post_id] = text
+        # Keep only last 50 entries to prevent file bloat
+        if len(cache) > 50:
+            keys = list(cache.keys())
+            for k in keys[:-50]:
+                del cache[k]
+        with open(SQUARE_CACHE_FILE, 'w') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"❌ square_cache_put error: {e}")
+
+def square_cache_get(post_id: str) -> str | None:
+    """Read text from square cache file."""
     try:
         if os.path.exists(SQUARE_CACHE_FILE):
             with open(SQUARE_CACHE_FILE, 'r') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-def _save_square_cache():
-    try:
-        with open(SQUARE_CACHE_FILE, 'w') as f:
-            json.dump(SQUARE_CACHE, f, ensure_ascii=False)
+                cache = json.load(f)
+                return cache.get(post_id)
     except Exception as e:
-        logging.error(f"❌ Failed to save square cache: {e}")
+        logging.error(f"❌ square_cache_get error: {e}")
+    return None
 
-SQUARE_CACHE = _load_square_cache()
+def square_cache_delete(post_id: str):
+    """Remove entry from square cache file."""
+    try:
+        if os.path.exists(SQUARE_CACHE_FILE):
+            with open(SQUARE_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+            cache.pop(post_id, None)
+            with open(SQUARE_CACHE_FILE, 'w') as f:
+                json.dump(cache, f, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"❌ square_cache_delete error: {e}")
 
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import draw_scan_chart
@@ -261,7 +284,7 @@ async def telegram_polling_loop(app_session):
                                     continue
                                 
                                 post_id = cb_data.replace("sq_", "")
-                                text_to_post = SQUARE_CACHE.get(post_id)
+                                text_to_post = square_cache_get(post_id)
                                 if text_to_post:
                                     await app_session.post(
                                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
@@ -269,8 +292,7 @@ async def telegram_polling_loop(app_session):
                                     )
                                     result_msg = await post_to_binance_square(text_to_post)
                                     await send_response(app_session, chat_id, result_msg)
-                                    del SQUARE_CACHE[post_id]
-                                    _save_square_cache()
+                                    square_cache_delete(post_id)
                                 else:
                                     await app_session.post(
                                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
@@ -737,8 +759,7 @@ async def telegram_polling_loop(app_session):
                                 import uuid
                                 post_id = str(uuid.uuid4())[:8]
                                 square_text = f"🚀 ${symbol} AI Market Analysis!\n\n{ai_msg}\n\n#AIBinance #BinanceSquare #Write2Earn"
-                                SQUARE_CACHE[post_id] = square_text
-                                _save_square_cache()
+                                square_cache_put(post_id, square_text)
 
                                 app_link = f"https://app.binance.com/en/futures/{symbol.upper()}"
                                 web_link = f"https://www.binance.com/en/futures/{symbol.upper()}"
