@@ -4,7 +4,7 @@ import logging
 import re
 import pandas as pd
 import json
-from config import BOT_TOKEN, GROUP_CHAT_ID
+from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID
 
 from core.binance_api import fetch_klines, fetch_funding_rate
 from core.indicators import calculate_binance_indicators
@@ -16,6 +16,14 @@ from agent.skills import post_to_binance_square
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import draw_scan_chart
 SCAN_SCHEDULE = {"hour": 3, "minute": 0}
+
+# --- ADMIN ACCESS CONTROL ---
+ADMIN_ID = int(CHAT_ID) if CHAT_ID else 0
+
+def is_admin(msg: dict) -> bool:
+    """Check if the message sender is the bot admin."""
+    user_id = msg.get("from", {}).get("id", 0)
+    return user_id == ADMIN_ID
 
 # --- Import all skills ---
 from agent.skills import (
@@ -142,6 +150,9 @@ async def telegram_polling_loop(app_session):
                         # BLOCK 1: AI MODEL COMMANDS (/models)
                         # ==========================================
                         if text.startswith("/models"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             models_text = (
                                 "🧠 *Available / Popular Models:*\n\n"
                                 "1. `stepfun/step-3.5-flash:free` (Fast, Free)\n"
@@ -154,6 +165,9 @@ async def telegram_polling_loop(app_session):
                             continue
                             
                         if text.startswith("/model"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             parts = original_text.split(maxsplit=1)
                             if len(parts) == 1:
                                 current_m = agent.analyzer.OPENROUTER_MODEL
@@ -213,20 +227,27 @@ async def telegram_polling_loop(app_session):
                                 "🔍 `scan BTC` or `посмотри btc` - Run Tech Analysis\n"
                                 "💰 `margin 100 leverage 10 max 20%` - Reply for exact stop-loss math\n"
                                 "🛠 `/skills` - Open Web3 Skills Menu\n"
-                                "🧠 `/models` - Change AI Engine\n"
-                                "⏰ `/time 18:30` - Set global scan schedule\n"
-                                "📢 `/autopost` - Status / manage auto-posts\n"
-                                "📢 `/autopost on / off` - Toggle auto-posts\n"
-                                "🪙 `/autopost SOL BTC ETH` - Set coins\n"
-                                "⏰ `/autopost time 13:30 22:50` - Set schedule\n"
-                                "✏️ `/post текст` - Post to Binance Square\n"
                                 "📈 `/top gainers` - Top 10 growth 24h\n"
                                 "📉 `/top losers` - Top 10 drops 24h"
                             )
+                            if is_admin(msg):
+                                welcome_text += (
+                                    "\n\n🔐 *Admin Commands:*\n"
+                                    "🧠 `/models` - Change AI Engine\n"
+                                    "⏰ `/time 18:30` - Set global scan schedule\n"
+                                    "📢 `/autopost` - Status / manage auto-posts\n"
+                                    "📢 `/autopost on / off` - Toggle auto-posts\n"
+                                    "🪙 `/autopost SOL BTC ETH` - Set coins\n"
+                                    "⏰ `/autopost time 13:30 22:50` - Set schedule\n"
+                                    "✏️ `/post текст` - Post to Binance Square"
+                                )
                             await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
                             continue
 
                         if text.startswith("/time "):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             try:
                                 # Parse format like "/time 18:15" or "/time 18 15"
                                 time_str = text.split(" ", 1)[1].replace(":", " ").split()
@@ -249,6 +270,9 @@ async def telegram_polling_loop(app_session):
                         # CUSTOM POST TO BINANCE SQUARE (/post <text>)
                         # ==========================================
                         if text.startswith("/post"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             parts = original_text.split(maxsplit=1)
                             if len(parts) < 2 or not parts[1].strip():
                                 await send_response(app_session, chat_id,
@@ -265,6 +289,9 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         if text.startswith("/autopost"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             parts = original_text.split(maxsplit=1)
                             arg = parts[1].strip() if len(parts) > 1 else ""
                             arg_lower = arg.lower()
