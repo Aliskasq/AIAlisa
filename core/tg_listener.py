@@ -15,6 +15,27 @@ import agent.analyzer
 import agent.square_publisher
 from agent.square_publisher import set_coins, set_times, get_coins, get_times, get_status_text
 from agent.skills import post_to_binance_square
+# --- SQUARE CACHE (must be defined BEFORE chart_drawer import due to circular dependency) ---
+SQUARE_CACHE_FILE = "data/square_cache.json"
+
+def _load_square_cache():
+    try:
+        if os.path.exists(SQUARE_CACHE_FILE):
+            with open(SQUARE_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _save_square_cache():
+    try:
+        with open(SQUARE_CACHE_FILE, 'w') as f:
+            json.dump(SQUARE_CACHE, f, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"❌ Failed to save square cache: {e}")
+
+SQUARE_CACHE = _load_square_cache()
+
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import draw_scan_chart
 SCAN_SCHEDULE = {"hour": 3, "minute": 0}
@@ -36,26 +57,6 @@ from agent.skills import (
     get_meme_rank,
     get_address_pnl_rank
 )
-
-SQUARE_CACHE_FILE = "data/square_cache.json"
-
-def _load_square_cache():
-    try:
-        if os.path.exists(SQUARE_CACHE_FILE):
-            with open(SQUARE_CACHE_FILE, 'r') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-def _save_square_cache():
-    try:
-        with open(SQUARE_CACHE_FILE, 'w') as f:
-            json.dump(SQUARE_CACHE, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-SQUARE_CACHE = _load_square_cache()
 
 
 async def build_trend_text(session: aiohttp.ClientSession) -> str:
