@@ -4,7 +4,8 @@ import logging
 import re
 import pandas as pd
 import json
-from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID
+from datetime import datetime, timezone, timedelta
+from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log
 
 from core.binance_api import fetch_klines, fetch_funding_rate
 from core.indicators import calculate_binance_indicators
@@ -36,6 +37,75 @@ from agent.skills import (
 )
 
 SQUARE_CACHE = {}
+
+
+async def build_trend_text(session: aiohttp.ClientSession) -> str:
+    """Build a formatted list of all breakout coins with breakout price and current live price."""
+    log = load_breakout_log()
+    if not log:
+        return "📭 Нет пробитий с последнего скана."
+
+    lines = ["📊 *Пробития трендовых линий:*\n"]
+    for entry in log:
+        sym = entry["symbol"].replace("USDT", "")
+        tf = entry["tf"]
+        bp = entry["breakout_price"]
+        # Fetch live price
+        current_price = entry["current_price"]
+        try:
+            url = f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={entry['symbol']}"
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    current_price = float(data["price"])
+        except Exception:
+            pass
+
+        diff_pct = ((current_price / bp) - 1) * 100 if bp > 0 else 0
+        arrow = "🟢" if diff_pct >= 0 else "🔴"
+        lines.append(
+            f"{arrow} `${sym}` ({tf})\n"
+            f"    Пробитие: `${bp:.6f}`\n"
+            f"    Сейчас: `${current_price:.6f}` (*{diff_pct:+.2f}%*)"
+        )
+    
+    lines.append(f"\n_Всего: {len(log)} монет_")
+    return "\n".join(lines)
+
+
+async def auto_trend_sender(session: aiohttp.ClientSession):
+    """Background task: sends /trend summary to group at 23:57 UTC daily."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # Target: 23:57 UTC (= 02:57 UTC+3)
+            target = now.replace(hour=23, minute=57, second=0, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
+            
+            sleep_sec = (target - now).total_seconds()
+            logging.info(f"📊 Trend auto-sender sleeping {sleep_sec:.0f}s until {target.strftime('%Y-%m-%d %H:%M')} UTC")
+            await asyncio.sleep(sleep_sec)
+
+            # Build and send trend summary
+            trend_text = await build_trend_text(session)
+            if "Нет пробитий" not in trend_text:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": GROUP_CHAT_ID,
+                    "text": f"🕐 *Ежедневный итог пробитий (23:57 UTC):*\n\n{trend_text}",
+                    "parse_mode": "Markdown"
+                }
+                await session.post(url, json=payload)
+                logging.info("✅ Auto trend summary sent to group.")
+            else:
+                logging.info("📭 No breakouts to report, skipping auto-trend.")
+            
+            await asyncio.sleep(120)  # Prevent double-trigger
+        except Exception as e:
+            logging.error(f"❌ Auto trend sender error: {e}")
+            await asyncio.sleep(60)
+
 
 async def send_response(session, chat_id, text, reply_to_msg_id=None, reply_markup=None, parse_mode=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -133,6 +203,31 @@ async def telegram_polling_loop(app_session):
                                 await send_response(app_session, chat_id, f"🛠 *Binance Web3 Skill:*\n{result_text}", parse_mode="Markdown")
                                 continue
 
+                            # 3. Model Selection Buttons (Admin only)
+                            if cb_data.startswith("md_"):
+                                if cb_data == "md_noop":
+                                    await app_session.post(
+                                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                                        json={"callback_query_id": cq_id}
+                                    )
+                                    continue
+                                user_id = cq.get("from", {}).get("id", 0)
+                                if user_id != ADMIN_ID:
+                                    await app_session.post(
+                                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                                        json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True}
+                                    )
+                                    continue
+                                new_model = cb_data[3:]  # strip "md_" prefix
+                                agent.analyzer.OPENROUTER_MODEL = new_model
+                                short_name = new_model.split("/")[-1] if "/" in new_model else new_model
+                                await app_session.post(
+                                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                                    json={"callback_query_id": cq_id, "text": f"✅ Switched to {short_name}"}
+                                )
+                                await send_response(app_session, chat_id, f"✅ AI Engine changed to:\n`{new_model}`", parse_mode="Markdown")
+                                continue
+
                         # --- HANDLE REGULAR MESSAGES ---
                         msg = update.get("message", {})
                         original_text = msg.get("text", "")
@@ -149,33 +244,32 @@ async def telegram_polling_loop(app_session):
                         # ==========================================
                         # BLOCK 1: AI MODEL COMMANDS (/models)
                         # ==========================================
-                        if text.startswith("/models"):
+                        if text.startswith("/models") or text.startswith("/model"):
                             if not is_admin(msg):
                                 await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
                                 continue
-                            models_text = (
-                                "🧠 *Available / Popular Models:*\n\n"
-                                "1. `stepfun/step-3.5-flash:free` (Fast, Free)\n"
-                                "2. `meta-llama/llama-3-8b-instruct:free` (Free)\n"
-                                "3. `google/gemini-2.5-flash` (Fast, requires balance)\n"
-                                "4. `anthropic/claude-3-haiku` (Smart, requires balance)\n\n"
-                                "To change, type:\n`/model model_name`"
-                            )
-                            await send_response(app_session, chat_id, models_text, msg_id, parse_mode="Markdown")
-                            continue
-                            
-                        if text.startswith("/model"):
-                            if not is_admin(msg):
-                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
-                                continue
-                            parts = original_text.split(maxsplit=1)
-                            if len(parts) == 1:
-                                current_m = agent.analyzer.OPENROUTER_MODEL
-                                await send_response(app_session, chat_id, f"🤖 Current model:\n`{current_m}`", msg_id, parse_mode="Markdown")
-                            else:
-                                new_model = parts[1].strip()
-                                agent.analyzer.OPENROUTER_MODEL = new_model
-                                await send_response(app_session, chat_id, f"✅ Model successfully changed to:\n`{new_model}`", msg_id, parse_mode="Markdown")
+                            current_m = agent.analyzer.OPENROUTER_MODEL
+                            model_text = f"🧠 *AI Engine Selection*\nCurrent: `{current_m}`"
+                            model_markup = {
+                                "inline_keyboard": [
+                                    [{"text": "── FREE MODELS ──", "callback_data": "md_noop"}],
+                                    [{"text": "⚡ StepFun 3.5 Flash", "callback_data": "md_stepfun/step-3.5-flash:free"},
+                                     {"text": "🦙 Llama 3 8B", "callback_data": "md_meta-llama/llama-3-8b-instruct:free"}],
+                                    [{"text": "🦙 Llama 4 Mav.", "callback_data": "md_meta-llama/llama-4-maverick:free"},
+                                     {"text": "🔮 Mistral Small", "callback_data": "md_mistralai/mistral-small-3.1-24b-instruct:free"}],
+                                    [{"text": "── GPT MODELS ──", "callback_data": "md_noop"}],
+                                    [{"text": "🧠 GPT-4o", "callback_data": "md_openai/gpt-4o"},
+                                     {"text": "⚡ GPT-4o Mini", "callback_data": "md_openai/gpt-4o-mini"}],
+                                    [{"text": "🧠 GPT-4.1", "callback_data": "md_openai/gpt-4.1"},
+                                     {"text": "⚡ GPT-4.1 Mini", "callback_data": "md_openai/gpt-4.1-mini"}],
+                                    [{"text": "💎 o4-mini", "callback_data": "md_openai/o4-mini"}],
+                                    [{"text": "── GEMINI MODELS ──", "callback_data": "md_noop"}],
+                                    [{"text": "💎 Gemini 2.5 Pro", "callback_data": "md_google/gemini-2.5-pro-preview-06-05"},
+                                     {"text": "⚡ Gemini 2.5 Flash", "callback_data": "md_google/gemini-2.5-flash-preview-05-20"}],
+                                    [{"text": "⚡ Gemini 2.0 Flash", "callback_data": "md_google/gemini-2.0-flash-001"}],
+                                ]
+                            }
+                            await send_response(app_session, chat_id, model_text, msg_id, reply_markup=model_markup, parse_mode="Markdown")
                             continue
 
                         # ==========================================
@@ -227,8 +321,9 @@ async def telegram_polling_loop(app_session):
                                 "🔍 `scan BTC` or `посмотри btc` - Run Tech Analysis\n"
                                 "💰 `margin 100 leverage 10 max 20%` - Reply for exact stop-loss math\n"
                                 "🛠 `/skills` - Open Web3 Skills Menu\n"
-                                "📈 `/top gainers` - Top 10 growth 24h\n"
-                                "📉 `/top losers` - Top 10 drops 24h"
+                                "📈 `/top gainers` - Top 10 Futures growth 24h\n"
+                                "📉 `/top losers` - Top 10 Futures drops 24h\n"
+                                "📊 `/trend` - All breakout coins since last scan"
                             )
                             if is_admin(msg):
                                 welcome_text += (
@@ -356,12 +451,12 @@ async def telegram_polling_loop(app_session):
                             mode = top_parts[1] if len(top_parts) > 1 else ""
 
                             if mode in ("gainers", "gainer", "рост", "gainers24"):
-                                await send_response(app_session, chat_id, "⏳ Loading top gainers...", msg_id)
+                                await send_response(app_session, chat_id, "⏳ Loading top gainers (Futures)...", msg_id)
                                 try:
                                     async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10) as resp:
                                         if resp.status == 200:
                                             tickers = await resp.json()
-                                            usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT")]
+                                            usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT") and float(t["quoteVolume"]) > 5_000_000]
                                             sorted_t = sorted(usdt_tickers, key=lambda x: float(x["priceChangePercent"]), reverse=True)[:10]
                                             lines = ["🟢 *Top 10 Gainers (24h Futures):*\n"]
                                             for i, t in enumerate(sorted_t, 1):
@@ -378,12 +473,12 @@ async def telegram_polling_loop(app_session):
                                     await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
 
                             elif mode in ("losers", "loser", "падение", "losers24"):
-                                await send_response(app_session, chat_id, "⏳ Loading top losers...", msg_id)
+                                await send_response(app_session, chat_id, "⏳ Loading top losers (Futures)...", msg_id)
                                 try:
                                     async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10) as resp:
                                         if resp.status == 200:
                                             tickers = await resp.json()
-                                            usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT")]
+                                            usdt_tickers = [t for t in tickers if t["symbol"].endswith("USDT") and float(t["quoteVolume"]) > 5_000_000]
                                             sorted_t = sorted(usdt_tickers, key=lambda x: float(x["priceChangePercent"]))[:10]
                                             lines = ["🔴 *Top 10 Losers (24h Futures):*\n"]
                                             for i, t in enumerate(sorted_t, 1):
@@ -404,6 +499,15 @@ async def telegram_polling_loop(app_session):
                                     "`/top gainers` — Top 10 growth (24h)\n"
                                     "`/top losers` — Top 10 drops (24h)",
                                     msg_id, parse_mode="Markdown")
+                            continue
+
+                        # ==========================================
+                        # TREND BREAKOUT LIST (/trend) — PUBLIC
+                        # ==========================================
+                        if text.startswith("/trend") or text in ["тренд", "тренды", "пробития"]:
+                            await send_response(app_session, chat_id, "⏳ Загружаю пробития...", msg_id)
+                            trend_text = await build_trend_text(app_session)
+                            await send_response(app_session, chat_id, trend_text, msg_id, parse_mode="Markdown")
                             continue
 
                         # ==========================================

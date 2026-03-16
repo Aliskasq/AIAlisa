@@ -7,14 +7,14 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts
+from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification
 import aiohttp
 
 # --- AI AND INDICATOR IMPORTS ---
-from core.tg_listener import telegram_polling_loop
+from core.tg_listener import telegram_polling_loop, auto_trend_sender
 from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 from agent.square_publisher import auto_square_poster
@@ -67,7 +67,10 @@ async def main():
         asyncio.create_task(telegram_polling_loop(session))
 
         # Start background automatic publisher for Binance Square
-        asyncio.create_task(auto_square_poster(session)) 
+        asyncio.create_task(auto_square_poster(session))
+        
+        # Start daily trend summary sender (23:57 UTC)
+        asyncio.create_task(auto_trend_sender(session))
 
 
         while True:
@@ -79,6 +82,7 @@ async def main():
             # Dynamic launch time controlled via Telegram /time command
             if last_full_calc_date != now_msk.date() and now_msk.hour == SCAN_SCHEDULE["hour"] and now_msk.minute == SCAN_SCHEDULE["minute"]:
                 await asyncio.sleep(2)
+                clear_breakout_log()
                 logging.info("🚀 STARTING GLOBAL GEOMETRIC ANALYSIS AND DRAWING (1D, 4H)...")
                 symbols = await get_usdt_futures_symbols()
 
@@ -108,6 +112,12 @@ async def main():
                             
                             stored_lines["1D"][s] = line_1d
                             stored_lines["4H"][s] = line_4h
+                            
+                            # Log coins that already broke through during scan
+                            for tf_label, line_res, raw_data in [("1D", line_1d, d1_raw), ("4H", line_4h, d4_raw)]:
+                                if line_res and line_res.get("status") == "READY" and raw_data:
+                                    cp = float(pd.DataFrame(raw_data)['close'].iloc[-1])
+                                    add_breakout_entry(s, tf_label, line_res.get("trigger_price", 0), cp, line_res.get("type", ""))
                             
                         logging.info(f"📊 Analysis progress: {min(i + chunk_size, len(symbols))} / {len(symbols)}")
                         await asyncio.sleep(0.05)
@@ -233,6 +243,8 @@ async def main():
                                 is_sent = True
 
                             if is_sent:
+                                # Log breakout for /trend command
+                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type)
                                 # ONLY REMOVE FROM JSON IF MESSAGE WAS SUCCESSFULLY DELIVERED!
                                 alerts_to_remove.append(alert)
                             else:
