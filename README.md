@@ -92,12 +92,30 @@ If the API weight exceeds `2350 / 2400`, the bot automatically triggers a safe t
 ## 🎙️ Telegram Command Center
 
 Alisa provides a comprehensive control panel via Telegram:
+
+**👥 Public Commands (all users):**
 *   `/start` - Initializes the dashboard.
-*   `look [coin]` - Forces an immediate OpenClaw analysis of a specific asset.
+*   `scan [coin]` / `look [coin]` / `посмотри [coin]` - Forces an immediate OpenClaw analysis of a specific asset.
+*   `margin 100 leverage 10 max 20%` - Reply to a signal for exact Stop-Loss math.
 *   `/skills` - Opens the interactive Binance Web3 Skills keyboard.
-*   `/time HH MM` - Dynamically sets the time for the global geometric scan.
-*   `/autopost on/off` - Toggles the background Binance Square automatic publisher task.
-*   `/models` - Switches the underlying LLM engine for failsafe routing.
+*   `/top gainers` - Top 10 Futures growth (24h).
+*   `/top losers` - Top 10 Futures drops (24h).
+*   `/trend` - Lists all coins that broke through trendlines since the last global scan (with breakout price & current price).
+
+**🔐 Admin Commands (bot owner only):**
+*   `/model` - Interactive AI engine selector (inline buttons: Free / GPT / Gemini models via OpenRouter).
+*   `/time HH:MM` - Dynamically sets the time for the global geometric scan.
+*   `/autopost` - Shows auto-posting status.
+*   `/autopost on / off` - Toggles the background Binance Square automatic publisher task.
+*   `/autopost SOL BTC ETH` - Sets coins for auto-posting.
+*   `/autopost time 13:30 22:50` - Sets auto-post schedule.
+*   `/post [text]` - Manually publishes text to Binance Square.
+*   `📢 Post to Binance Square` button under signals - Admin-verified inline publishing.
+
+**🤖 Automated Tasks:**
+*   **Global Geometric Scan** - Runs at the configured `/time` schedule (default: 03:00 UTC+3).
+*   **Daily Trend Summary** - Auto-sends all breakout coins to the group at 23:57 UTC (02:57 UTC+3).
+*   **Square Auto-Publisher** - Disabled by default. Enable via `/autopost on`.
 
 ---
 
