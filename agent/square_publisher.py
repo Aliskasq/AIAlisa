@@ -13,7 +13,8 @@ from agent.analyzer import ask_ai_analysis
 from agent.skills import post_to_binance_square
 
 # --- GLOBAL TOGGLE FOR TELEGRAM ---
-AUTO_SQUARE_ENABLED = True
+# Default OFF — admin enables manually via /autopost on
+AUTO_SQUARE_ENABLED = False
 
 # --- SETTINGS FILE (persists across restarts) ---
 AUTOPOST_SETTINGS_FILE = "data/autopost_settings.json"
