@@ -61,7 +61,25 @@ def square_cache_delete(post_id: str):
 
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import draw_scan_chart
-SCAN_SCHEDULE = {"hour": 3, "minute": 0}
+SCAN_SCHEDULE_FILE = "data/scan_schedule.json"
+
+def _load_scan_schedule():
+    try:
+        if os.path.exists(SCAN_SCHEDULE_FILE):
+            with open(SCAN_SCHEDULE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"hour": 3, "minute": 0}
+
+def _save_scan_schedule():
+    try:
+        with open(SCAN_SCHEDULE_FILE, 'w') as f:
+            json.dump(SCAN_SCHEDULE, f)
+    except Exception:
+        pass
+
+SCAN_SCHEDULE = _load_scan_schedule()
 
 # --- ADMIN ACCESS CONTROL ---
 ADMIN_ID = int(CHAT_ID) if CHAT_ID else 0
@@ -476,6 +494,7 @@ async def telegram_polling_loop(app_session):
                                 if 0 <= new_h < 24 and 0 <= new_m < 60:
                                     SCAN_SCHEDULE["hour"] = new_h
                                     SCAN_SCHEDULE["minute"] = new_m
+                                    _save_scan_schedule()
                                     msg_text = f"✅ Global scan time successfully changed to *{new_h:02d}:{new_m:02d}* (UTC+3)"
                                 else:
                                     msg_text = "⚠️ Invalid time format. Use: `/time 18:15` or `/time 18 15`"
