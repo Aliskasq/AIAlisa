@@ -60,7 +60,7 @@ def square_cache_delete(post_id: str):
         logging.error(f"❌ square_cache_delete error: {e}")
 
 from core.geometry_scanner import find_trend_line
-from core.chart_drawer import draw_scan_chart
+from core.chart_drawer import draw_scan_chart, draw_simple_chart
 SCAN_SCHEDULE_FILE = "data/scan_schedule.json"
 
 def _load_scan_schedule():
@@ -773,6 +773,9 @@ async def telegram_polling_loop(app_session):
                                     line_data, _ = await find_trend_line(df_full, "4H", symbol)
                                     if line_data:
                                         chart_path = await draw_scan_chart(symbol, df_full, line_data, "4H")
+                                    else:
+                                        # No trend line — draw simple chart without line
+                                        chart_path = await draw_simple_chart(symbol, df_full, "4H")
 
                                 # --- PREPARE BINANCE SQUARE PUBLICATION & BUTTONS ---
                                 import uuid

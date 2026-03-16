@@ -325,3 +325,52 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) ->
     if os.path.exists(file_path):
         return file_path
     return None
+
+
+async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str) -> str | None:
+    """
+    Draw a simple candlestick chart WITHOUT trend line.
+    Used when trend line construction fails.
+    Returns file path to PNG or None on failure.
+    """
+    view_limit = min(len(df), 199)
+
+    plot_df = df.iloc[-view_limit:].copy().reset_index(drop=True)
+    plot_df['ds'] = pd.to_datetime(plot_df['open_time'], unit='ms')
+    plot_df.set_index('ds', inplace=True)
+
+    file_path = f"scan_{symbol}_{tf}.png"
+    fig = None
+
+    try:
+        fig, axlist = mpf.plot(
+            plot_df, type='candle', style='charles',
+            yscale='log',
+            title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
+            figsize=(14, 8), returnfig=True, tight_layout=True
+        )
+
+        ax = axlist[0]
+        ax.set_xlim(-0.5, view_limit - 0.5)
+
+        # Watermark
+        ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
+
+        # No trendline label
+        ax.text(0.5, 0.97, "No trendline detected", transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='gray', alpha=0.7))
+
+        fig.savefig(file_path, dpi=120, bbox_inches='tight')
+
+    except Exception as e:
+        logging.error(f"❌ Error generating simple chart {symbol}: {repr(e)}")
+        return None
+    finally:
+        if fig:
+            fig.clf()
+        plt.close('all')
+        gc.collect()
+
+    if os.path.exists(file_path):
+        return file_path
+    return None
