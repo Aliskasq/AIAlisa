@@ -195,6 +195,39 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     mf_volume = mf_multiplier * df['volume']
     df['cmf'] = mf_volume.rolling(20).sum() / df['volume'].rolling(20).sum()
 
+    # 16. Volume Block Analysis (2 blocks of 10 candles)
+    vol_analysis = {"block1": {}, "block2": {}, "shift": ""}
+    if len(df) >= 20:
+        block1 = df.iloc[-20:-10]  # older 10 candles
+        block2 = df.iloc[-10:]     # recent 10 candles
+
+        b1_green_vol = block1.loc[block1['close'] > block1['open'], 'volume'].sum()
+        b1_red_vol = block1.loc[block1['close'] <= block1['open'], 'volume'].sum()
+        b2_green_vol = block2.loc[block2['close'] > block2['open'], 'volume'].sum()
+        b2_red_vol = block2.loc[block2['close'] <= block2['open'], 'volume'].sum()
+
+        b1_total = b1_green_vol + b1_red_vol if (b1_green_vol + b1_red_vol) > 0 else 1
+        b2_total = b2_green_vol + b2_red_vol if (b2_green_vol + b2_red_vol) > 0 else 1
+
+        b1_buy_pct = round(b1_green_vol / b1_total * 100, 1)
+        b2_buy_pct = round(b2_green_vol / b2_total * 100, 1)
+
+        # Determine power shift
+        if b2_buy_pct > b1_buy_pct + 5:
+            shift = "🟢 Buyers gaining strength"
+        elif b1_buy_pct > b2_buy_pct + 5:
+            shift = "🔴 Sellers gaining strength"
+        else:
+            shift = "⚪ Balanced / No clear shift"
+
+        vol_analysis = {
+            "block1_buy_pct": b1_buy_pct,
+            "block1_sell_pct": round(100 - b1_buy_pct, 1),
+            "block2_buy_pct": b2_buy_pct,
+            "block2_sell_pct": round(100 - b2_buy_pct, 1),
+            "shift": shift
+        }
+
     # ==========================================
     # 🧠 SMART MONEY CONCEPTS (SMC)
     # ==========================================
@@ -319,6 +352,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "mfi": last['mfi'],
         "ichimoku_status": ichi_status,
         "funding_rate": df.get("funding_rate", "Unknown"),
+        "vol_blocks": vol_analysis,
         "bb_upper": last['bb_upper'],
         "bb_lower": last['bb_lower'],
         "bb_mid": last['bb_mid'],

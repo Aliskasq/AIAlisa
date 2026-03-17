@@ -908,6 +908,11 @@ async def telegram_polling_loop(app_session):
                                             f"  _Средневзвешенная цена по объёму. Выше VWAP = бычий контроль_\n\n"
                                             f"• *CMF* → `{row.get('cmf',0):.4f}`\n"
                                             f"  _Chaikin Money Flow. >0 = покупатели доминируют, <0 = продавцы_\n\n"
+                                            f"• *Volume Blocks* →\n"
+                                            f"  Блок 1 (старый): Buy `{row.get('vol_blocks',{}).get('block1_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block1_sell_pct',0)}%`\n"
+                                            f"  Блок 2 (свежий): Buy `{row.get('vol_blocks',{}).get('block2_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block2_sell_pct',0)}%`\n"
+                                            f"  Сдвиг: {row.get('vol_blocks',{}).get('shift','N/A')}\n"
+                                            f"  _Сравнение объёмов покупок и продаж за 20 свечей (2 блока по 10). Показывает кто набирает силу_\n\n"
                                             f"• *Funding Rate* → `{funding}`\n"
                                             f"  _Ставка финансирования фьючерсов. + = лонги платят шортам_"
                                         )
@@ -949,6 +954,11 @@ async def telegram_polling_loop(app_session):
                                             f"  _Volume Weighted Average Price. Above VWAP = bullish control_\n\n"
                                             f"• *CMF* → `{row.get('cmf',0):.4f}`\n"
                                             f"  _Chaikin Money Flow. >0 = buyers dominate, <0 = sellers dominate_\n\n"
+                                            f"• *Volume Blocks* →\n"
+                                            f"  Block 1 (older): Buy `{row.get('vol_blocks',{}).get('block1_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block1_sell_pct',0)}%`\n"
+                                            f"  Block 2 (recent): Buy `{row.get('vol_blocks',{}).get('block2_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block2_sell_pct',0)}%`\n"
+                                            f"  Shift: {row.get('vol_blocks',{}).get('shift','N/A')}\n"
+                                            f"  _Compares buy vs sell volume over 20 candles (2 blocks of 10). Shows who's gaining power_\n\n"
                                             f"• *Funding Rate* → `{funding}`\n"
                                             f"  _Futures funding. Positive = longs pay shorts_"
                                         )
