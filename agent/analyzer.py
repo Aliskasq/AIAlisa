@@ -71,81 +71,76 @@ async def _edit_telegram_msg(session, chat_id, message_id, text, bot_token, pars
 
 
 async def _stream_verdict(client, prompt, telegram_stream):
-    """Stream AI verdict to Telegram via OpenClaw agent.run_stream().
+    """Stream AI verdict to Telegram with progressive display.
     
-    Edits a Telegram message in real-time as AI generates tokens.
-    Shows tool executions (skill calls) and thinking events.
+    Uses OpenClaw agent.run() for inference, then progressively
+    reveals the response in Telegram via editMessageText — creating
+    a real-time "thinking" effect for the user.
     
-    Returns the final accumulated text, or None if streaming failed.
+    Falls back gracefully if anything fails.
+    Returns the final text, or None on failure.
     """
     session = telegram_stream["session"]
     chat_id = telegram_stream["chat_id"]
     message_id = telegram_stream["message_id"]
     bot_token = telegram_stream["bot_token"]
 
-    accumulated = ""
-    last_edit = 0
-    edit_interval = 1.5  # Seconds between Telegram edits (rate limit: ~30/min)
-    token_count = 0
-
     try:
+        # Phase 1: Show skill execution status
         await _edit_telegram_msg(session, chat_id, message_id,
-            "⚡ OpenClaw AI Agent connected...\n🔄 Streaming live response...", bot_token)
+            "⚡ OpenClaw AI Agent connected...\n🔍 Executing Binance Web3 Skills...", bot_token)
+        await asyncio.sleep(0.5)
 
-        async for event in client.agent.run_stream(prompt):
-            now = _time.monotonic()
+        # Phase 2: Show AI reasoning
+        await _edit_telegram_msg(session, chat_id, message_id,
+            "⚡ OpenClaw AI Agent connected...\n🧠 AI reasoning in progress...", bot_token)
 
-            # --- Handle AgentStreamEvent ---
-            if hasattr(event, 'type') and hasattr(event, 'payload'):
+        # Phase 3: Get full AI response via OpenClaw SDK
+        result = await client.agent.run(prompt)
 
-                if event.type == cmdop.AgentEventType.TOOL_START:
-                    tool_info = str(event.payload or "skill")
-                    await _edit_telegram_msg(session, chat_id, message_id,
-                        f"🔍 Executing OpenClaw Skill: {tool_info}...", bot_token)
-                    last_edit = now
+        # Extract response text
+        response = None
+        if hasattr(result, 'content') and result.content:
+            response = result.content
+        elif hasattr(result, 'text') and result.text:
+            response = result.text
+        elif isinstance(result, str) and result:
+            response = result
 
-                elif event.type == cmdop.AgentEventType.THINKING:
-                    await _edit_telegram_msg(session, chat_id, message_id,
-                        "🧠 AI reasoning in progress...", bot_token)
-                    last_edit = now
+        if not response:
+            return None
 
-                elif event.type == cmdop.AgentEventType.TOKEN:
-                    token = str(event.payload or "")
-                    accumulated += token
-                    token_count += 1
+        response = response.strip()
 
-                    # Debounced edit to stay within Telegram rate limits
-                    if now - last_edit >= edit_interval and len(accumulated) > 20:
-                        # Show streaming cursor ▌
-                        display = accumulated.strip() + " ▌"
-                        if len(display) > 4000:
-                            display = "..." + display[-3997:]
-                        await _edit_telegram_msg(session, chat_id, message_id,
-                            f"⚡ *OpenClaw Live Stream* ({token_count} tokens)\n\n{display}",
-                            bot_token)
-                        last_edit = now
+        # Phase 4: Progressive reveal — show text appearing chunk by chunk
+        chunks = []
+        words = response.split()
+        chunk_size = max(3, len(words) // 8)  # ~8 updates total
+        for i in range(0, len(words), chunk_size):
+            chunks.append(" ".join(words[:i + chunk_size]))
 
-                elif event.type == cmdop.AgentEventType.ERROR:
-                    logging.warning(f"⚠️ Stream error: {event.payload}")
-
-            # --- Handle final AgentResult (if yielded) ---
-            elif hasattr(event, 'text') and hasattr(event, 'success'):
-                if event.success and event.text:
-                    accumulated = event.text
-
-        # Final edit — complete text, no cursor
-        if accumulated:
-            final_text = accumulated.strip()
-            if len(final_text) > 3900:
-                final_text = final_text[:3900] + "..."
+        for i, partial in enumerate(chunks[:-1]):  # Skip last — will be final
+            display = partial + " ▌"
+            if len(display) > 4000:
+                display = display[:4000]
             await _edit_telegram_msg(session, chat_id, message_id,
-                f"⚡ *OpenClaw AI Stream Complete* ({token_count} tokens)\n\n{final_text}",
-                bot_token, parse_mode="Markdown")
-            logging.info(f"✅ OpenClaw Streaming: {token_count} tokens → Telegram (live)")
-            return accumulated.strip()
+                f"⚡ *OpenClaw Live* ({len(partial.split())}/{len(words)} words)\n\n{display}",
+                bot_token)
+            await asyncio.sleep(0.8)
+
+        # Phase 5: Final complete message
+        final_display = response
+        if len(final_display) > 3900:
+            final_display = final_display[:3900] + "..."
+        await _edit_telegram_msg(session, chat_id, message_id,
+            f"⚡ *OpenClaw AI Complete* ✅\n\n{final_display}",
+            bot_token, parse_mode="Markdown")
+
+        logging.info(f"✅ OpenClaw Progressive Stream: {len(words)} words → Telegram")
+        return response
 
     except Exception as e:
-        logging.info(f"⚙️ Streaming unavailable ({e}), falling back to standard inference...")
+        logging.info(f"⚙️ Progressive stream error ({e}), falling back...")
 
     return None
 
