@@ -11,6 +11,18 @@ Designed to enhance the Binance ecosystem, Alisa solves three major challenges:
 2. **Risk Management:** Interactively calculates exact Stop-Loss limits based on user-defined margin and leverage.
 3. **Community Marketing:** Empowers Crypto-Influencers by providing 1-click & fully automated AI publications directly to **Binance Square**.
 
+### 🦞 Deep OpenClaw SDK Integration (3 Services)
+
+AiAlisa is not just "using OpenClaw for chat" — the entire AI pipeline is built on **three distinct CMDOP/OpenClaw SDK services**:
+
+| SDK Service | Purpose | Fallback |
+|---|---|---|
+| **`client.extract.run(model=TradeVerdict)`** | Returns **typed Pydantic models** (entry, SL, TP as floats) instead of raw text. Enables programmatic signal validation. | `agent.run()` → OpenRouter |
+| **`client.skills.run(skill_name, prompt)`** | All 7 Binance Web3 Skills are routed through the **OpenClaw Skills API** for orchestrated execution. | Direct HTTP to Binance Web3 API |
+| **`client.agent.run(prompt)`** | Core AI inference for trading verdicts via CMDOP Cloud relay. | OpenRouter aiohttp failsafe |
+
+**Why this matters:** Every AI decision passes through OpenClaw's typed extraction pipeline. The `TradeVerdict` Pydantic model ensures the agent returns **validated floats** for Entry/SL/TP — not just text that might hallucinate wrong numbers. This is critical for real trading risk management.
+
 ---
 
 ## 📸 Proof of Concept & Killer Features
@@ -81,6 +93,56 @@ To ensure the OpenClaw Agent delivers professional-grade verdicts, we feed it hi
 
 ---
 
+## 🏗️ OpenClaw SDK Architecture: How It Works
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   TELEGRAM USER                      │
+│         scan BTC / margin 100 leverage 5x            │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│          BINANCE FUTURES API (540+ pairs)            │
+│    fetch_klines() → Logarithmic Geometry Scanner     │
+│    199 candles × 4H/1D → find_trend_line()           │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│        OPENCLAW SKILLS SDK (client.skills.run)       │
+│  ┌─────────────────┐  ┌──────────────────────────┐  │
+│  │ smart_money_     │  │ social_hype_leaderboard  │  │
+│  │ signals          │  │ meme_rank                │  │
+│  │ inflow_rank      │  │ unified_token_rank       │  │
+│  │ address_pnl_rank │  │ post_to_binance_square   │  │
+│  └─────────────────┘  └──────────────────────────┘  │
+│          ↓ fallback: Direct Binance Web3 HTTP        │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│      OPENCLAW EXTRACT (client.extract.run)           │
+│                                                      │
+│   Prompt + Indicators + Skills Data                  │
+│        ↓                                             │
+│   TradeVerdict(BaseModel):                           │
+│     direction: "LONG"                                │
+│     entry_price: 98245.50    ← typed float           │
+│     stop_loss: 96100.00      ← typed float           │
+│     take_profit: 103500.00   ← typed float           │
+│     risk_percent: 4.37       ← typed float           │
+│     logic: "Funding negative, Smart Money buying..." │
+│        ↓ fallback: agent.run() → OpenRouter          │
+└──────────────┬──────────────────────────────────────┘
+               │
+┌──────────────▼──────────────────────────────────────┐
+│        TELEGRAM + BINANCE SQUARE OUTPUT              │
+│  📊 Chart PNG + AI Verdict + [Post to Square] btn   │
+└─────────────────────────────────────────────────────┘
+```
+
+The 3-tier fallback chain (`Extract → Agent → OpenRouter`) ensures **zero downtime** — if any OpenClaw service is temporarily unavailable, the bot seamlessly degrades to the next layer without the user noticing.
+
+---
+
 ## 🛡️ Enterprise-Grade Engine (Respecting Binance Infrastructure)
 
 A great bot doesn't just trade; it protects the ecosystem it lives in. 
@@ -124,7 +186,7 @@ Alisa provides a comprehensive control panel via Telegram:
 
 ## 🚀 Easy Installation Guide (Production Ready)
 
-This project is built for Ubuntu/Linux servers. To avoid dependency conflicts and ensure complete compatibility with the **OpenClaw SDK**, we strictly use **Python 3.11** in an isolated environment. Follow these exact steps to deploy the agent 24/7.
+This project is built for Ubuntu/Linux servers. To avoid dependency conflicts and ensure complete compatibility with the **OpenClaw SDK** (`openclaw` + `cmdop`), we strictly use **Python 3.11** in an isolated environment. Follow these exact steps to deploy the agent 24/7.
 
 ### Step 1: Install Python 3.11
 ```bash
@@ -137,8 +199,8 @@ sudo apt install python3.11 python3.11-venv python3.11-dev build-essential -y
 
 ### Step 2: Clone and Setup Environment
 ```bash
-git clone https://github.com/Aliskasq/AI-Alisa-CopilotClow-.git
-cd AI-Alisa-CopilotClow-
+git clone https://github.com/Aliskasq/AIAlisa.git
+cd AIAlisa
 
 # Create and activate virtual environment
 python3.11 -m venv venv
@@ -153,63 +215,89 @@ pip install -r requirements.txt
 ```
 
 ### Step 4: OpenClaw Library Hotfix (Crucial)
-*Note: Currently, the beta release of the `cmdop` package (an OpenClaw dependency) is missing the `TimeoutError` import. This causes the SDK to throw an OS dependency error (`WARNING ⚠️ OpenClaw core detected missing OS dependencies`) on boot and forces the agent into the failsafe routing mode.* 
+*Note: Currently, the beta release of the `cmdop` package (an OpenClaw dependency) is missing the `TimeoutError` import. This causes the SDK to throw an OS dependency error (`WARNING ⚠️ OpenClaw core detected missing OS dependencies`) on boot and forces the agent into the failsafe routing mode (bypassing `client.extract.run` and `client.skills.run`).* 
 
 Apply this 1-line patch to fix the library code directly via terminal:
 ```bash
 echo "TimeoutError = TimeoutError" >> venv/lib/python3.11/site-packages/cmdop/exceptions.py
 ```
 
-### Step 5: Encrypt Keys & Configure
-For extreme security, your Binance API keys must be locally encrypted.
-1. Run the encryption script:
-```bash
-python encrypt_keys.py
-```
-2. Copy `.env.example` to `.env`:
+### Step 5: Configure Environment
+Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 nano .env
 ```
-3. Replace the placeholder values with your Telegram credentials, OpenRouter API Key, Encryption parameters (generated by the script), Binance Square Key, and CMDOP API Key. Save and exit (Ctrl+O, Enter, Ctrl+X).
+Fill in the following values:
+
+| Variable | Description |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Your personal Telegram user ID (admin) |
+| `TELEGRAM_GROUP_CHAT_ID` | Signal group chat ID |
+| `OPENROUTER_API_KEY` | OpenRouter API key (failsafe AI routing) |
+| `CMDOP_API_KEY` | CMDOP/OpenClaw API key (primary AI routing) |
+| `SQUARE_OPENAPI_KEY` | Binance Square OpenAPI key |
+| `ENCRYPTION_KEY` | Fernet key for Binance API encryption |
+| `ENCRYPTED_API_KEY` | Encrypted Binance API key |
+| `ENCRYPTED_SECRET_KEY` | Encrypted Binance Secret key |
+
+Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
+
 ### Step 6: Create a Background Service (systemd)
-To keep the bot running 24/7, let's create a system service:
+To keep the bot running 24/7, create a system service:
 ```bash
-sudo nano /etc/systemd/system/alisa.service
-```
-Paste this configuration (ensure paths match your directory):
-```ini
+sudo tee /etc/systemd/system/alisa.service > /dev/null << 'EOF'
 [Unit]
-Description=AI Alisa Copilot Bot
+Description=AI Alisa Copilot Bot (OpenClaw SDK)
 After=network.target
 
 [Service]
-WorkingDirectory=/root/AI-Alisa-CopilotClow-
-ExecStart=/root/AI-Alisa-CopilotClow-/venv/bin/python main.py
+Type=simple
+WorkingDirectory=/root/AIAlisa
+ExecStart=/root/AIAlisa/venv/bin/python main.py
 Restart=always
 RestartSec=10
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=alisa-bot
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
+EOF
 ```
+
 Enable and start the daemon:
 ```bash
-systemctl daemon-reload
-systemctl enable alisa.service
-systemctl start alisa.service
+sudo systemctl daemon-reload
+sudo systemctl enable alisa.service
+sudo systemctl start alisa.service
 ```
 
 ### Step 7: Verify Installation
 Verify that the OpenClaw SDK is successfully compiled and patched:
 ```bash
-python -c 'import openclaw; print("OPENCLAW RUN")'
+source venv/bin/activate
+python -c 'import openclaw; print("✅ OPENCLAW SDK READY")'
 ```
+
+Verify the new Structured Output model loads:
+```bash
+python -c 'from agent.analyzer import TradeVerdict; print("✅ TradeVerdict model:", TradeVerdict.model_fields.keys())'
+```
+
 Watch the live logs to ensure the bot is online:
 ```bash
 journalctl -u alisa.service -f
+```
+
+You should see these lines confirming the 3-service OpenClaw integration:
+```
+⚙️ [OpenClaw Architecture] Executing Agentic Binance Skills...
+✅ [OpenClaw SDK] Skill 'smart_money_signals' executed successfully
+📊 [OpenClaw Extract] Requesting structured TradeVerdict...
+✅ OpenClaw Extract: Structured verdict received → LONG (Entry: ..., SL: ..., TP: ...)
 ```
 
 ### Step 8: Trigger the Geometric Scan (Bootstrapping)
