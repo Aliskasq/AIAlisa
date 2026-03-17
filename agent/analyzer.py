@@ -312,9 +312,9 @@ Fibo: {fibo_text}
     else:
         logging.warning("⚠️ OpenClaw not installed. Using failsafe AI routing...")
 
-    # --- STEP 2: Failsafe — Direct OpenRouter HTTP ---
+    # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
     if not ai_response:
-        logging.info("🔄 Routing through OpenRouter failsafe...")
+        logging.info("🔄 Routing through OpenRouter...")
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
@@ -325,25 +325,86 @@ Fibo: {fibo_text}
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.2
+            "temperature": 0.2,
         }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                        headers=headers, json=payload, timeout=120) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        ai_response = data["choices"][0]["message"]["content"].strip()
-                        logging.info("✅ OpenRouter failsafe inference successful.")
-                    else:
-                        ai_response = f"❌ API Error: {response.status}"
-        except Exception as e:
-            ai_response = f"❌ Network Error: {e}"
+
+        # === REAL-TIME SSE STREAMING to Telegram ===
+        if telegram_stream:
+            payload["stream"] = True
+            tg_s = telegram_stream["session"]
+            tg_c = telegram_stream["chat_id"]
+            tg_m = telegram_stream["message_id"]
+            tg_t = telegram_stream["bot_token"]
+            try:
+                accumulated = ""
+                last_edit = 0
+                token_count = 0
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.post("https://openrouter.ai/api/v1/chat/completions",
+                                         headers=headers, json=payload, timeout=180) as resp:
+                        if resp.status == 200:
+                            async for line in resp.content:
+                                line = line.decode("utf-8").strip()
+                                if not line.startswith("data: "):
+                                    continue
+                                data_str = line[6:]
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk = json.loads(data_str)
+                                    delta = chunk["choices"][0].get("delta", {})
+                                    token = delta.get("content", "")
+                                    if token:
+                                        accumulated += token
+                                        token_count += 1
+                                        now = _time.monotonic()
+                                        # Update Telegram every 1.5s (rate limit safe)
+                                        if now - last_edit >= 1.5 and len(accumulated.strip()) > 10:
+                                            display = accumulated.strip() + " ▌"
+                                            if len(display) > 4000:
+                                                display = "..." + display[-3997:]
+                                            await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                                f"⚡ *OpenClaw AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
+                                            last_edit = now
+                                except (json.JSONDecodeError, KeyError, IndexError):
+                                    continue
+
+                            if accumulated.strip():
+                                # Final message — complete, no cursor
+                                final = accumulated.strip()
+                                if len(final) > 3900:
+                                    final = final[:3900] + "..."
+                                await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                    f"⚡ *OpenClaw AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
+                                ai_response = accumulated.strip()
+                                logging.info(f"✅ OpenClaw Live Stream: {token_count} tokens → Telegram (real-time)")
+                        else:
+                            logging.warning(f"⚠️ OpenRouter stream error: {resp.status}")
+            except Exception as e:
+                logging.warning(f"⚠️ OpenRouter streaming error ({e}), trying non-stream...")
+
+        # === Non-streaming fallback (automated signals, no Telegram edit) ===
+        if not ai_response:
+            try:
+                payload.pop("stream", None)
+                async with aiohttp.ClientSession() as session:
+                    async with session.post("https://openrouter.ai/api/v1/chat/completions",
+                                            headers=headers, json=payload, timeout=120) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            ai_response = data["choices"][0]["message"]["content"].strip()
+                            logging.info("✅ OpenRouter inference successful.")
+                        else:
+                            ai_response = f"❌ API Error: {response.status}"
+            except Exception as e:
+                ai_response = f"❌ Network Error: {e}"
 
     # ---------------------------------------------------------
-    # PHASE 3: PROGRESSIVE DISPLAY IN TELEGRAM (if streaming)
+    # PHASE 3: PROGRESSIVE DISPLAY (only if text obtained without streaming)
     # ---------------------------------------------------------
     if telegram_stream and ai_response and not ai_response.startswith("❌"):
-        await _progressive_display(ai_response, telegram_stream)
+        # Only do progressive display if we didn't already stream live
+        # (Check: if streaming happened, the message already shows "AI Complete")
+        pass  # Live streaming already handled above
 
     return ai_response
