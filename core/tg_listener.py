@@ -346,7 +346,7 @@ async def telegram_polling_loop(app_session):
                             cb_data = cq.get("data", "")
                             cq_id = cq.get("id")
                             chat_id = cq.get("message", {}).get("chat", {}).get("id")
-                            cb_lang = _load_lang_settings().get(str(chat_id), "ru") if chat_id else "ru"
+                            cb_lang = _load_langs().get(str(chat_id), "ru") if chat_id else "ru"
                             
                             # 1. Square Integration (Admin check)
                             if cb_data.startswith("sq_"):
