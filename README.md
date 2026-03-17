@@ -4,12 +4,13 @@
 ![OpenClaw](https://img.shields.io/badge/Powered_by-OpenClaw_SDK-F3BA2F.svg?logo=binance)
 ![Binance API](https://img.shields.io/badge/Binance-Web3_Skills-F3BA2F.svg?logo=binance)
 
-**AiAlisa Copilot** is a fully autonomous, enterprise-grade AI trading assistant and content publisher built natively on the **Binance OpenClaw Architecture**. 
+**AiAlisa CopilotClaw** is a fully autonomous, enterprise-grade AI trading assistant and content publisher built natively on the **Binance OpenClaw Architecture**. 
 
-Designed to enhance the Binance ecosystem, Alisa solves three major challenges:
-1. **Trading Strategy:** Scans all 540+ Binance Futures pairs simultaneously using proprietary logarithmic geometry and Smart Money Concepts.
+Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
+1. **Trading Strategy:** Scans **1000+ Binance Futures pairs** simultaneously using proprietary logarithmic geometry and Smart Money Concepts.
 2. **Risk Management:** Interactively calculates exact Stop-Loss limits based on user-defined margin and leverage.
-3. **Community Marketing:** Empowers Crypto-Influencers by providing 1-click & fully automated AI publications directly to **Binance Square**.
+3. **Education:** `/learn` mode explains all 12+ indicators in plain language — making crypto accessible to beginners.
+4. **Community Marketing:** Empowers Crypto-Influencers with automated AI publications to **Binance Square** with extended analysis.
 
 ### ⚡ NEW: Real-Time AI Streaming, Education & Signal Tracking
 
@@ -18,9 +19,11 @@ Designed to enhance the Binance ecosystem, Alisa solves three major challenges:
 | 🔴 **Live AI Streaming** | Real-time SSE token streaming — watch AI think live in Telegram |
 | 📚 **Education Mode** | `/learn BTC` — explains every indicator in plain language for beginners |
 | 🏆 **Signal Tracker** | `/signals` — live winrate accuracy of all bot predictions |
-| 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 12+ indicators + Web3 skills |
-| 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support |
+| 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 12+ indicators + 7 Web3 skills |
+| 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support, per-chat persistent |
 | 🔔 **Smart Alerts** | `/alert BTC 75000` — persistent price alerts that survive restarts |
+| 📢 **Smart Auto-Post** | Extended AI analysis auto-published to Binance Square with funding, indicators & skills |
+| 👋 **Auto-Welcome** | New group members receive full command list automatically |
 
 ### 🦞 Deep OpenClaw SDK Integration (4 Services)
 
@@ -111,13 +114,22 @@ To ensure the OpenClaw Agent delivers professional-grade verdicts, we feed it hi
 *   **Logarithmic Trendline Formula:** Calculates geometric slopes using $Price = e^{(m \cdot x + c)}$ to filter market noise.
 *   **Smart Money Concepts (SMC):** Real-time mapping of Order Blocks (OB) and Fair Value Gaps (FVG).
 
-**Market Sentiment:**
-*   Live Binance Futures **Funding Rates** are aggressively monitored to predict short squeezes.
+**Market Sentiment (via Binance Web3 Skills):**
+*   🐋 **Smart Money Detection** — whale wallet tracking via Binance DeFi API
+*   🔥 **Social Hype Leaderboard** — community sentiment and retail FOMO measurement
+*   💸 **Smart Money Net Inflow** — 24h capital inflow ranking across chains
+*   📊 **Unified Token Rank** — Binance trending + top search rankings
+*   🐶 **Meme Rank** — explosive breakout probability scoring
+*   👨‍💻 **Top Traders PnL** — 30-day win rate of best on-chain traders
+*   Live Binance Futures **Funding Rates** — monitored for short squeeze prediction
 
-**10+ Technical Indicators:**
+**12+ Technical Indicators:**
 *   **Trend & Oscillators:** EMA (7, 25, 99), MACD Histogram, Ichimoku Cloud, SuperTrend, ADX, RSI (6), StochRSI, MFI (Money Flow Index).
 *   **Volume Metrics:** OBV (On-Balance Volume) and custom Volume Decay algorithms.
+*   **SMC:** Order Blocks (Support/Resistance OB), Fair Value Gaps (Bullish/Bearish FVG).
 *   **Grid:** Dynamic Fibonacci retracements based on local extremums.
+
+All indicators + skills are explained in plain language via `/learn` education mode.
 </details>
 
 ---
@@ -188,34 +200,42 @@ If the API weight exceeds `2350 / 2400`, the bot automatically triggers a safe t
 Alisa provides a comprehensive control panel via Telegram:
 
 **👥 Public Commands (all users):**
-*   `/start` - Initializes the dashboard.
-*   `scan [coin]` / `look [coin]` / `посмотри [coin]` - **AI analysis with real-time streaming** — watch AI think live (🔴 LIVE), then receive chart + extended verdict.
-*   `margin 100 leverage 10 max 20%` - Reply to a signal for exact Stop-Loss math.
-*   📚 `/learn [coin]` - **Education Mode** — explains ALL indicators (RSI, MACD, Ichimoku, OBV, MFI, ADX, StochRSI, SuperTrend, Funding, Volume Decay) with current values and plain-language interpretation. Perfect for beginners.
-*   🏆 `/signals` - **Signal Accuracy Tracker** — shows winrate of all bot predictions since last scan. Compares breakout entry price vs current price for each coin.
-*   `/skills` - Opens the interactive Binance Web3 Skills keyboard.
-*   `/top gainers` - Top 10 Futures growth (24h).
-*   `/top losers` - Top 10 Futures drops (24h).
-*   `/trend` - Lists all coins that broke through trendlines since the last global scan.
-*   🔔 `/alert [coin] [price]` - Set a persistent price alert (survives restarts). Get notified when target is reached.
-*   `/alert list` - View your active alerts.
-*   `/alert clear` - Remove all your alerts.
-*   🌐 `/lang en` / `/lang ru` - Switch interface language (persistent per chat).
+
+| Command | Aliases | Description |
+|---|---|---|
+| `scan BTC` | `look BTC`, `check BTC`, `analyze BTC`, `посмотри BTC`, `глянь BTC`, `чекни BTC`, `анализ BTC` | 🔍 **AI analysis with real-time streaming** — 🔴 LIVE AI thinking → chart with logarithmic trendline → extended verdict with all indicators + Web3 skills |
+| `/learn BTC` | _(any futures coin)_ | 📚 **Education Mode** — explains ALL 12+ indicators with current values in plain language (RSI, MFI, ADX, StochRSI, MACD, OBV, Ichimoku, SuperTrend, Volume Decay, Funding Rate) |
+| `/signals` | | 🏆 **Signal Accuracy Tracker** — live winrate of all bot predictions, compares entry vs current price |
+| `/skills` | | 🛠 **Web3 Skills Dashboard** — interactive buttons for Smart Money, Social Hype, Meme Rank, Inflow, PnL, Token Rank |
+| `margin 100 leverage 10 max 20%` | `маржа 100 плечо 10 макс 20%` | 💰 **Risk Calculator** — reply to any signal for exact Stop-Loss math |
+| `/top gainers` | | 📈 Top 10 Futures growth (24h) |
+| `/top losers` | | 📉 Top 10 Futures drops (24h) |
+| `/trend` | | 📊 All breakout coins since last geometric scan |
+| `/alert BTC 69500` | | 🔔 Set persistent price alert (survives restarts) |
+| `/alert list` | | 🔔 View active alerts |
+| `/alert clear` | | 🔔 Remove all alerts |
+| `/lang en` | `/lang ru` | 🌐 Switch language — English / Russian (persistent per chat) |
+| `/start` | `/help`, `hello`, `привет` | 📋 Show all commands (bilingual EN + RU) |
 
 **🔐 Admin Commands (bot owner only):**
-*   `/model` - Interactive AI engine selector (inline buttons: Free / GPT / Gemini models via OpenRouter).
-*   `/time HH:MM` - Dynamically sets the time for the global geometric scan.
-*   `/autopost` - Shows auto-posting status.
-*   `/autopost on / off` - Toggles the background Binance Square automatic publisher task.
-*   `/autopost SOL BTC ETH` - Sets coins for auto-posting.
-*   `/autopost time 13:30 22:50` - Sets auto-post schedule.
-*   `/post [text]` - Manually publishes text to Binance Square.
-*   `📢 Post to Binance Square` button under signals - Admin-verified inline publishing.
+
+| Command | Description |
+|---|---|
+| `/models` | 🧠 Interactive AI engine selector (Free / GPT / Gemini via OpenRouter) |
+| `/time HH:MM` | ⏰ Dynamically set global geometric scan schedule |
+| `/autopost` | 📢 Show auto-posting status (coins, times, on/off) |
+| `/autopost on` / `off` | Toggle Binance Square auto-publisher |
+| `/autopost SOL BTC ETH` | Set coins for auto-posting |
+| `/autopost time 13:30 22:50` | Set auto-post schedule |
+| `/post [text]` | ✏️ Manually publish to Binance Square |
+| `📢 Post to Square` button | Admin-verified inline publishing under each signal |
 
 **🤖 Automated Tasks:**
-*   **Global Geometric Scan** - Runs at the configured `/time` schedule (default: 03:00 UTC+3).
-*   **Daily Trend Summary** - Auto-sends all breakout coins to the group at 23:57 UTC (02:57 UTC+3).
-*   **Square Auto-Publisher** - Disabled by default. Enable via `/autopost on`.
+*   **Global Geometric Scan** — Runs at configured `/time` schedule. Scans 1000+ coins on 4H & 1D.
+*   **Daily Trend Summary** — Auto-sends all breakout coins at 23:57 UTC.
+*   **Square Auto-Publisher** — Extended AI analysis with funding rate, all indicators, Web3 skills + `#AIBinance` hashtags. Enable via `/autopost on`.
+*   **Price Alert Monitor** — Checks every 30 seconds, persists across restarts.
+*   **New Member Welcome** — Auto-sends command list when users join the group.
 
 ---
 
