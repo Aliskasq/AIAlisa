@@ -184,15 +184,33 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     # 🧠 SMART MONEY CONCEPTS (SMC)
     # ==========================================
 
-    df['bull_fvg_gap'] = df['low'] - df['high'].shift(2)
-    df['bear_fvg_gap'] = df['low'].shift(2) - df['high']
+    current_price = df['close'].iloc[-1]
 
-    bull_fvgs = df[df['bull_fvg_gap'] > 0]
-    last_bull_fvg = f"{bull_fvgs['high'].shift(2).iloc[-1]:.5f} - {bull_fvgs['low'].iloc[-1]:.5f}" if not bull_fvgs.empty else "None"
+    # --- FVG (Fair Value Gap) ---
+    # Bullish FVG: candle[i] low > candle[i-2] high (gap up — unfilled = support)
+    # Bearish FVG: candle[i-2] low > candle[i] high (gap down — unfilled = resistance)
+    last_bull_fvg = "None"
+    last_bear_fvg = "None"
 
-    bear_fvgs = df[df['bear_fvg_gap'] > 0]
-    last_bear_fvg = f"{bear_fvgs['high'].iloc[-1]:.5f} - {bear_fvgs['low'].shift(2).iloc[-1]:.5f}" if not bear_fvgs.empty else "None"
+    for i in range(len(df) - 1, 2, -1):
+        gap_bottom = df['high'].iloc[i - 2]
+        gap_top = df['low'].iloc[i]
+        if gap_top > gap_bottom:
+            # Bullish FVG exists — check if still unfilled (price hasn't dropped through it)
+            if current_price >= gap_bottom:
+                last_bull_fvg = f"{gap_bottom:.5f} - {gap_top:.5f}"
+                break
 
+    for i in range(len(df) - 1, 2, -1):
+        gap_top = df['low'].iloc[i - 2]
+        gap_bottom = df['high'].iloc[i]
+        if gap_top > gap_bottom:
+            # Bearish FVG exists — check if still unfilled (price hasn't risen through it)
+            if current_price <= gap_top:
+                last_bear_fvg = f"{gap_bottom:.5f} - {gap_top:.5f}"
+                break
+
+    # --- Order Blocks ---
     df['is_green'] = df['close'] > df['open']
     df['is_red'] = df['close'] < df['open']
     df['body_size'] = np.abs(df['close'] - df['open'])
@@ -203,17 +221,29 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     bullish_ob = "None"
     bearish_ob = "None"
 
+    # Bullish OB: last red candle before a strong green move, still holding as support
     if not strong_bull.empty:
-        idx = strong_bull.index[-1]
-        reds_before = df.loc[:idx][df.loc[:idx]['is_red']]
-        if not reds_before.empty:
-            bullish_ob = f"{reds_before['low'].iloc[-1]:.5f} (Support OB)"
+        for sb_idx in reversed(strong_bull.index.tolist()):
+            reds_before = df.loc[:sb_idx][df.loc[:sb_idx]['is_red']]
+            if not reds_before.empty:
+                ob_low = reds_before['low'].iloc[-1]
+                ob_high = reds_before['high'].iloc[-1]
+                # OB is valid only if price is still above it (not broken)
+                if current_price >= ob_low:
+                    bullish_ob = f"{ob_low:.5f} - {ob_high:.5f} (Support OB)"
+                    break
 
+    # Bearish OB: last green candle before a strong red move, still holding as resistance
     if not strong_bear.empty:
-        idx = strong_bear.index[-1]
-        greens_before = df.loc[:idx][df.loc[:idx]['is_green']]
-        if not greens_before.empty:
-            bearish_ob = f"{greens_before['high'].iloc[-1]:.5f} (Resist OB)"
+        for sb_idx in reversed(strong_bear.index.tolist()):
+            greens_before = df.loc[:sb_idx][df.loc[:sb_idx]['is_green']]
+            if not greens_before.empty:
+                ob_low = greens_before['low'].iloc[-1]
+                ob_high = greens_before['high'].iloc[-1]
+                # OB is valid only if price is still below it (not broken)
+                if current_price <= ob_high:
+                    bearish_ob = f"{ob_low:.5f} - {ob_high:.5f} (Resist OB)"
+                    break
 
     # ==========================================
     # ⏳ DYNAMIC PRICE CHANGE (1H/4H & 24H)
