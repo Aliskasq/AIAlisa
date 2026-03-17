@@ -4,6 +4,8 @@ import aiohttp
 import asyncio
 import math
 import os
+from typing import Optional
+from pydantic import BaseModel
 from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
 
 # Import OpenClaw Architecture dependencies
@@ -13,7 +15,43 @@ try:
     openclaw_installed = True
 except ImportError:
     openclaw = None
+    cmdop = None
     openclaw_installed = False
+
+
+# ---------------------------------------------------------
+# OPENCLAW STRUCTURED OUTPUT: AI TRADING VERDICT MODEL
+# ---------------------------------------------------------
+class TradeVerdict(BaseModel):
+    """OpenClaw Structured Trading Verdict — Binance AI Analysis.
+    
+    Used with cmdop ExtractService to return typed, validated
+    trading signals instead of raw unstructured text.
+    """
+    direction: str          # "LONG" or "SHORT"
+    entry_price: float      # Recommended entry price
+    stop_loss: float        # Stop-loss price level
+    take_profit: float      # Take-profit price level
+    risk_percent: float     # Estimated risk as % of margin
+    leverage_rec: str       # e.g. "5x", "10x"
+    deposit_rec: str        # e.g. "10%", "15%"
+    logic: str              # AI reasoning (max 5 sentences)
+    risk_note: Optional[str] = None  # Stop-loss calculation for margin queries
+
+
+def _format_verdict(v: TradeVerdict, base_coin: str, price: float, dynamics_text: str) -> str:
+    """Convert structured TradeVerdict back to display text for Telegram."""
+    lines = []
+    if v.risk_note:
+        lines.append(v.risk_note)
+        lines.append("")
+    lines.append(f"${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}")
+    lines.append(f"🏆 VERDICT: {v.direction}")
+    lines.append(f"🧠 LOGIC: {v.logic}")
+    lines.append(f"🎯 TRADE: 💰 Entry: {v.entry_price} | 🚫 SL: {v.stop_loss} | 🎯 TP: {v.take_profit}")
+    lines.append(f"🚫 RISK: {v.risk_percent}%")
+    lines.append(f"💼 REC: {v.leverage_rec} | {v.deposit_rec}")
+    return "\n".join(lines)
 
 # Load the FULL arsenal of Native Binance Skills
 from agent.skills import (
@@ -146,7 +184,37 @@ Fibo: {fibo_text}
             # Merge system and user prompts into a single string for the new SDK
             full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-            # Run the agent directly asynchronously
+            # =====================================================
+            # STEP 1: OpenClaw Extract — Structured TradeVerdict
+            # =====================================================
+            # Uses CMDOP ExtractService to return a validated Pydantic
+            # model instead of raw text. This ensures typed entry/SL/TP
+            # values and enables programmatic signal processing.
+            try:
+                logging.info("📊 [OpenClaw Extract] Requesting structured TradeVerdict...")
+                extract_result = await client.extract.run(
+                    model=TradeVerdict,
+                    prompt=full_prompt,
+                    options=cmdop.ExtractOptions(
+                        temperature=0.2,
+                        timeout_seconds=120,
+                        max_tokens=4096
+                    )
+                )
+                if extract_result.data:
+                    response = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
+                    logging.info(f"✅ OpenClaw Extract: Structured verdict received → {extract_result.data.direction} "
+                                 f"(Entry: {extract_result.data.entry_price}, SL: {extract_result.data.stop_loss}, "
+                                 f"TP: {extract_result.data.take_profit})")
+                    return response
+                else:
+                    logging.info("⚙️ Extract returned no structured data, falling back to agent.run...")
+            except Exception as extract_err:
+                logging.info(f"⚙️ Extract unavailable ({extract_err}), falling back to agent.run...")
+
+            # =====================================================
+            # STEP 2: Fallback — OpenClaw Agent (existing behavior)
+            # =====================================================
             result = await client.agent.run(full_prompt)
             
             # Extract content handling potential wrapper classes returned by the library
@@ -160,7 +228,7 @@ Fibo: {fibo_text}
                 response = str(result)
                 
             if response:
-                logging.info("✅ OpenClaw inference successful.")
+                logging.info("✅ OpenClaw agent.run inference successful.")
                 return response
         except Exception as e:
             logging.warning(f"⚠️ OpenClaw SDK timeout/error ({e}). Activating failsafe routing...")

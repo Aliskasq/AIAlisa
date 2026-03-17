@@ -8,8 +8,55 @@ from config import ALERTS_FILE, SQUARE_OPENAPI_KEY
 # OPENCLAW BINANCE WEB3 SKILLS
 # ---------------------------------------------------------
 
+# --- OpenClaw SDK Skill Routing (lazy singleton) ---
+try:
+    import cmdop
+    _cmdop_available = True
+except ImportError:
+    cmdop = None
+    _cmdop_available = False
+
+_sdk_client = None
+
+async def _get_sdk_client():
+    """Get or create CMDOP SDK client for OpenClaw Skill routing."""
+    global _sdk_client
+    if _sdk_client is None and _cmdop_available:
+        try:
+            api_key = os.getenv("CMDOP_API_KEY")
+            if api_key:
+                _sdk_client = cmdop.AsyncCMDOPClient.remote(api_key=api_key)
+        except Exception:
+            pass
+    return _sdk_client
+
+async def _try_sdk_skill(skill_name: str, prompt: str) -> str | None:
+    """Attempt to execute a skill via OpenClaw Skills SDK.
+    
+    Returns the skill result text if successful, None otherwise.
+    Transparent fallback — caller proceeds to direct HTTP if None.
+    """
+    client = await _get_sdk_client()
+    if client:
+        try:
+            result = await client.skills.run(
+                skill_name, prompt,
+                options=cmdop.SkillRunOptions(timeout_seconds=15)
+            )
+            if result.success and result.text:
+                logging.info(f"✅ [OpenClaw SDK] Skill '{skill_name}' executed successfully")
+                return result.text
+        except Exception as e:
+            logging.debug(f"⚙️ SDK skill '{skill_name}' → direct HTTP fallback: {e}")
+    return None
+
 async def get_smart_money_signals(symbol: str) -> str:
     """OpenClaw Skill: Check Smart Money / Whale buy and sell signals for a specific token."""
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("smart_money_signals", f"Analyze Smart Money whale activity for {symbol} on BSC (ChainId: 56)")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/web/signal/smart-money"
     headers = {"Content-Type": "application/json", "Accept-Encoding": "identity", "User-Agent": "binance-web3/1.0 (Skill)"}
     payload = {"page": 1, "pageSize": 50, "chainId": "56"} 
@@ -34,6 +81,11 @@ async def get_unified_token_rank(rank_type: int = 10) -> str:
     rank_type mapping: 10=Trending, 11=Top Search, 20=Binance Alpha picks.
     Use this to understand macro market trends.
     """
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("unified_token_rank", f"Get market token rankings (type={rank_type}, Trending/TopSearch) on BSC")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/pulse/unified/rank/list"
     headers = {"Content-Type": "application/json", "Accept-Encoding": "identity", "User-Agent": "binance-web3/2.0 (Skill)"}
     payload = {"rankType": rank_type, "chainId": "56", "period": 50, "size": 5}
@@ -49,6 +101,11 @@ async def get_unified_token_rank(rank_type: int = 10) -> str:
 
 async def get_social_hype_leaderboard() -> str:
     """OpenClaw Skill: Get the top tokens based on Social Hype and Sentiment."""
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("social_hype_leaderboard", "Get top tokens by social hype and community sentiment on BSC")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/pulse/social/hype/rank/leaderboard?chainId=56&sentiment=All&targetLanguage=en&timeRange=1"
     headers = {"Accept-Encoding": "identity", "User-Agent": "binance-web3/2.0 (Skill)"}
     try:
@@ -63,6 +120,11 @@ async def get_social_hype_leaderboard() -> str:
 
 async def get_smart_money_inflow_rank() -> str:
     """OpenClaw Skill: Discover which tokens Smart Money is buying the most right now (Net Inflow)."""
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("smart_money_inflow_rank", "Discover top tokens by Smart Money net inflow on BSC (24h)")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/tracker/wallet/token/inflow/rank/query"
     headers = {"Content-Type": "application/json", "Accept-Encoding": "identity", "User-Agent": "binance-web3/2.0 (Skill)"}
     payload = {"chainId": "56", "period": "24h", "tagType": 2}
@@ -78,6 +140,11 @@ async def get_smart_money_inflow_rank() -> str:
 
 async def get_meme_rank() -> str:
     """OpenClaw Skill: Find the top meme tokens most likely to break out."""
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("meme_rank", "Find top meme tokens with highest breakout probability on BSC")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/pulse/exclusive/rank/list?chainId=56"
     headers = {"Accept-Encoding": "identity", "User-Agent": "binance-web3/2.0 (Skill)"}
     try:
@@ -92,6 +159,11 @@ async def get_meme_rank() -> str:
 
 async def get_address_pnl_rank() -> str:
     """OpenClaw Skill: Get top performing trader addresses (PnL & Win Rate)."""
+    # --- OpenClaw Skills SDK routing ---
+    sdk_result = await _try_sdk_skill("address_pnl_rank", "Get top performing trader addresses by PnL and Win Rate (30d)")
+    if sdk_result:
+        return sdk_result
+    # --- Fallback: Direct Binance Web3 API ---
     url = "https://web3.binance.com/bapi/defi/v1/public/wallet-direct/market/leaderboard/query?tag=ALL&chainId=CT_501&period=30d&pageSize=3"
     headers = {"Accept-Encoding": "identity", "User-Agent": "binance-web3/2.0 (Skill)"}
     try:
