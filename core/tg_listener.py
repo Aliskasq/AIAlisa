@@ -346,6 +346,7 @@ async def telegram_polling_loop(app_session):
                             cb_data = cq.get("data", "")
                             cq_id = cq.get("id")
                             chat_id = cq.get("message", {}).get("chat", {}).get("id")
+                            cb_lang = _load_lang_settings().get(str(chat_id), "ru") if chat_id else "ru"
                             
                             # 1. Square Integration (Admin check)
                             if cb_data.startswith("sq_"):
@@ -374,7 +375,7 @@ async def telegram_polling_loop(app_session):
                                 if text_to_post:
                                     await app_session.post(
                                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                                        json={"callback_query_id": cq_id, "text": "⏳ Publishing..."}
+                                        json={"callback_query_id": cq_id, "text": "⏳ Publishing..." if cb_lang == "en" else "⏳ Публикую..."}
                                     )
                                     result_msg = await post_to_binance_square(text_to_post)
                                     await send_response(app_session, chat_id, result_msg)
@@ -382,7 +383,7 @@ async def telegram_polling_loop(app_session):
                                 else:
                                     await app_session.post(
                                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                                        json={"callback_query_id": cq_id, "text": "⚠️ Text is outdated.", "show_alert": True}
+                                        json={"callback_query_id": cq_id, "text": "⚠️ Text is outdated." if cb_lang == "en" else "⚠️ Текст устарел.", "show_alert": True}
                                     )
                                 continue
 
@@ -390,7 +391,7 @@ async def telegram_polling_loop(app_session):
                             if cb_data.startswith("sk_"):
                                 await app_session.post(
                                     f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                                    json={"callback_query_id": cq_id, "text": "⏳ Fetching Web3 data..."}
+                                    json={"callback_query_id": cq_id, "text": "⏳ Fetching Web3 data..." if cb_lang == "en" else "⏳ Загружаю Web3 данные..."}
                                 )
                                 
                                 result_text = ""
@@ -647,7 +648,8 @@ async def telegram_polling_loop(app_session):
                                     msg_id, parse_mode="Markdown")
                             else:
                                 user_text = parts[1].strip()
-                                await send_response(app_session, chat_id, "⏳ Публикую в Binance Square...", msg_id)
+                                pub_msg = "⏳ Publishing to Binance Square..." if lang_pref == "en" else "⏳ Публикую в Binance Square..."
+                                await send_response(app_session, chat_id, pub_msg, msg_id)
                                 result = await post_to_binance_square(user_text)
                                 await send_response(app_session, chat_id, result, msg_id)
                             continue
@@ -720,7 +722,8 @@ async def telegram_polling_loop(app_session):
                             mode = top_parts[1] if len(top_parts) > 1 else ""
 
                             if mode in ("gainers", "gainer", "рост", "gainers24"):
-                                await send_response(app_session, chat_id, "⏳ Loading top gainers (Futures)...", msg_id)
+                                gain_load = "⏳ Loading top gainers (Futures)..." if lang_pref == "en" else "⏳ Загружаю топ растущих (Futures)..."
+                                await send_response(app_session, chat_id, gain_load, msg_id)
                                 try:
                                     async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10) as resp:
                                         if resp.status == 200:
@@ -742,7 +745,8 @@ async def telegram_polling_loop(app_session):
                                     await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
 
                             elif mode in ("losers", "loser", "падение", "losers24"):
-                                await send_response(app_session, chat_id, "⏳ Loading top losers (Futures)...", msg_id)
+                                loss_load = "⏳ Loading top losers (Futures)..." if lang_pref == "en" else "⏳ Загружаю топ падающих (Futures)..."
+                                await send_response(app_session, chat_id, loss_load, msg_id)
                                 try:
                                     async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/24hr", timeout=10) as resp:
                                         if resp.status == 200:
@@ -763,11 +767,16 @@ async def telegram_polling_loop(app_session):
                                 except Exception as e:
                                     await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
                             else:
-                                await send_response(app_session, chat_id,
+                                top_usage = (
                                     "📊 *Usage:*\n"
                                     "`/top gainers` — Top 10 growth (24h)\n"
-                                    "`/top losers` — Top 10 drops (24h)",
-                                    msg_id, parse_mode="Markdown")
+                                    "`/top losers` — Top 10 drops (24h)"
+                                ) if lang_pref == "en" else (
+                                    "📊 *Использование:*\n"
+                                    "`/top gainers` — Топ 10 рост (24ч)\n"
+                                    "`/top losers` — Топ 10 падение (24ч)"
+                                )
+                                await send_response(app_session, chat_id, top_usage, msg_id, parse_mode="Markdown")
                             continue
 
                         # ==========================================
@@ -780,7 +789,8 @@ async def telegram_polling_loop(app_session):
                                 learn_symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
                                 short_coin = learn_symbol.replace("USDT", "")
 
-                                await send_response(app_session, chat_id, f"📚 Analyzing {learn_symbol} indicators...", msg_id)
+                                learn_load = f"📚 Analyzing {learn_symbol} indicators..." if lang_pref == "en" else f"📚 Анализирую индикаторы {learn_symbol}..."
+                                await send_response(app_session, chat_id, learn_load, msg_id)
 
                                 raw_df = await fetch_klines(app_session, learn_symbol, "4h", 100)
                                 if raw_df:
@@ -953,9 +963,11 @@ async def telegram_polling_loop(app_session):
                                 alerts = load_price_alerts()
                                 user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
                                 if not user_alerts:
-                                    await send_response(app_session, chat_id, "📭 У вас нет активных алертов.\n\nИспользуйте:\n`/alert BTC 69500`", msg_id, parse_mode="Markdown")
+                                    empty_alert = "📭 No active alerts.\n\nUsage:\n`/alert BTC 69500`" if lang_pref == "en" else "📭 Нет активных алертов.\n\nИспользуйте:\n`/alert BTC 69500`"
+                                    await send_response(app_session, chat_id, empty_alert, msg_id, parse_mode="Markdown")
                                 else:
-                                    lines = ["🔔 *Ваши алерты:*\n"]
+                                    hdr = "🔔 *Your alerts:*\n" if lang_pref == "en" else "🔔 *Ваши алерты:*\n"
+                                    lines = [hdr]
                                     for i, a in enumerate(user_alerts, 1):
                                         short = a["symbol"].replace("USDT", "")
                                         arrow = "↗️" if a["direction"] == "above" else "↘️"
@@ -968,7 +980,8 @@ async def telegram_polling_loop(app_session):
                                 alerts = load_price_alerts()
                                 remaining = [a for a in alerts if a["chat_id"] != chat_id]
                                 save_price_alerts(remaining)
-                                await send_response(app_session, chat_id, "✅ Все ваши алерты удалены.", msg_id)
+                                clr_msg = "✅ All alerts cleared." if lang_pref == "en" else "✅ Все алерты удалены."
+                                await send_response(app_session, chat_id, clr_msg, msg_id)
                                 continue
 
                             # /alert BTC 69500 — set new alert
@@ -978,7 +991,8 @@ async def telegram_polling_loop(app_session):
                                 try:
                                     target_price = float(parts[2].replace(",", "."))
                                 except ValueError:
-                                    await send_response(app_session, chat_id, "⚠️ Неверная цена. Пример: `/alert BTC 69500`", msg_id, parse_mode="Markdown")
+                                    err_price = "⚠️ Invalid price. Example: `/alert BTC 69500`" if lang_pref == "en" else "⚠️ Неверная цена. Пример: `/alert BTC 69500`"
+                                    await send_response(app_session, chat_id, err_price, msg_id, parse_mode="Markdown")
                                     continue
 
                                 # Get current price to determine direction
@@ -992,7 +1006,8 @@ async def telegram_polling_loop(app_session):
                                     pass
 
                                 if current_price == 0:
-                                    await send_response(app_session, chat_id, f"⚠️ Не найдена пара `{symbol}` на Binance Futures.", msg_id, parse_mode="Markdown")
+                                    not_found = f"⚠️ Pair `{symbol}` not found on Binance Futures." if lang_pref == "en" else f"⚠️ Пара `{symbol}` не найдена на Binance Futures."
+                                    await send_response(app_session, chat_id, not_found, msg_id, parse_mode="Markdown")
                                     continue
 
                                 direction = "above" if target_price > current_price else "below"
@@ -1011,22 +1026,38 @@ async def telegram_polling_loop(app_session):
                                 save_price_alerts(alerts)
 
                                 short = symbol.replace("USDT", "")
-                                await send_response(app_session, chat_id,
-                                    f"✅ Алерт установлен!\n\n"
-                                    f"🪙 `${short}`\n"
-                                    f"💰 Сейчас: `${current_price:.6f}`\n"
-                                    f"{arrow} Цель: `${target_price:.6f}`\n"
-                                    f"📩 Уведомлю когда цена {'поднимется' if direction == 'above' else 'опустится'} до цели.",
-                                    msg_id, parse_mode="Markdown")
+                                if lang_pref == "en":
+                                    dir_text = "rises above" if direction == "above" else "drops below"
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Alert set!\n\n"
+                                        f"🪙 `${short}`\n"
+                                        f"💰 Now: `${current_price:.6f}`\n"
+                                        f"{arrow} Target: `${target_price:.6f}`\n"
+                                        f"📩 I'll notify you when price {dir_text} target.",
+                                        msg_id, parse_mode="Markdown")
+                                else:
+                                    dir_text = "поднимется" if direction == "above" else "опустится"
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Алерт установлен!\n\n"
+                                        f"🪙 `${short}`\n"
+                                        f"💰 Сейчас: `${current_price:.6f}`\n"
+                                        f"{arrow} Цель: `${target_price:.6f}`\n"
+                                        f"📩 Уведомлю когда цена {dir_text} до цели.",
+                                        msg_id, parse_mode="Markdown")
                                 continue
 
                             # No args — show help
-                            await send_response(app_session, chat_id,
-                                "🔔 *Price Alert:*\n\n"
-                                "Установить: `/alert BTC 69500`\n"
-                                "Список: `/alert list`\n"
-                                "Удалить все: `/alert clear`",
-                                msg_id, parse_mode="Markdown")
+                            if lang_pref == "en":
+                                alert_help = ("🔔 *Price Alert:*\n\n"
+                                    "Set: `/alert BTC 69500`\n"
+                                    "List: `/alert list`\n"
+                                    "Clear all: `/alert clear`")
+                            else:
+                                alert_help = ("🔔 *Price Alert:*\n\n"
+                                    "Установить: `/alert BTC 69500`\n"
+                                    "Список: `/alert list`\n"
+                                    "Удалить все: `/alert clear`")
+                            await send_response(app_session, chat_id, alert_help, msg_id, parse_mode="Markdown")
                             continue
 
                         # ==========================================
@@ -1329,9 +1360,9 @@ async def telegram_polling_loop(app_session):
                             symbol = symbol_raw + "USDT" if not symbol_raw.endswith("USDT") else symbol_raw
 
                             # Send status message and capture its ID for live streaming
+                            fetch_msg = f"⏳ Fetching chart data + building trend line... ({symbol})" if lang_pref == "en" else f"⏳ Загружаю график + строю трендовую линию... ({symbol})"
                             stream_msg_id = await send_and_get_msg_id(
-                                app_session, chat_id,
-                                f"⏳ Fetching chart data + building trend line... ({symbol})", msg_id
+                                app_session, chat_id, fetch_msg, msg_id
                             )
 
                             # Fetch 199 candles for trend line construction (same as main scanner)
