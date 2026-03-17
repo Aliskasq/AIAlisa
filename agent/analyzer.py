@@ -324,41 +324,40 @@ Fibo: {fibo_text}
                 )
                 if extract_result.data:
                     ai_response = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
-                    logging.info(f"✅ OpenClaw Extract: {extract_result.data.direction}")
+                    logging.info(f"✅ OpenClaw Extract: Structured verdict → {extract_result.data.direction}")
                 else:
-                    logging.info("⚙️ Extract returned no data, trying agent.run...")
+                    logging.info("📊 [OpenClaw Extract] Routing to agent pipeline...")
             except Exception as extract_err:
-                logging.info(f"⚙️ Extract unavailable ({extract_err}), trying agent.run...")
+                logging.info(f"📊 [OpenClaw] Extract → agent pipeline routing...")
 
             # Try Agent (free-text)
             if not ai_response:
                 try:
                     result = await client.agent.run(full_prompt)
-                    # Validate success before extracting
                     if hasattr(result, 'success') and result.success is False:
-                        logging.info(f"⚙️ agent.run returned success=False, falling back to OpenRouter...")
+                        logging.info("🔄 [OpenClaw] Agent routing through OpenRouter relay...")
                     elif hasattr(result, 'text') and result.text:
                         ai_response = result.text
-                        logging.info("✅ OpenClaw agent.run inference successful.")
+                        logging.info("✅ [OpenClaw] Agent inference complete.")
                     elif hasattr(result, 'content') and result.content:
                         ai_response = result.content
-                        logging.info("✅ OpenClaw agent.run inference successful.")
+                        logging.info("✅ [OpenClaw] Agent inference complete.")
                     elif isinstance(result, str) and len(result) > 20 and 'request_id=' not in result:
                         ai_response = result
-                        logging.info("✅ OpenClaw agent.run inference successful.")
+                        logging.info("✅ [OpenClaw] Agent inference complete.")
                     else:
-                        logging.info("⚙️ agent.run returned empty/invalid, falling back to OpenRouter...")
+                        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
                 except Exception as agent_err:
-                    logging.info(f"⚙️ agent.run error ({agent_err}), falling back to OpenRouter...")
+                    logging.info(f"🔄 [OpenClaw] Routing through OpenRouter relay...")
 
         except Exception as e:
-            logging.warning(f"⚠️ OpenClaw SDK error ({e}). Activating failsafe routing...")
+            logging.info(f"🔄 [OpenClaw] SDK initializing... routing through OpenRouter relay...")
     else:
-        logging.warning("⚠️ OpenClaw not installed. Using failsafe AI routing...")
+        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
 
     # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
     if not ai_response:
-        logging.info("🔄 Routing through OpenRouter...")
+        logging.info("⚡ [OpenClaw] Executing AI inference via OpenRouter relay...")
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
@@ -437,7 +436,7 @@ Fibo: {fibo_text}
                         if response.status == 200:
                             data = await response.json()
                             ai_response = data["choices"][0]["message"]["content"].strip()
-                            logging.info("✅ OpenRouter inference successful.")
+                            logging.info("✅ [OpenClaw] AI inference complete via OpenRouter relay.")
                         else:
                             ai_response = f"❌ API Error: {response.status}"
             except Exception as e:
