@@ -98,7 +98,7 @@ async def _stream_verdict(client, prompt, telegram_stream):
         # Phase 3: Get full AI response via OpenClaw SDK
         result = await client.agent.run(prompt)
 
-        # Extract response text
+        # Extract response text (mirrors main fallback logic exactly)
         response = None
         if hasattr(result, 'content') and result.content:
             response = result.content
@@ -106,8 +106,10 @@ async def _stream_verdict(client, prompt, telegram_stream):
             response = result.text
         elif isinstance(result, str) and result:
             response = result
+        else:
+            response = str(result)
 
-        if not response:
+        if not response or len(response.strip()) < 10:
             return None
 
         response = response.strip()
