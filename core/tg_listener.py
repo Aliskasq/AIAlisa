@@ -8,6 +8,26 @@ import json
 from datetime import datetime, timezone, timedelta
 from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts, save_price_alerts
 
+# --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
+PAPER_FILE = "data/paper_portfolio.json"
+
+def _load_paper():
+    try:
+        if os.path.exists(PAPER_FILE):
+            with open(PAPER_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def _save_paper(data):
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(PAPER_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
 # --- LANGUAGE SETTINGS (per-chat, persistent) ---
 LANG_FILE = "data/lang_settings.json"
 
@@ -573,7 +593,10 @@ async def telegram_polling_loop(app_session):
                                     "⏰ `/time 18:30` — scan schedule\n"
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
-                                    "✏️ `/post text` — post to Square"
+                                    "✏️ `/post text` — post to Square\n"
+                                    "💼 `/paper BTC 74000 long 5x` — paper trading\n"
+                                    "💼 `/paper` — view portfolio P&L\n"
+                                    "💼 `/paper clear` — reset portfolio"
                                 )
                             await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
                             continue
@@ -1007,6 +1030,125 @@ async def telegram_polling_loop(app_session):
                             await send_response(app_session, chat_id, "⏳ Загружаю пробития...", msg_id)
                             trend_text = await build_trend_text(app_session)
                             await send_response(app_session, chat_id, trend_text, msg_id, parse_mode="Markdown")
+                            continue
+
+                        # ==========================================
+                        # PAPER TRADING: /paper — virtual portfolio (admin only)
+                        # ==========================================
+                        if text.startswith("/paper"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
+
+                            user_id = str(msg.get("from", {}).get("id", 0))
+                            parts = original_text.split()
+                            paper = _load_paper()
+                            user_positions = paper.get(user_id, [])
+
+                            # /paper clear — remove all positions
+                            if len(parts) == 2 and parts[1].lower() in ("clear", "очистить"):
+                                paper[user_id] = []
+                                _save_paper(paper)
+                                clr = "✅ Paper portfolio cleared." if lang_pref == "en" else "✅ Виртуальный портфель очищен."
+                                await send_response(app_session, chat_id, clr, msg_id)
+                                continue
+
+                            # /paper BTC 74000 long 5x — add position
+                            if len(parts) >= 4:
+                                coin_raw = parts[1].upper().strip()
+                                p_symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
+                                try:
+                                    entry_price = float(parts[2].replace(",", "."))
+                                except ValueError:
+                                    await send_response(app_session, chat_id, "⚠️ Usage: `/paper BTC 74000 long 5x`", msg_id, parse_mode="Markdown")
+                                    continue
+
+                                direction = "long"
+                                if len(parts) >= 4 and parts[3].lower() in ("short", "шорт"):
+                                    direction = "short"
+
+                                leverage = 1
+                                for p in parts:
+                                    p_clean = p.lower().replace("x", "").replace("х", "")
+                                    if p_clean.isdigit() and int(p_clean) > 1 and int(p_clean) <= 125:
+                                        leverage = int(p_clean)
+
+                                position = {
+                                    "symbol": p_symbol,
+                                    "entry": entry_price,
+                                    "direction": direction,
+                                    "leverage": leverage,
+                                    "time": datetime.now(timezone.utc).isoformat()[:16]
+                                }
+                                user_positions.append(position)
+                                paper[user_id] = user_positions
+                                _save_paper(paper)
+
+                                short_coin = p_symbol.replace("USDT", "")
+                                arrow = "📈 LONG" if direction == "long" else "📉 SHORT"
+                                if lang_pref == "ru":
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Виртуальная позиция открыта!\n\n"
+                                        f"🪙 `{short_coin}` {arrow} {leverage}x\n"
+                                        f"💰 Вход: `${entry_price:.6f}`",
+                                        msg_id, parse_mode="Markdown")
+                                else:
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Paper position opened!\n\n"
+                                        f"🪙 `{short_coin}` {arrow} {leverage}x\n"
+                                        f"💰 Entry: `${entry_price:.6f}`",
+                                        msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /paper — show portfolio with live P&L
+                            if not user_positions:
+                                empty = "📭 No paper positions.\n\nUsage: `/paper BTC 74000 long 5x`" if lang_pref == "en" else "📭 Нет виртуальных позиций.\n\nИспользование: `/paper BTC 74000 long 5x`"
+                                await send_response(app_session, chat_id, empty, msg_id, parse_mode="Markdown")
+                                continue
+
+                            header = "💼 *Paper Trading Portfolio*\n\n" if lang_pref == "en" else "💼 *Виртуальный портфель*\n\n"
+                            lines = [header]
+                            total_pnl = 0
+
+                            for i, pos in enumerate(user_positions, 1):
+                                sym = pos["symbol"]
+                                entry = pos["entry"]
+                                direction = pos["direction"]
+                                lev = pos["leverage"]
+                                short_sym = sym.replace("USDT", "")
+
+                                # Fetch current price
+                                now_price = entry
+                                try:
+                                    async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
+                                        if resp.status == 200:
+                                            data = await resp.json()
+                                            now_price = float(data["price"])
+                                except Exception:
+                                    pass
+
+                                if direction == "long":
+                                    pnl_pct = ((now_price - entry) / entry) * 100 * lev
+                                else:
+                                    pnl_pct = ((entry - now_price) / entry) * 100 * lev
+
+                                total_pnl += pnl_pct
+                                icon = "🟢" if pnl_pct >= 0 else "🔴"
+                                arrow = "LONG" if direction == "long" else "SHORT"
+
+                                lines.append(
+                                    f"{icon} `{short_sym}` {arrow} {lev}x\n"
+                                    f"   Entry: `${entry:.4f}` → Now: `${now_price:.4f}`\n"
+                                    f"   P&L: `{pnl_pct:+.2f}%`\n"
+                                )
+
+                            total_icon = "🟢" if total_pnl >= 0 else "🔴"
+                            lines.append(f"\n{total_icon} *Total P&L: {total_pnl:+.2f}%*")
+
+                            full_text = "\n".join(lines)
+                            if len(full_text) > 4000:
+                                full_text = full_text[:4000] + "..."
+                            await send_response(app_session, chat_id, full_text, msg_id, parse_mode="Markdown")
                             continue
 
                         # ==========================================

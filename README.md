@@ -23,6 +23,7 @@ Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
 | 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support, per-chat persistent |
 | 🔔 **Smart Alerts** | `/alert BTC 75000` — persistent price alerts that survive restarts |
 | 📢 **Smart Auto-Post** | Extended AI analysis auto-published to Binance Square with funding, indicators & skills |
+| 💼 **Paper Trading** | `/paper BTC 74000 long 5x` — virtual portfolio with live P&L from real Binance prices |
 | 👋 **Auto-Welcome** | New group members receive full command list automatically |
 
 ### 🦞 Deep OpenClaw SDK Integration (4 Services)
@@ -228,6 +229,9 @@ Alisa provides a comprehensive control panel via Telegram:
 | `/autopost SOL BTC ETH` | Set coins for auto-posting |
 | `/autopost time 13:30 22:50` | Set auto-post schedule |
 | `/post [text]` | ✏️ Manually publish to Binance Square |
+| `/paper BTC 74000 long 5x` | 💼 Open virtual paper trading position |
+| `/paper` | 💼 View portfolio with live P&L (real Binance prices) |
+| `/paper clear` | 💼 Reset paper portfolio |
 | `📢 Post to Square` button | Admin-verified inline publishing under each signal |
 
 **🤖 Automated Tasks:**
