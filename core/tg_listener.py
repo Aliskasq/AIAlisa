@@ -600,6 +600,7 @@ async def telegram_polling_loop(app_session):
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
                                     "✏️ `/post text` — post to Square\n"
+                                    "✏️ reply `/post` — publish replied msg\n"
                                     "💼 `/paper BTC 74000 long 5x sl 73000 tp 75000`\n"
                                     "💼 `/paper` — portfolio + live P&L\n"
                                     "💼 `/paper close 1` — close position\n"
@@ -640,19 +641,49 @@ async def telegram_polling_loop(app_session):
                                 await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
                                 continue
                             parts = original_text.split(maxsplit=1)
-                            if len(parts) < 2 or not parts[1].strip():
-                                await send_response(app_session, chat_id,
-                                    "✏️ *Как использовать:*\n"
-                                    "`/post Ваш текст для Binance Square`\n\n"
-                                    "Пример:\n"
-                                    "`/post Привет Бинанс! Сегодня BTC выглядит бычьим 🚀`",
-                                    msg_id, parse_mode="Markdown")
-                            else:
+                            has_text_arg = len(parts) >= 2 and parts[1].strip()
+                            reply_msg_obj = msg.get("reply_to_message")
+
+                            if has_text_arg:
+                                # /post <text> — post custom text
                                 user_text = parts[1].strip()
                                 pub_msg = "⏳ Publishing to Binance Square..." if lang_pref == "en" else "⏳ Публикую в Binance Square..."
                                 await send_response(app_session, chat_id, pub_msg, msg_id)
                                 result = await post_to_binance_square(user_text)
                                 await send_response(app_session, chat_id, result, msg_id)
+                            elif reply_msg_obj:
+                                # /post as reply — grab replied message text and post it
+                                replied_text = reply_msg_obj.get("text", "").strip()
+                                replied_caption = reply_msg_obj.get("caption", "").strip()
+                                post_content = replied_text or replied_caption
+
+                                if not post_content:
+                                    no_text = "⚠️ Replied message has no text." if lang_pref == "en" else "⚠️ В ответном сообщении нет текста."
+                                    await send_response(app_session, chat_id, no_text, msg_id)
+                                else:
+                                    # Add header + hashtags if not already present
+                                    if "#AIBinance" not in post_content:
+                                        post_content = f"🤖 AI-ALISA-COPILOTCLAW\n\n{post_content}\n\n#AIBinance #BinanceSquare #Write2Earn"
+                                    if len(post_content) > 1950:
+                                        post_content = post_content[:1947] + "..."
+                                    pub_msg = "⏳ Publishing to Binance Square..." if lang_pref == "en" else "⏳ Публикую в Binance Square..."
+                                    await send_response(app_session, chat_id, pub_msg, msg_id)
+                                    result = await post_to_binance_square(post_content)
+                                    await send_response(app_session, chat_id, result, msg_id)
+                            else:
+                                if lang_pref == "en":
+                                    post_help = ("✏️ *How to use:*\n"
+                                        "`/post Your text for Binance Square`\n\n"
+                                        "Or reply to any message with `/post` to publish it.\n\n"
+                                        "Example:\n"
+                                        "`/post Hello Binance! BTC looks bullish today 🚀`")
+                                else:
+                                    post_help = ("✏️ *Как использовать:*\n"
+                                        "`/post Ваш текст для Binance Square`\n\n"
+                                        "Или ответьте на любое сообщение командой `/post` чтобы опубликовать его.\n\n"
+                                        "Пример:\n"
+                                        "`/post Привет Бинанс! Сегодня BTC выглядит бычьим 🚀`")
+                                await send_response(app_session, chat_id, post_help, msg_id, parse_mode="Markdown")
                             continue
 
                         if text.startswith("/autopost"):
