@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
 from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log
-from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg
+from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification
 import aiohttp
@@ -123,7 +123,7 @@ async def main():
                                     add_breakout_entry(s, tf_label, line_res.get("trigger_price", 0), cp, line_res.get("type", ""))
                             
                         logging.info(f"📊 Analysis progress: {min(i + chunk_size, len(symbols))} / {len(symbols)}")
-                        # Rate limit: spread global scan over ~4 minutes (safe for 2400 weight/min)
+                        await wait_for_weight(session, 1800)
                         await asyncio.sleep(1.5)
 
                     last_full_calc_date = now_msk.date()
@@ -254,7 +254,7 @@ async def main():
                             else:
                                 logging.warning(f"🔄 Signal {symbol} ({tf_key}) LEFT IN QUEUE. Will retry in 5 minutes.")
 
-                    # Rate limit: spread monitoring over ~90s (safe for 2400 weight/min)
+                    await wait_for_weight(session, 1800)
                     await asyncio.sleep(3.0)
 
                 # Clean up processed alerts

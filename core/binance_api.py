@@ -15,6 +15,16 @@ async def send_status_msg(text):
     except Exception as e:
         logging.error(f"Failed to send status message: {e}")
 
+async def wait_for_weight(session, threshold=1800):
+    """Wait until API weight drops below threshold. Checks every 5s."""
+    weight = getattr(session, 'last_weight', 0)
+    if isinstance(weight, str):
+        weight = int(weight) if weight.isdigit() else 0
+    if weight > threshold:
+        wait_secs = 60 - (time.time() % 60) + 2  # Wait until next minute resets weight
+        logging.info(f"⏸️ API weight {weight}/{threshold} — pausing {wait_secs:.0f}s for reset...")
+        await asyncio.sleep(wait_secs)
+
 async def fetch_klines(session, symbol, interval, limit=199):
     global LAST_WEIGHT_WARNING
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -24,7 +34,7 @@ async def fetch_klines(session, symbol, interval, limit=199):
             weight = int(weight_str) if weight_str.isdigit() else 0
             session.last_weight = weight
             
-            if weight > 2350:
+            if weight > 2000:
                 current_time = time.time()
                 if current_time - LAST_WEIGHT_WARNING > 60:
                     LAST_WEIGHT_WARNING = current_time
@@ -34,7 +44,10 @@ async def fetch_klines(session, symbol, interval, limit=199):
                         f"📈 Current weight: `{weight}/2400`\n"
                         f"Bot is automatically slowing down."
                     ))
-                await asyncio.sleep(5)
+                # Wait for next minute to reset weight
+                wait_secs = 60 - (time.time() % 60) + 2
+                logging.info(f"⏸️ Weight {weight} > 2000 — waiting {wait_secs:.0f}s for reset...")
+                await asyncio.sleep(wait_secs)
             
             if resp.status == 200:
                 raw = await resp.json()
