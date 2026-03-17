@@ -4,6 +4,7 @@ import aiohttp
 import asyncio
 import math
 import os
+import time as _time
 from typing import Optional
 from pydantic import BaseModel
 from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
@@ -53,6 +54,102 @@ def _format_verdict(v: TradeVerdict, base_coin: str, price: float, dynamics_text
     lines.append(f"💼 REC: {v.leverage_rec} | {v.deposit_rec}")
     return "\n".join(lines)
 
+# ---------------------------------------------------------
+# OPENCLAW AGENT STREAMING: LIVE AI IN TELEGRAM
+# ---------------------------------------------------------
+async def _edit_telegram_msg(session, chat_id, message_id, text, bot_token, parse_mode=None):
+    """Edit a Telegram message. Used for real-time streaming updates."""
+    url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text[:4096]}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
+        async with session.post(url, json=payload, timeout=5) as resp:
+            pass  # Silently ignore edit errors (rate limits, unchanged text)
+    except Exception:
+        pass
+
+
+async def _stream_verdict(client, prompt, telegram_stream):
+    """Stream AI verdict to Telegram via OpenClaw agent.run_stream().
+    
+    Edits a Telegram message in real-time as AI generates tokens.
+    Shows tool executions (skill calls) and thinking events.
+    
+    Returns the final accumulated text, or None if streaming failed.
+    """
+    session = telegram_stream["session"]
+    chat_id = telegram_stream["chat_id"]
+    message_id = telegram_stream["message_id"]
+    bot_token = telegram_stream["bot_token"]
+
+    accumulated = ""
+    last_edit = 0
+    edit_interval = 1.5  # Seconds between Telegram edits (rate limit: ~30/min)
+    token_count = 0
+
+    try:
+        await _edit_telegram_msg(session, chat_id, message_id,
+            "⚡ OpenClaw AI Agent connected...\n🔄 Streaming live response...", bot_token)
+
+        async for event in client.agent.run_stream(prompt):
+            now = _time.monotonic()
+
+            # --- Handle AgentStreamEvent ---
+            if hasattr(event, 'type') and hasattr(event, 'payload'):
+
+                if event.type == cmdop.AgentEventType.TOOL_START:
+                    tool_info = str(event.payload or "skill")
+                    await _edit_telegram_msg(session, chat_id, message_id,
+                        f"🔍 Executing OpenClaw Skill: {tool_info}...", bot_token)
+                    last_edit = now
+
+                elif event.type == cmdop.AgentEventType.THINKING:
+                    await _edit_telegram_msg(session, chat_id, message_id,
+                        "🧠 AI reasoning in progress...", bot_token)
+                    last_edit = now
+
+                elif event.type == cmdop.AgentEventType.TOKEN:
+                    token = str(event.payload or "")
+                    accumulated += token
+                    token_count += 1
+
+                    # Debounced edit to stay within Telegram rate limits
+                    if now - last_edit >= edit_interval and len(accumulated) > 20:
+                        # Show streaming cursor ▌
+                        display = accumulated.strip() + " ▌"
+                        if len(display) > 4000:
+                            display = "..." + display[-3997:]
+                        await _edit_telegram_msg(session, chat_id, message_id,
+                            f"⚡ *OpenClaw Live Stream* ({token_count} tokens)\n\n{display}",
+                            bot_token)
+                        last_edit = now
+
+                elif event.type == cmdop.AgentEventType.ERROR:
+                    logging.warning(f"⚠️ Stream error: {event.payload}")
+
+            # --- Handle final AgentResult (if yielded) ---
+            elif hasattr(event, 'text') and hasattr(event, 'success'):
+                if event.success and event.text:
+                    accumulated = event.text
+
+        # Final edit — complete text, no cursor
+        if accumulated:
+            final_text = accumulated.strip()
+            if len(final_text) > 3900:
+                final_text = final_text[:3900] + "..."
+            await _edit_telegram_msg(session, chat_id, message_id,
+                f"⚡ *OpenClaw AI Stream Complete* ({token_count} tokens)\n\n{final_text}",
+                bot_token, parse_mode="Markdown")
+            logging.info(f"✅ OpenClaw Streaming: {token_count} tokens → Telegram (live)")
+            return accumulated.strip()
+
+    except Exception as e:
+        logging.info(f"⚙️ Streaming unavailable ({e}), falling back to standard inference...")
+
+    return None
+
+
 # Load the FULL arsenal of Native Binance Skills
 from agent.skills import (
     get_smart_money_signals,
@@ -63,10 +160,15 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en") -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None) -> str:
     """
     OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
     and sends aggregated context to OpenRouter.
+    
+    Args:
+        telegram_stream: Optional dict for live Telegram streaming:
+            {"session": aiohttp_session, "chat_id": int, "message_id": int, "bot_token": str}
+            If provided, streams AI tokens to Telegram in real-time via editMessageText.
     """
     base_coin = symbol.upper().replace("USDT", "")
 
@@ -185,7 +287,25 @@ Fibo: {fibo_text}
             full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
             # =====================================================
-            # STEP 1: OpenClaw Extract — Structured TradeVerdict
+            # STEP 1: OpenClaw Agent Streaming (Live Telegram UI)
+            # =====================================================
+            # If telegram_stream is provided, stream AI tokens in real-time
+            # to a Telegram message via editMessageText. Users see the AI
+            # "thinking" live — massive UX improvement over static "⏳".
+            if telegram_stream:
+                try:
+                    logging.info("⚡ [OpenClaw Stream] Starting live AI stream to Telegram...")
+                    stream_result = await _stream_verdict(client, full_prompt, telegram_stream)
+                    if stream_result:
+                        logging.info("✅ OpenClaw Streaming completed successfully.")
+                        return stream_result
+                    else:
+                        logging.info("⚙️ Streaming returned empty, falling back to Extract...")
+                except Exception as stream_err:
+                    logging.info(f"⚙️ Streaming error ({stream_err}), falling back to Extract...")
+
+            # =====================================================
+            # STEP 2: OpenClaw Extract — Structured TradeVerdict
             # =====================================================
             # Uses CMDOP ExtractService to return a validated Pydantic
             # model instead of raw text. This ensures typed entry/SL/TP
@@ -213,7 +333,7 @@ Fibo: {fibo_text}
                 logging.info(f"⚙️ Extract unavailable ({extract_err}), falling back to agent.run...")
 
             # =====================================================
-            # STEP 2: Fallback — OpenClaw Agent (existing behavior)
+            # STEP 3: Fallback — OpenClaw Agent (existing behavior)
             # =====================================================
             result = await client.agent.run(full_prompt)
             

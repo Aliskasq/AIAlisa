@@ -260,6 +260,22 @@ async def send_response(session, chat_id, text, reply_to_msg_id=None, reply_mark
         
     await session.post(url, json=payload)
 
+
+async def send_and_get_msg_id(session, chat_id, text, reply_to_msg_id=None):
+    """Send a Telegram message and return its message_id (for streaming edits)."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text}
+    if reply_to_msg_id:
+        payload["reply_to_message_id"] = reply_to_msg_id
+    try:
+        async with session.post(url, json=payload, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("result", {}).get("message_id")
+    except Exception as e:
+        logging.error(f"❌ send_and_get_msg_id error: {e}")
+    return None
+
 async def telegram_polling_loop(app_session):
     """Listens for messages and button presses from the Telegram group/chat"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
@@ -752,7 +768,11 @@ async def telegram_polling_loop(app_session):
                             symbol_raw = text.replace(matched_prefix, "").strip().split()[0].upper()
                             symbol = symbol_raw + "USDT" if not symbol_raw.endswith("USDT") else symbol_raw
 
-                            await send_response(app_session, chat_id, f"⏳ Fetching chart data + building trend line... ({symbol})", msg_id)
+                            # Send status message and capture its ID for live streaming
+                            stream_msg_id = await send_and_get_msg_id(
+                                app_session, chat_id,
+                                f"⏳ Fetching chart data + building trend line... ({symbol})", msg_id
+                            )
 
                             # Fetch 199 candles for trend line construction (same as main scanner)
                             raw_df_full = await fetch_klines(app_session, symbol, "4h", 199)
@@ -764,7 +784,18 @@ async def telegram_polling_loop(app_session):
                                 last_row, full_df = calculate_binance_indicators(df, "4H")
                                 funding = await fetch_funding_rate(app_session, symbol)
                                 last_row["funding_rate"] = funding
-                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref)
+
+                                # Build telegram_stream dict for live AI streaming
+                                tg_stream = None
+                                if stream_msg_id:
+                                    tg_stream = {
+                                        "session": app_session,
+                                        "chat_id": chat_id,
+                                        "message_id": stream_msg_id,
+                                        "bot_token": BOT_TOKEN
+                                    }
+
+                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream)
 
                                 # --- BUILD TREND LINE & CHART ---
                                 chart_path = None
