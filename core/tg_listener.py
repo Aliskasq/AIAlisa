@@ -797,6 +797,16 @@ async def telegram_polling_loop(app_session):
 
                                 ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream)
 
+                                # Delete streaming message — final result goes in chart caption
+                                if stream_msg_id:
+                                    try:
+                                        del_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                                        await app_session.post(del_url, json={
+                                            "chat_id": chat_id, "message_id": stream_msg_id
+                                        }, timeout=5)
+                                    except Exception:
+                                        pass  # Silently ignore if already deleted
+
                                 # --- BUILD TREND LINE & CHART ---
                                 chart_path = None
                                 if raw_df_full:
