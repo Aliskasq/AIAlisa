@@ -797,15 +797,16 @@ async def telegram_polling_loop(app_session):
 
                                 ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream)
 
-                                # Delete streaming message — final result goes in chart caption
-                                if stream_msg_id:
+                                # Schedule delayed deletion of streaming message (15s after chart sent)
+                                async def _delayed_delete(sess, cid, mid, delay=15):
+                                    await asyncio.sleep(delay)
                                     try:
-                                        del_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
-                                        await app_session.post(del_url, json={
-                                            "chat_id": chat_id, "message_id": stream_msg_id
-                                        }, timeout=5)
+                                        await sess.post(
+                                            f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                                            json={"chat_id": cid, "message_id": mid}, timeout=5
+                                        )
                                     except Exception:
-                                        pass  # Silently ignore if already deleted
+                                        pass
 
                                 # --- BUILD TREND LINE & CHART ---
                                 chart_path = None
@@ -866,6 +867,10 @@ async def telegram_polling_loop(app_session):
                                 else:
                                     # No trend line found — send text only
                                     await send_response(app_session, chat_id, ai_msg, msg_id, reply_markup=scan_markup)
+
+                                # Delete streaming message 15s after chart/text sent
+                                if stream_msg_id:
+                                    asyncio.create_task(_delayed_delete(app_session, chat_id, stream_msg_id, 15))
 
                             continue
 
