@@ -28,14 +28,17 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['ema25'] = df['close'].ewm(span=25, adjust=False).mean()
     df['ema99'] = df['close'].ewm(span=99, adjust=False).mean()
 
-    # 2. RSI (6)
+    # 2. RSI (6, 12, 24) — Binance standard periods
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
-    avg_gain = rma(gain, 6)
-    avg_loss = rma(loss, 6)
-    rs = avg_gain / avg_loss
-    df['rsi6'] = 100 - (100 / (1 + rs))
+
+    for period in [6, 12, 24]:
+        avg_g = rma(gain, period)
+        avg_l = rma(loss, period)
+        rs = avg_g / avg_l.replace(0, np.nan)
+        df[f'rsi{period}'] = 100 - (100 / (1 + rs))
+        df[f'rsi{period}'] = df[f'rsi{period}'].fillna(50)
 
     # 3. MACD
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
@@ -121,18 +124,28 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
 
-    plus_di = 100 * rma(pd.Series(plus_dm), 14) / df['atr']
-    minus_di = 100 * rma(pd.Series(minus_dm), 14) / df['atr']
-    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+    atr_safe = df['atr'].replace(0, np.nan)
+    plus_di = 100 * rma(pd.Series(plus_dm, index=df.index), 14) / atr_safe
+    minus_di = 100 * rma(pd.Series(minus_dm, index=df.index), 14) / atr_safe
+    di_sum = plus_di + minus_di
+    di_sum = di_sum.replace(0, np.nan)
+    dx = 100 * np.abs(plus_di - minus_di) / di_sum
+    dx = dx.fillna(0)
     df['adx'] = rma(dx, 14)
 
     # 9. Stochastic RSI (14, K=3, D=3)
-    rsi14 = 100 - (100 / (1 + (rma(gain, 14) / rma(loss, 14))))
+    avg_g14 = rma(gain, 14)
+    avg_l14 = rma(loss, 14)
+    rs14 = avg_g14 / avg_l14.replace(0, np.nan)
+    rsi14 = 100 - (100 / (1 + rs14))
+    rsi14 = rsi14.fillna(50)
     stoch_rsi_min = rsi14.rolling(14).min()
     stoch_rsi_max = rsi14.rolling(14).max()
-    stoch_rsi_k = 100 * (rsi14 - stoch_rsi_min) / (stoch_rsi_max - stoch_rsi_min)
-    df['stoch_k'] = stoch_rsi_k.rolling(3).mean()
-    df['stoch_d'] = df['stoch_k'].rolling(3).mean()
+    stoch_range = stoch_rsi_max - stoch_rsi_min
+    stoch_range = stoch_range.replace(0, np.nan)
+    stoch_rsi_k = 100 * (rsi14 - stoch_rsi_min) / stoch_range
+    df['stoch_k'] = stoch_rsi_k.rolling(3).mean().fillna(50)
+    df['stoch_d'] = df['stoch_k'].rolling(3).mean().fillna(50)
 
     # 10. MFI (Money Flow Index, 14)
     typical_price = (df['high'] + df['low'] + df['close']) / 3
@@ -246,6 +259,10 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "recent_label": recent_label,
         "ema7": last['ema7'], "ema25": last['ema25'], "ema99": last['ema99'],
         "rsi6": last['rsi6'],
+        "rsi12": last['rsi12'],
+        "rsi24": last['rsi24'],
+        "macd_line": last['macd_line'],
+        "macd_signal": last['macd_signal'],
         "obv_status": obv_status,
         "macd_hist": last['macd_hist'],
         "volume_decay": "Yes" if last['volume_decay'] else "No",

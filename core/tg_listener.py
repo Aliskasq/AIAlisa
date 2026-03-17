@@ -800,10 +800,14 @@ async def telegram_polling_loop(app_session):
                                     funding = await fetch_funding_rate(app_session, learn_symbol)
 
                                     price = row.get("close", 0)
-                                    rsi = row.get("rsi6", 0)
+                                    rsi6 = row.get("rsi6", 0)
+                                    rsi12 = row.get("rsi12", 0)
+                                    rsi24 = row.get("rsi24", 0)
                                     mfi = row.get("mfi", 0)
                                     adx = row.get("adx", 0)
                                     stoch = row.get("stoch_k", 0)
+                                    macd_line = row.get("macd_line", 0)
+                                    macd_sig = row.get("macd_signal", 0)
                                     macd_h = row.get("macd_hist", 0)
                                     obv = row.get("obv_status", "Unknown")
                                     ichimoku = row.get("ichimoku_status", "Unknown")
@@ -811,7 +815,7 @@ async def telegram_polling_loop(app_session):
                                     vol_decay = row.get("volume_decay", "Unknown")
 
                                     if lang_pref == "ru":
-                                        rsi_note = "перекупленность ⚠️" if rsi > 70 else "перепроданность 🟢" if rsi < 30 else "нейтрально"
+                                        def rsi_note_ru(v): return "перекупленность ⚠️" if v > 70 else "перепроданность 🟢" if v < 30 else "нейтрально"
                                         mfi_note = "перекупленность (давление продавцов)" if mfi > 80 else "перепроданность (давление покупателей)" if mfi < 20 else "нейтрально"
                                         adx_note = "сильный тренд 💪" if adx > 25 else "слабый/боковой тренд"
                                         stoch_note = "перекупленность" if stoch > 80 else "перепроданность" if stoch < 20 else "нейтрально"
@@ -821,7 +825,9 @@ async def telegram_polling_loop(app_session):
                                             f"📚 *Обучение: {short_coin}* (4H)\n"
                                             f"💰 Цена: `${price:.6f}`\n\n"
                                             f"📊 *Индикаторы:*\n"
-                                            f"• *RSI(6)* = `{rsi:.1f}` → {rsi_note}\n"
+                                            f"• *RSI(6)* = `{rsi6:.1f}` → {rsi_note_ru(rsi6)}\n"
+                                            f"• *RSI(12)* = `{rsi12:.1f}` → {rsi_note_ru(rsi12)}\n"
+                                            f"• *RSI(24)* = `{rsi24:.1f}` → {rsi_note_ru(rsi24)}\n"
                                             f"  _RSI показывает скорость изменения цены (0-100). >70 = перекупленность, <30 = перепроданность_\n\n"
                                             f"• *MFI* = `{mfi:.1f}` → {mfi_note}\n"
                                             f"  _Money Flow Index — RSI с учётом объёма. Показывает давление денег_\n\n"
@@ -829,8 +835,9 @@ async def telegram_polling_loop(app_session):
                                             f"  _Сила тренда (не направление). >25 = тренд, <20 = флэт_\n\n"
                                             f"• *StochRSI* = `{stoch:.1f}` → {stoch_note}\n"
                                             f"  _Более чувствительный RSI. Помогает ловить развороты_\n\n"
-                                            f"• *MACD* = `{macd_h:.4f}` → {macd_note}\n"
-                                            f"  _Разница быстрой и медленной EMA. Показывает импульс_\n\n"
+                                            f"• *MACD*: Line=`{macd_line:.6f}` Signal=`{macd_sig:.6f}`\n"
+                                            f"  Histogram=`{macd_h:.6f}` → {macd_note}\n"
+                                            f"  _MACD(12,26,9). Гистограмма > 0 = бычий импульс_\n\n"
                                             f"• *OBV* → `{obv}`\n"
                                             f"  _Объём покупок vs продаж. Бычий = накопление, медвежий = распределение_\n\n"
                                             f"• *Ichimoku* → `{ichimoku}`\n"
@@ -843,7 +850,7 @@ async def telegram_polling_loop(app_session):
                                             f"  _Ставка финансирования фьючерсов. + = лонги платят шортам_"
                                         )
                                     else:
-                                        rsi_note = "overbought ⚠️" if rsi > 70 else "oversold 🟢" if rsi < 30 else "neutral"
+                                        def rsi_note_en(v): return "overbought ⚠️" if v > 70 else "oversold 🟢" if v < 30 else "neutral"
                                         mfi_note = "overbought (sell pressure)" if mfi > 80 else "oversold (buy pressure)" if mfi < 20 else "neutral"
                                         adx_note = "strong trend 💪" if adx > 25 else "weak/sideways"
                                         stoch_note = "overbought" if stoch > 80 else "oversold" if stoch < 20 else "neutral"
@@ -853,7 +860,9 @@ async def telegram_polling_loop(app_session):
                                             f"📚 *Learn: {short_coin}* (4H)\n"
                                             f"💰 Price: `${price:.6f}`\n\n"
                                             f"📊 *Indicators Explained:*\n"
-                                            f"• *RSI(6)* = `{rsi:.1f}` → {rsi_note}\n"
+                                            f"• *RSI(6)* = `{rsi6:.1f}` → {rsi_note_en(rsi6)}\n"
+                                            f"• *RSI(12)* = `{rsi12:.1f}` → {rsi_note_en(rsi12)}\n"
+                                            f"• *RSI(24)* = `{rsi24:.1f}` → {rsi_note_en(rsi24)}\n"
                                             f"  _RSI measures price momentum (0-100). >70 = overbought, <30 = oversold_\n\n"
                                             f"• *MFI* = `{mfi:.1f}` → {mfi_note}\n"
                                             f"  _Money Flow Index — RSI weighted by volume. Shows money pressure_\n\n"
@@ -861,8 +870,9 @@ async def telegram_polling_loop(app_session):
                                             f"  _Trend strength (not direction). >25 = trending, <20 = ranging_\n\n"
                                             f"• *StochRSI* = `{stoch:.1f}` → {stoch_note}\n"
                                             f"  _More sensitive RSI. Helps catch reversals early_\n\n"
-                                            f"• *MACD* = `{macd_h:.4f}` → {macd_note}\n"
-                                            f"  _Fast vs slow EMA difference. Shows momentum direction_\n\n"
+                                            f"• *MACD*: Line=`{macd_line:.6f}` Signal=`{macd_sig:.6f}`\n"
+                                            f"  Histogram=`{macd_h:.6f}` → {macd_note}\n"
+                                            f"  _MACD(12,26,9). Histogram > 0 = bullish momentum_\n\n"
                                             f"• *OBV* → `{obv}`\n"
                                             f"  _On-Balance Volume. Bullish = accumulation, Bearish = distribution_\n\n"
                                             f"• *Ichimoku* → `{ichimoku}`\n"
@@ -1412,9 +1422,18 @@ async def telegram_polling_loop(app_session):
                                         chart_path = await draw_simple_chart(symbol, df_full, "4H")
 
                                 # --- PREPARE BINANCE SQUARE PUBLICATION & BUTTONS ---
+                                # Use Part 2 (extended analysis) for Square, fall back to full text
                                 import uuid
                                 post_id = str(uuid.uuid4())[:8]
-                                square_text = f"🚀 ${symbol} AI Market Analysis!\n\n{ai_msg}\n\n#AIBinance #BinanceSquare #Write2Earn"
+                                square_ai = ai_msg
+                                if "---" in ai_msg:
+                                    sq_parts = ai_msg.split("---", 1)
+                                    if len(sq_parts) > 1 and sq_parts[1].strip():
+                                        square_ai = sq_parts[1].strip()
+                                short_sym = symbol.replace("USDT", "")
+                                square_text = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{square_ai}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
+                                if len(square_text) > 1950:
+                                    square_text = square_text[:1947] + "..."
                                 square_cache_put(post_id, square_text)
 
                                 app_link = f"https://app.binance.com/en/futures/{symbol.upper()}"
