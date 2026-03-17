@@ -44,6 +44,8 @@ async def fetch_funding_history(session: aiohttp.ClientSession, symbol: str) -> 
     return "Unknown"
 
 async def main():
+    # Ensure data directory exists on fresh installs
+    os.makedirs("data", exist_ok=True)
     logging.info("--- Monitoring loop started (199 CANDLES MODE | 4H & 1D ONLY) ---")
 
     # Load mathematical state of lines
