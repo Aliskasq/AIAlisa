@@ -277,8 +277,10 @@ Trend: {clean_indic.get("supertrend", "Unknown")} (Level: {clean_indic.get("supe
 ADX: {clean_indic.get("adx", 0):.2f} | MFI: {clean_indic.get("mfi", 0):.2f} | StochRSI K: {clean_indic.get("stoch_k", 0):.2f} / D: {clean_indic.get("stoch_d", 0):.2f}
 RSI(6): {clean_indic.get("rsi6", 0):.2f} | RSI(12): {clean_indic.get("rsi12", 0):.2f} | RSI(24): {clean_indic.get("rsi24", 0):.2f}
 MACD Line: {clean_indic.get("macd_line", 0):.6f} | Signal: {clean_indic.get("macd_signal", 0):.6f} | Histogram: {clean_indic.get("macd_hist", 0):.6f} ({'Bullish' if clean_indic.get("macd_hist", 0) > 0 else 'Bearish'})
-Volume Decay: {clean_indic.get("volume_decay", "Unknown")} | OBV Trend: {clean_indic.get("obv_status", "Unknown")}
+Volume Decay: {clean_indic.get("volume_decay", "Unknown")} | OBV Trend: {clean_indic.get("obv_status", "Unknown")} | CMF: {clean_indic.get("cmf", 0):.4f}
 Ichimoku: {clean_indic.get("ichimoku_status", "Unknown")}
+Bollinger: Upper={clean_indic.get("bb_upper", 0):.4f} | Mid={clean_indic.get("bb_mid", 0):.4f} | Lower={clean_indic.get("bb_lower", 0):.4f}
+VWAP: {clean_indic.get("vwap", 0):.4f}
 EMA: 7={clean_indic.get("ema7", 0):.4f}, 25={clean_indic.get("ema25", 0):.4f}, 99={clean_indic.get("ema99", 0):.4f}
 Funding: {clean_indic.get("funding_rate", "Unknown")}
 Bullish FVG: {clean_indic.get("smc_bullish_fvg", "None")} | Bearish FVG: {clean_indic.get("smc_bearish_fvg", "None")}

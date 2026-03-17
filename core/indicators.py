@@ -180,6 +180,21 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['obv'] = obv_change.fillna(0).cumsum()
     df['obv_sma20'] = df['obv'].rolling(20).mean()
 
+    # 13. Bollinger Bands (20, 2)
+    bb_sma = df['close'].rolling(20).mean()
+    bb_std = df['close'].rolling(20).std()
+    df['bb_upper'] = bb_sma + 2 * bb_std
+    df['bb_lower'] = bb_sma - 2 * bb_std
+    df['bb_mid'] = bb_sma
+
+    # 14. VWAP (Volume Weighted Average Price) — approximation over window
+    df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / df['volume'].cumsum()
+
+    # 15. CMF (Chaikin Money Flow, 20)
+    mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low']).replace(0, np.nan)
+    mf_volume = mf_multiplier * df['volume']
+    df['cmf'] = mf_volume.rolling(20).sum() / df['volume'].rolling(20).sum()
+
     # ==========================================
     # 🧠 SMART MONEY CONCEPTS (SMC)
     # ==========================================
@@ -304,6 +319,11 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "mfi": last['mfi'],
         "ichimoku_status": ichi_status,
         "funding_rate": df.get("funding_rate", "Unknown"),
+        "bb_upper": last['bb_upper'],
+        "bb_lower": last['bb_lower'],
+        "bb_mid": last['bb_mid'],
+        "vwap": last['vwap'],
+        "cmf": last['cmf'],
         "smc_bullish_ob": bullish_ob,
         "smc_bearish_ob": bearish_ob,
         "smc_bullish_fvg": last_bull_fvg,
