@@ -19,6 +19,7 @@ Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
 | 🔴 **Live AI Streaming** | Real-time SSE token streaming — watch AI think live in Telegram |
 | 📚 **Education Mode** | `/learn BTC` — explains every indicator in plain language for beginners |
 | 🏆 **Signal Tracker** | `/signals` — live winrate accuracy of all bot predictions |
+| ✅❌ **AI Accuracy in /trend** | Each breakout shows ✅ if AI prediction (LONG/SHORT) matched price direction, ❌ if wrong |
 | 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 16+ indicators + 7 Web3 skills |
 | 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support, per-chat persistent |
 | 🔔 **Smart Alerts** | `/alert BTC 75000` — persistent price alerts that survive restarts |
@@ -214,7 +215,7 @@ Alisa provides a comprehensive control panel via Telegram:
 | `margin 100 leverage 10 max 20%` | `маржа 100 плечо 10 макс 20%` | 💰 **Risk Calculator** — reply to any signal for exact Stop-Loss math |
 | `/top gainers` | | 📈 Top 10 Futures growth (24h) |
 | `/top losers` | | 📉 Top 10 Futures drops (24h) |
-| `/trend` | | 📊 All breakout coins since last geometric scan |
+| `/trend` | | 📊 All breakout coins since last scan + ✅❌ AI prediction accuracy (LONG/SHORT vs actual price movement) |
 | `/alert BTC 69500` | | 🔔 Set persistent price alert (survives restarts) |
 | `/alert list` | | 🔔 View active alerts |
 | `/alert clear` | | 🔔 Remove all alerts |
