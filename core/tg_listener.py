@@ -179,10 +179,17 @@ async def build_trend_text(session: aiohttp.ClientSession, lang: str = "ru") -> 
 
         diff_pct = ((current_price / bp) - 1) * 100 if bp > 0 else 0
         arrow = "🟢" if diff_pct >= 0 else "🔴"
+        # AI prediction check: ✅ if AI was right, ❌ if wrong
+        ai_dir = entry.get("ai_direction", "")
+        if ai_dir:
+            ai_correct = (ai_dir == "LONG" and diff_pct >= 0) or (ai_dir == "SHORT" and diff_pct < 0)
+            ai_mark = "✅" if ai_correct else "❌"
+        else:
+            ai_mark = ""
         bp_label = "Breakout" if lang == "en" else "Пробитие"
         now_label = "Now" if lang == "en" else "Сейчас"
         lines.append(
-            f"{arrow} `${sym}` ({tf})\n"
+            f"{arrow}{ai_mark} `${sym}` ({tf})\n"
             f"    {bp_label}: `${bp:.6f}`\n"
             f"    {now_label}: `${current_price:.6f}` (*{diff_pct:+.2f}%*)"
         )

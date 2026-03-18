@@ -71,7 +71,7 @@ def save_breakout_log(log):
     except Exception as e:
         logging.error(f"Error writing breakout log: {e}")
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type=""):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction=""):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
     # Don't duplicate same symbol+tf
@@ -82,6 +82,7 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type=""):
             "breakout_price": round(breakout_price, 8),
             "current_price": round(current_price, 8),
             "type": line_type,
+            "ai_direction": ai_direction.upper() if ai_direction else "",
             "time": datetime.now(timezone.utc).isoformat()
         })
         save_breakout_log(log)

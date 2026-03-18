@@ -249,8 +249,16 @@ async def main():
                                 is_sent = True
 
                             if is_sent:
+                                # Parse AI direction from verdict text
+                                _ai_dir = ""
+                                if ai_verdict:
+                                    _v_upper = ai_verdict.upper()
+                                    if "LONG" in _v_upper:
+                                        _ai_dir = "LONG"
+                                    elif "SHORT" in _v_upper:
+                                        _ai_dir = "SHORT"
                                 # Log breakout for /trend command
-                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type)
+                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type, ai_direction=_ai_dir)
                                 # ONLY REMOVE FROM JSON IF MESSAGE WAS SUCCESSFULLY DELIVERED!
                                 alerts_to_remove.append(alert)
                             else:
