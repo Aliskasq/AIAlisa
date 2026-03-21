@@ -285,16 +285,51 @@ async def main():
                                 is_sent = True
 
                             if is_sent:
-                                # Parse AI direction from verdict text
+                                # Parse AI direction + trade params from verdict text
                                 _ai_dir = ""
+                                _ai_entry = 0.0
+                                _ai_sl = 0.0
+                                _ai_tp = 0.0
+                                _ai_leverage = ""
+                                _ai_deposit_pct = ""
                                 if ai_verdict:
                                     _v_upper = ai_verdict.upper()
                                     if "LONG" in _v_upper:
                                         _ai_dir = "LONG"
                                     elif "SHORT" in _v_upper:
                                         _ai_dir = "SHORT"
-                                # Log breakout for /trend command
-                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type, ai_direction=_ai_dir)
+
+                                    # Parse Entry, SL, TP, leverage, deposit% from AI text
+                                    import re as _re
+                                    _m = _re.search(r'Entry[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
+                                    if _m:
+                                        try: _ai_entry = float(_m.group(1))
+                                        except: pass
+                                    _m = _re.search(r'SL[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
+                                    if _m:
+                                        try: _ai_sl = float(_m.group(1))
+                                        except: pass
+                                    _m = _re.search(r'TP[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
+                                    if _m:
+                                        try: _ai_tp = float(_m.group(1))
+                                        except: pass
+                                    _m = _re.search(r'(\d+)x', ai_verdict, _re.IGNORECASE)
+                                    if _m:
+                                        _ai_leverage = _m.group(0)
+                                    _m = _re.search(r'REC[:\s].*?(\d+%)', ai_verdict, _re.IGNORECASE)
+                                    if _m:
+                                        _ai_deposit_pct = _m.group(1)
+
+                                # Log breakout for /trend and /signals
+                                add_breakout_entry(
+                                    symbol, tf_key, dynamic_trigger, current_price, alert_type,
+                                    ai_direction=_ai_dir,
+                                    ai_entry=_ai_entry,
+                                    ai_sl=_ai_sl,
+                                    ai_tp=_ai_tp,
+                                    ai_leverage=_ai_leverage,
+                                    ai_deposit_pct=_ai_deposit_pct
+                                )
                                 # ONLY REMOVE FROM JSON IF MESSAGE WAS SUCCESSFULLY DELIVERED!
                                 alerts_to_remove.append(alert)
                             else:

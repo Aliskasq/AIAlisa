@@ -985,7 +985,7 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         # ==========================================
-                        # SIGNAL ACCURACY: /signals — winrate from breakout log
+                        # SIGNAL ACCURACY: /signals — P&L with SL/TP verification on 15m candles
                         # ==========================================
                         if text.startswith("/signal"):
                             log = load_breakout_log()
@@ -994,59 +994,211 @@ async def telegram_polling_loop(app_session):
                                 await send_response(app_session, chat_id, no_signals, msg_id)
                                 continue
 
+                            loading_msg = "⏳ Analyzing signals with 15m candles..." if lang_pref == "en" else "⏳ Анализирую сигналы по 15-мин свечам..."
+                            await send_response(app_session, chat_id, loading_msg, msg_id)
+
+                            VIRTUAL_DEPOSIT = 10000.0
                             wins = 0
                             losses = 0
+                            pending = 0
+                            total_pnl_usd = 0.0
                             lines = []
+
                             for entry in log:
                                 sym = entry["symbol"]
-                                bp = entry.get("breakout_price", 0)
-                                cp = entry.get("current_price", 0)
-                                tf = entry.get("tf", "?")
-                                t = entry.get("time", "")[:16].replace("T", " ")
-
-                                # Check current price to see if signal was profitable
-                                try:
-                                    async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
-                                        if resp.status == 200:
-                                            data = await resp.json()
-                                            now_price = float(data["price"])
-                                        else:
-                                            now_price = cp
-                                except Exception:
-                                    now_price = cp
-
-                                pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
-                                if pnl_pct > 0:
-                                    wins += 1
-                                    icon = "🟢"
-                                else:
-                                    losses += 1
-                                    icon = "🔴"
-
                                 short_sym = sym.replace("USDT", "")
-                                lines.append(f"{icon} `{short_sym}` {tf} | Entry: `{bp:.6f}` → Now: `{now_price:.6f}` ({pnl_pct:+.2f}%)")
+                                tf = entry.get("tf", "?")
+                                ai_dir = entry.get("ai_direction", "")
+                                ai_entry = entry.get("ai_entry", 0.0)
+                                ai_sl = entry.get("ai_sl", 0.0)
+                                ai_tp = entry.get("ai_tp", 0.0)
+                                ai_lev_str = entry.get("ai_leverage", "")
+                                ai_dep_pct_str = entry.get("ai_deposit_pct", "")
+                                signal_time_str = entry.get("time", "")
+
+                                # Parse leverage (e.g. "5x" -> 5)
+                                leverage = 1
+                                if ai_lev_str:
+                                    try:
+                                        leverage = int(ai_lev_str.lower().replace("x", ""))
+                                    except Exception:
+                                        leverage = 1
+                                if leverage < 1:
+                                    leverage = 1
+
+                                # Parse deposit % (e.g. "10%" -> 0.10)
+                                dep_pct = 0.10  # default 10%
+                                if ai_dep_pct_str:
+                                    try:
+                                        dep_pct = float(ai_dep_pct_str.replace("%", "")) / 100
+                                    except Exception:
+                                        dep_pct = 0.10
+
+                                margin_used = VIRTUAL_DEPOSIT * dep_pct
+
+                                # If no AI entry/SL/TP — fallback to old logic
+                                if not ai_dir or ai_entry <= 0 or ai_sl <= 0 or ai_tp <= 0:
+                                    bp = entry.get("breakout_price", 0)
+                                    try:
+                                        async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
+                                            if resp.status == 200:
+                                                data = await resp.json()
+                                                now_price = float(data["price"])
+                                            else:
+                                                now_price = entry.get("current_price", bp)
+                                    except Exception:
+                                        now_price = entry.get("current_price", bp)
+
+                                    pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
+                                    icon = "🟢" if pnl_pct > 0 else "🔴"
+                                    if pnl_pct > 0:
+                                        wins += 1
+                                    else:
+                                        losses += 1
+                                    lines.append(f"{icon} `{short_sym}` {tf} | `{bp:.4f}` → `{now_price:.4f}` ({pnl_pct:+.2f}%)")
+                                    continue
+
+                                # === FULL AI SIGNAL: check SL/TP on 15m candles ===
+                                signal_result = "OPEN"
+                                pnl_usd = 0.0
+                                pnl_pct = 0.0
+
+                                try:
+                                    async with app_session.get(
+                                        f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=15m&limit=97",
+                                        timeout=10
+                                    ) as resp:
+                                        if resp.status == 200:
+                                            klines = await resp.json()
+
+                                            # Find signal timestamp
+                                            signal_ts = 0
+                                            if signal_time_str:
+                                                try:
+                                                    from datetime import datetime as _dt
+                                                    st = _dt.fromisoformat(signal_time_str.replace("Z", "+00:00"))
+                                                    signal_ts = int(st.timestamp() * 1000)
+                                                except Exception:
+                                                    signal_ts = 0
+
+                                            for k in klines:
+                                                k_open_time = k[0]
+                                                if signal_ts and k_open_time < signal_ts:
+                                                    continue
+
+                                                k_high = float(k[2])
+                                                k_low = float(k[3])
+
+                                                if ai_dir == "LONG":
+                                                    if k_low <= ai_sl:
+                                                        signal_result = "SL"
+                                                        break
+                                                    if k_high >= ai_tp:
+                                                        signal_result = "TP"
+                                                        break
+                                                elif ai_dir == "SHORT":
+                                                    if k_high >= ai_sl:
+                                                        signal_result = "SL"
+                                                        break
+                                                    if k_low <= ai_tp:
+                                                        signal_result = "TP"
+                                                        break
+                                except Exception as e:
+                                    logging.error(f"❌ /signals kline fetch error for {sym}: {e}")
+
+                                # Calculate P&L
+                                if signal_result == "TP":
+                                    if ai_dir == "LONG":
+                                        pnl_pct = ((ai_tp - ai_entry) / ai_entry) * 100 * leverage
+                                    else:
+                                        pnl_pct = ((ai_entry - ai_tp) / ai_entry) * 100 * leverage
+                                    pnl_usd = margin_used * (pnl_pct / 100)
+                                    wins += 1
+                                    total_pnl_usd += pnl_usd
+                                    icon = "✅"
+                                elif signal_result == "SL":
+                                    if ai_dir == "LONG":
+                                        pnl_pct = ((ai_sl - ai_entry) / ai_entry) * 100 * leverage
+                                    else:
+                                        pnl_pct = ((ai_entry - ai_sl) / ai_entry) * 100 * leverage
+                                    pnl_usd = margin_used * (pnl_pct / 100)
+                                    losses += 1
+                                    total_pnl_usd += pnl_usd
+                                    icon = "❌"
+                                else:
+                                    # Still open
+                                    pending += 1
+                                    try:
+                                        async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
+                                            if resp.status == 200:
+                                                data = await resp.json()
+                                                now_price = float(data["price"])
+                                            else:
+                                                now_price = ai_entry
+                                    except Exception:
+                                        now_price = ai_entry
+                                    if ai_dir == "LONG":
+                                        pnl_pct = ((now_price - ai_entry) / ai_entry) * 100 * leverage
+                                    else:
+                                        pnl_pct = ((ai_entry - now_price) / ai_entry) * 100 * leverage
+                                    pnl_usd = margin_used * (pnl_pct / 100)
+                                    total_pnl_usd += pnl_usd
+                                    icon = "⏳"
+
+                                dir_emoji = "📈" if ai_dir == "LONG" else "📉"
+                                lev_str = f"{leverage}x" if leverage > 1 else ""
+                                margin_str = f"${margin_used:.0f}"
+                                pnl_sign = "+" if pnl_usd >= 0 else ""
+
+                                if signal_result in ("TP", "SL"):
+                                    lines.append(
+                                        f"{icon} `{short_sym}` {dir_emoji}{ai_dir} {lev_str}\n"
+                                        f"   E:`{ai_entry:.4f}` SL:`{ai_sl:.4f}` TP:`{ai_tp:.4f}`\n"
+                                        f"   {signal_result} → {pnl_sign}${pnl_usd:.2f} ({pnl_pct:+.1f}%) [{margin_str}]"
+                                    )
+                                else:
+                                    lines.append(
+                                        f"{icon} `{short_sym}` {dir_emoji}{ai_dir} {lev_str}\n"
+                                        f"   E:`{ai_entry:.4f}` SL:`{ai_sl:.4f}` TP:`{ai_tp:.4f}`\n"
+                                        f"   Open → {pnl_sign}${pnl_usd:.2f} ({pnl_pct:+.1f}%) [{margin_str}]"
+                                    )
 
                             total = wins + losses
                             winrate = (wins / total * 100) if total > 0 else 0
+                            total_sign = "+" if total_pnl_usd >= 0 else ""
 
                             if lang_pref == "ru":
                                 header = (
-                                    f"🏆 *Точность сигналов AiAlisa*\n\n"
-                                    f"📊 Всего: {total} | ✅ Profit: {wins} | ❌ Loss: {losses}\n"
-                                    f"🎯 Winrate: *{winrate:.0f}%*\n\n"
+                                    f"🏆 *Результаты сигналов AiAlisa*\n"
+                                    f"💰 Депозит: $10,000\n\n"
+                                    f"📊 Закрыто: {total} | ✅TP: {wins} | ❌SL: {losses} | ⏳Открыто: {pending}\n"
+                                    f"🎯 Winrate: *{winrate:.0f}%*\n"
+                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}*\n\n"
                                 )
                             else:
                                 header = (
-                                    f"🏆 *AiAlisa Signal Accuracy*\n\n"
-                                    f"📊 Total: {total} | ✅ Profit: {wins} | ❌ Loss: {losses}\n"
-                                    f"🎯 Winrate: *{winrate:.0f}%*\n\n"
+                                    f"🏆 *AiAlisa Signal Results*\n"
+                                    f"💰 Deposit: $10,000\n\n"
+                                    f"📊 Closed: {total} | ✅TP: {wins} | ❌SL: {losses} | ⏳Open: {pending}\n"
+                                    f"🎯 Winrate: *{winrate:.0f}%*\n"
+                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}*\n\n"
                                 )
 
-                            body = "\n".join(lines[:30])  # Limit to 30 signals
-                            full_text = header + body
-                            if len(full_text) > 4000:
-                                full_text = full_text[:4000] + "..."
-                            await send_response(app_session, chat_id, full_text, msg_id, parse_mode="Markdown")
+                            all_lines_text = "\n".join(lines)
+                            full_text = header + all_lines_text
+
+                            if len(full_text) <= 4000:
+                                await send_response(app_session, chat_id, full_text, msg_id, parse_mode="Markdown")
+                            else:
+                                await send_response(app_session, chat_id, header, msg_id, parse_mode="Markdown")
+                                chunk = ""
+                                for line in lines:
+                                    if len(chunk) + len(line) + 2 > 3900:
+                                        await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+                                        chunk = ""
+                                    chunk += line + "\n"
+                                if chunk.strip():
+                                    await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
                             continue
 
                         # ==========================================

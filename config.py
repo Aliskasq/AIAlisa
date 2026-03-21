@@ -71,8 +71,11 @@ def save_breakout_log(log):
     except Exception as e:
         logging.error(f"Error writing breakout log: {e}")
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction=""):
-    """Add a breakout event to the log (deduplicates by symbol+tf)."""
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="",
+                       ai_entry=0.0, ai_sl=0.0, ai_tp=0.0, ai_leverage="", ai_deposit_pct=""):
+    """Add a breakout event to the log (deduplicates by symbol+tf).
+    Stores AI trade parameters for /signals P&L tracking.
+    """
     log = load_breakout_log()
     # Don't duplicate same symbol+tf
     if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
@@ -83,6 +86,11 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             "current_price": round(current_price, 8),
             "type": line_type,
             "ai_direction": ai_direction.upper() if ai_direction else "",
+            "ai_entry": round(ai_entry, 8) if ai_entry else 0.0,
+            "ai_sl": round(ai_sl, 8) if ai_sl else 0.0,
+            "ai_tp": round(ai_tp, 8) if ai_tp else 0.0,
+            "ai_leverage": ai_leverage,
+            "ai_deposit_pct": ai_deposit_pct,
             "time": datetime.now(timezone.utc).isoformat()
         })
         save_breakout_log(log)
