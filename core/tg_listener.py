@@ -6,7 +6,7 @@ import os
 import pandas as pd
 import json
 from datetime import datetime, timezone, timedelta
-from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts, save_price_alerts
+from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts, save_price_alerts, load_virtual_bank, save_virtual_bank, VIRTUAL_BANK_START
 
 # --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
 PAPER_FILE = "data/paper_portfolio.json"
@@ -985,7 +985,7 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         # ==========================================
-                        # SIGNAL ACCURACY: /signals — P&L with SL/TP verification on 15m candles
+                        # SIGNAL ACCURACY: /signals — P&L with virtual bank & multi-message
                         # ==========================================
                         if text.startswith("/signal"):
                             log = load_breakout_log()
@@ -997,7 +997,10 @@ async def telegram_polling_loop(app_session):
                             loading_msg = "⏳ Analyzing signals with 15m candles..." if lang_pref == "en" else "⏳ Анализирую сигналы по 15-мин свечам..."
                             await send_response(app_session, chat_id, loading_msg, msg_id)
 
-                            VIRTUAL_DEPOSIT = 10000.0
+                            # Virtual bank
+                            bank = load_virtual_bank()
+                            current_balance = bank.get("balance", VIRTUAL_BANK_START)
+
                             wins = 0
                             losses = 0
                             pending = 0
@@ -1016,7 +1019,7 @@ async def telegram_polling_loop(app_session):
                                 ai_dep_pct_str = entry.get("ai_deposit_pct", "")
                                 signal_time_str = entry.get("time", "")
 
-                                # Parse leverage (e.g. "5x" -> 5)
+                                # Parse leverage
                                 leverage = 1
                                 if ai_lev_str:
                                     try:
@@ -1026,17 +1029,17 @@ async def telegram_polling_loop(app_session):
                                 if leverage < 1:
                                     leverage = 1
 
-                                # Parse deposit % (e.g. "10%" -> 0.10)
-                                dep_pct = 0.10  # default 10%
+                                # Parse deposit % (default 10%)
+                                dep_pct = 0.10
                                 if ai_dep_pct_str:
                                     try:
                                         dep_pct = float(ai_dep_pct_str.replace("%", "")) / 100
                                     except Exception:
                                         dep_pct = 0.10
 
-                                margin_used = VIRTUAL_DEPOSIT * dep_pct
+                                margin_used = current_balance * dep_pct
 
-                                # If no AI entry/SL/TP — fallback to old logic
+                                # If no AI params — fallback
                                 if not ai_dir or ai_entry <= 0 or ai_sl <= 0 or ai_tp <= 0:
                                     bp = entry.get("breakout_price", 0)
                                     try:
@@ -1058,7 +1061,7 @@ async def telegram_polling_loop(app_session):
                                     lines.append(f"{icon} `{short_sym}` {tf} | `{bp:.4f}` → `{now_price:.4f}` ({pnl_pct:+.2f}%)")
                                     continue
 
-                                # === FULL AI SIGNAL: check SL/TP on 15m candles ===
+                                # Full AI signal: check SL/TP on 15m candles
                                 signal_result = "OPEN"
                                 pnl_usd = 0.0
                                 pnl_pct = 0.0
@@ -1070,8 +1073,6 @@ async def telegram_polling_loop(app_session):
                                     ) as resp:
                                         if resp.status == 200:
                                             klines = await resp.json()
-
-                                            # Find signal timestamp
                                             signal_ts = 0
                                             if signal_time_str:
                                                 try:
@@ -1085,7 +1086,6 @@ async def telegram_polling_loop(app_session):
                                                 k_open_time = k[0]
                                                 if signal_ts and k_open_time < signal_ts:
                                                     continue
-
                                                 k_high = float(k[2])
                                                 k_low = float(k[3])
 
@@ -1126,7 +1126,6 @@ async def telegram_polling_loop(app_session):
                                     total_pnl_usd += pnl_usd
                                     icon = "❌"
                                 else:
-                                    # Still open
                                     pending += 1
                                     try:
                                         async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
@@ -1166,31 +1165,37 @@ async def telegram_polling_loop(app_session):
                             total = wins + losses
                             winrate = (wins / total * 100) if total > 0 else 0
                             total_sign = "+" if total_pnl_usd >= 0 else ""
+                            new_balance = current_balance + total_pnl_usd
 
                             if lang_pref == "ru":
                                 header = (
                                     f"🏆 *Результаты сигналов AiAlisa*\n"
-                                    f"💰 Депозит: $10,000\n\n"
-                                    f"📊 Закрыто: {total} | ✅TP: {wins} | ❌SL: {losses} | ⏳Открыто: {pending}\n"
+                                    f"💰 Начальный баланс: ${current_balance:,.2f}\n"
+                                    f"📊 Закрыто: {total} | ✅TP: {wins} ({wins/total*100:.0f}%) | ❌SL: {losses} ({losses/total*100:.0f}%) | ⏳Открыто: {pending}\n"
                                     f"🎯 Winrate: *{winrate:.0f}%*\n"
-                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}*\n\n"
+                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}* ({total_pnl_usd/current_balance*100:+.1f}%)\n"
+                                    f"📈 Текущий баланс: *${new_balance:,.2f}*\n\n"
                                 )
                             else:
                                 header = (
                                     f"🏆 *AiAlisa Signal Results*\n"
-                                    f"💰 Deposit: $10,000\n\n"
-                                    f"📊 Closed: {total} | ✅TP: {wins} | ❌SL: {losses} | ⏳Open: {pending}\n"
+                                    f"💰 Starting Balance: ${current_balance:,.2f}\n"
+                                    f"📊 Closed: {total} | ✅TP: {wins} ({wins/total*100:.0f}%) | ❌SL: {losses} ({losses/total*100:.0f}%) | ⏳Open: {pending}\n"
                                     f"🎯 Winrate: *{winrate:.0f}%*\n"
-                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}*\n\n"
+                                    f"💵 P&L: *{total_sign}${total_pnl_usd:.2f}* ({total_pnl_usd/current_balance*100:+.1f}%)\n"
+                                    f"📈 Current Balance: *${new_balance:,.2f}*\n\n"
                                 )
 
+                            # Send header + all trade lines in chunks of max 3900 chars
                             all_lines_text = "\n".join(lines)
                             full_text = header + all_lines_text
 
-                            if len(full_text) <= 4000:
+                            if len(full_text) <= 3900:
                                 await send_response(app_session, chat_id, full_text, msg_id, parse_mode="Markdown")
                             else:
+                                # Send header first
                                 await send_response(app_session, chat_id, header, msg_id, parse_mode="Markdown")
+                                # Then send trade lines in chunks
                                 chunk = ""
                                 for line in lines:
                                     if len(chunk) + len(line) + 2 > 3900:
