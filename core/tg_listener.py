@@ -1200,17 +1200,71 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         # ==========================================
-                        # TREND → redirects to /signals (same data)
+                        # TREND BREAKOUT LIST (/trend) — simple breakout list
                         # ==========================================
                         if text.startswith("/trend") or text in ["тренд", "тренды", "пробития"]:
+                            log = load_breakout_log()
+                            if not log:
+                                no_brk = "📭 No breakouts since last scan." if lang_pref == "en" else "📭 Нет пробитий с последнего скана."
+                                await send_response(app_session, chat_id, no_brk, msg_id)
+                                continue
+
+                            # Batch fetch prices
+                            price_map = {}
                             try:
-                                chunks = await build_signals_text(app_session, lang=lang_pref)
+                                async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                                    if resp.status == 200:
+                                        for p in await resp.json():
+                                            price_map[p["symbol"]] = float(p["price"])
+                            except Exception:
+                                pass
+
+                            hdr = "📊 *Trendline Breakouts:*\n" if lang_pref == "en" else "📊 *Пробития трендовых линий:*\n"
+                            lines = [hdr]
+                            for entry in log:
+                                sym = entry["symbol"]
+                                short = sym.replace("USDT", "")
+                                tf = entry["tf"]
+                                bp = entry["breakout_price"]
+                                now_price = price_map.get(sym, entry.get("current_price", 0))
+                                diff_pct = ((now_price / bp) - 1) * 100 if bp > 0 else 0
+                                arrow = "🟢" if diff_pct >= 0 else "🔴"
+
+                                ai_dir = entry.get("ai_direction", "")
+                                ai_mark = ""
+                                if ai_dir:
+                                    ai_ok = (ai_dir == "LONG" and diff_pct >= 0) or (ai_dir == "SHORT" and diff_pct < 0)
+                                    ai_mark = "✅" if ai_ok else "❌"
+
+                                bp_lbl = "Breakout" if lang_pref == "en" else "Пробитие"
+                                now_lbl = "Now" if lang_pref == "en" else "Сейчас"
+                                lines.append(
+                                    f"{arrow}{ai_mark} `${short}` ({tf})\n"
+                                    f"    {bp_lbl}: `${bp:.6f}`\n"
+                                    f"    {now_lbl}: `${now_price:.6f}` (*{diff_pct:+.2f}%*)"
+                                )
+
+                            total_lbl = "Total" if lang_pref == "en" else "Всего"
+                            coins_lbl = "coins" if lang_pref == "en" else "монет"
+                            lines.append(f"\n_{total_lbl}: {len(log)} {coins_lbl}_")
+
+                            full = "\n".join(lines)
+                            if len(full) <= 4000:
+                                await send_response(app_session, chat_id, full, msg_id, parse_mode="Markdown")
+                            else:
+                                chunks = []
+                                cur = ""
+                                for line in lines:
+                                    if len(cur) + len(line) + 1 > 3900:
+                                        chunks.append(cur)
+                                        cur = line
+                                    else:
+                                        cur += "\n" + line if cur else line
+                                if cur:
+                                    chunks.append(cur)
                                 for i, chunk in enumerate(chunks):
                                     rid = msg_id if i == 0 else None
                                     await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
-                            except Exception as e:
-                                logging.error(f"❌ /trend error: {e}")
-                                await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
                             continue
 
                         # ==========================================
