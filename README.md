@@ -266,8 +266,8 @@ sudo apt install python3.11 python3.11-venv python3.11-dev build-essential -y
 
 ### Step 2: Clone and Setup Environment
 ```bash
-git clone https://github.com/Aliskasq/AI-Alisa-CopilotClow-.git
-cd AI-Alisa-CopilotClow-
+git clone https://github.com/Aliskasq/AIAlisa.git
+cd AIAlisa
 
 # Create and activate virtual environment
 python3.11 -m venv venv
