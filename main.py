@@ -270,8 +270,18 @@ async def main():
                                     funding_history = await fetch_funding_history(session, symbol)
                                     last_indic_row["funding_rate"] = funding_history
 
+                                    # 3b. Multi-timeframe data for better AI accuracy
+                                    mtf_data = {}
+                                    if tf_key != "1D":
+                                        raw_1h = await fetch_klines(session, symbol, "1h", 99)
+                                        raw_15m = await fetch_klines(session, symbol, "15m", 99)
+                                        if raw_1h:
+                                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                                        if raw_15m:
+                                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+
                                     # 4. Request AI verdict
-                                    ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price)
+                                    ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
 
                                     # 5. Wait for confirmation from the send function (Returns True or False)
                                     is_sent = await send_breakout_notification(

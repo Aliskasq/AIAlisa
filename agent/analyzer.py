@@ -127,7 +127,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False) -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, mtf_data: dict = None) -> str:
     """
     OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
     and sends aggregated context to OpenRouter.
@@ -151,9 +151,6 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     change_recent = clean_indic.get("change_recent", 0.0)
     change_24h = clean_indic.get("change_24h", 0.0)
     recent_label = clean_indic.get("recent_label", "Recent")
-
-    # Format nice Fibonacci text
-    fibo_text = ", ".join([f"{k}: {v:.4f}" for k, v in clean_indic.get("fibo_levels", {}).items()])
 
     # Build dynamic text to avoid duplicate stats on 1D timeframe
     if recent_label.upper() == "1D" or tf_key.upper() == "1D":
@@ -257,6 +254,7 @@ CRITICAL RULES:
 4. Your response must be extremely structured.
 5. DO NOT ADD ANY HASHTAGS.
 6. STRICT LENGTH LIMIT: YOUR ENTIRE RESPONSE MUST BE UNDER 900 CHARACTERS. Keep the LOGIC section concise (maximum 5 short sentences).
+7. MULTI-TIMEFRAME: You receive data from 4H + 1H + 15m. Use ALL timeframes to determine direction. If lower TFs contradict higher TF — mention pullback/reversal risk. Entry price must NOT be current price — find optimal entry from support/OB levels across all TFs.
 
 MANDATORY OUTPUT STRUCTURE (Append below custom risk sentence if applicable):
 ${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}
@@ -268,25 +266,41 @@ ${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}
 """
 
 
-    # 2. FULL MATHEMATICAL DATA
-    user_prompt = f"""Evaluate {symbol} on {tf_key}. {breakout_context} {user_risk_text}
+    # 2. BUILD MULTI-TIMEFRAME DATA BLOCK
+    from core.indicators import format_tf_summary
 
-[BOT MATHEMATICAL DATA]
-Price: {price:.6f}
-Trend: {clean_indic.get("supertrend", "Unknown")} (Level: {clean_indic.get("supertrend_price", 0):.6f})
-ADX: {clean_indic.get("adx", 0):.2f} | MFI: {clean_indic.get("mfi", 0):.2f} | StochRSI K: {clean_indic.get("stoch_k", 0):.2f} / D: {clean_indic.get("stoch_d", 0):.2f}
-RSI(6): {clean_indic.get("rsi6", 0):.2f} | RSI(12): {clean_indic.get("rsi12", 0):.2f} | RSI(24): {clean_indic.get("rsi24", 0):.2f}
-MACD Line: {clean_indic.get("macd_line", 0):.6f} | Signal: {clean_indic.get("macd_signal", 0):.6f} | Histogram: {clean_indic.get("macd_hist", 0):.6f} ({'Bullish' if clean_indic.get("macd_hist", 0) > 0 else 'Bearish'})
-Volume Decay: {clean_indic.get("volume_decay", "Unknown")} | OBV Trend: {clean_indic.get("obv_status", "Unknown")} | CMF: {clean_indic.get("cmf", 0):.4f}
-Volume Blocks (10-candle): Old=[Buy {clean_indic.get("vol_blocks", {}).get("block1_buy_pct", 0)}% / Sell {clean_indic.get("vol_blocks", {}).get("block1_sell_pct", 0)}%] → New=[Buy {clean_indic.get("vol_blocks", {}).get("block2_buy_pct", 0)}% / Sell {clean_indic.get("vol_blocks", {}).get("block2_sell_pct", 0)}%] → {clean_indic.get("vol_blocks", {}).get("shift", "N/A")}
-Ichimoku: {clean_indic.get("ichimoku_status", "Unknown")}
-Bollinger: Upper={clean_indic.get("bb_upper", 0):.4f} | Mid={clean_indic.get("bb_mid", 0):.4f} | Lower={clean_indic.get("bb_lower", 0):.4f}
-VWAP: {clean_indic.get("vwap", 0):.4f}
-EMA: 7={clean_indic.get("ema7", 0):.4f}, 25={clean_indic.get("ema25", 0):.4f}, 99={clean_indic.get("ema99", 0):.4f}
-Funding: {clean_indic.get("funding_rate", "Unknown")}
-Bullish FVG: {clean_indic.get("smc_bullish_fvg", "None")} | Bearish FVG: {clean_indic.get("smc_bearish_fvg", "None")}
-Support OB: {clean_indic.get("smc_bullish_ob", "None")} | Resist OB: {clean_indic.get("smc_bearish_ob", "None")}
-Fibo: {fibo_text}
+    # Primary TF data (always present)
+    primary_tf_text = format_tf_summary(clean_indic, tf_key)
+
+    # Additional timeframes (if mtf_data provided)
+    mtf_text = ""
+    if mtf_data:
+        for mtf_label, mtf_indic in mtf_data.items():
+            # Clean NaN/Inf from each TF
+            clean_mtf = {}
+            for k, v in mtf_indic.items():
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    clean_mtf[k] = 0.0
+                else:
+                    clean_mtf[k] = v
+            mtf_text += "\n" + format_tf_summary(clean_mtf, mtf_label)
+
+    user_prompt = f"""Evaluate {symbol}. {breakout_context} {user_risk_text}
+
+[MULTI-TIMEFRAME ANALYSIS DATA]
+{primary_tf_text}
+{mtf_text}
+
+Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
+
+IMPORTANT — MULTI-TIMEFRAME RULES:
+- 4H = medium-term trend direction and strength
+- 1H = short-term momentum and early reversal signals
+- 15m = immediate price action and precise entry timing
+- If 4H is bullish but 1H/15m show reversal signals → WARN about pullback risk
+- If 4H is bearish but 15m shows bullish reversal → possible SHORT-TERM bounce only
+- Entry price should NOT be current price — find optimal entry using support/resistance from all TFs
+- Consider divergences between timeframes (e.g. RSI divergence on 15m while 4H trends up)
 """
 
     # ---------------------------------------------------------

@@ -28,17 +28,16 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['ema25'] = df['close'].ewm(span=25, adjust=False).mean()
     df['ema99'] = df['close'].ewm(span=99, adjust=False).mean()
 
-    # 2. RSI (6, 12, 24) — Binance standard periods
+    # 2. RSI (14) — standard period
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
 
-    for period in [6, 12, 24]:
-        avg_g = rma(gain, period)
-        avg_l = rma(loss, period)
-        rs = avg_g / avg_l.replace(0, np.nan)
-        df[f'rsi{period}'] = 100 - (100 / (1 + rs))
-        df[f'rsi{period}'] = df[f'rsi{period}'].fillna(50)
+    avg_g14 = rma(gain, 14)
+    avg_l14 = rma(loss, 14)
+    rs14 = avg_g14 / avg_l14.replace(0, np.nan)
+    df['rsi14'] = 100 - (100 / (1 + rs14))
+    df['rsi14'] = df['rsi14'].fillna(50)
 
     # 3. MACD
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
@@ -47,24 +46,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
     df['macd_hist'] = df['macd_line'] - df['macd_signal']
 
-    # 4. Volume Trend (Decay)
-    df['vol_sma5'] = df['volume'].rolling(5).mean()
-    df['vol_sma20'] = df['volume'].rolling(20).mean()
-    df['volume_decay'] = df['vol_sma5'] < df['vol_sma20']
-
-    # 5. Local Min/Max & Fibonacci Grid
-    local_min = df['low'].rolling(10).min().iloc[-1]
-    local_max = df['high'].rolling(10).max().iloc[-1]
-    diff_f = local_max - local_min if local_max != local_min else 1.0
-    fibo = {
-        "1.000": local_max,
-        "0.786": local_max - diff_f * 0.214,
-        "0.618": local_max - diff_f * 0.382,
-        "0.500": local_max - diff_f * 0.500,
-        "0.382": local_max - diff_f * 0.618,
-        "0.236": local_max - diff_f * 0.764,
-        "0.000": local_min
-    }
+    # 4. (Volume Decay & Fibonacci removed — low value, noise)
 
     # ==========================================
     # 🚀 ADVANCED INDICATORS (NEW)
@@ -187,46 +169,14 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['bb_lower'] = bb_sma - 2 * bb_std
     df['bb_mid'] = bb_sma
 
-    # 14. VWAP (Volume Weighted Average Price) — approximation over window
-    df['vwap'] = (df['volume'] * (df['high'] + df['low'] + df['close']) / 3).cumsum() / df['volume'].cumsum()
+    # 14. (VWAP removed — meaningless on 4H futures)
 
     # 15. CMF (Chaikin Money Flow, 20)
     mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low']).replace(0, np.nan)
     mf_volume = mf_multiplier * df['volume']
     df['cmf'] = mf_volume.rolling(20).sum() / df['volume'].rolling(20).sum()
 
-    # 16. Volume Block Analysis (2 blocks of 10 candles)
-    vol_analysis = {"block1": {}, "block2": {}, "shift": ""}
-    if len(df) >= 20:
-        block1 = df.iloc[-20:-10]  # older 10 candles
-        block2 = df.iloc[-10:]     # recent 10 candles
-
-        b1_green_vol = block1.loc[block1['close'] > block1['open'], 'volume'].sum()
-        b1_red_vol = block1.loc[block1['close'] <= block1['open'], 'volume'].sum()
-        b2_green_vol = block2.loc[block2['close'] > block2['open'], 'volume'].sum()
-        b2_red_vol = block2.loc[block2['close'] <= block2['open'], 'volume'].sum()
-
-        b1_total = b1_green_vol + b1_red_vol if (b1_green_vol + b1_red_vol) > 0 else 1
-        b2_total = b2_green_vol + b2_red_vol if (b2_green_vol + b2_red_vol) > 0 else 1
-
-        b1_buy_pct = round(b1_green_vol / b1_total * 100, 1)
-        b2_buy_pct = round(b2_green_vol / b2_total * 100, 1)
-
-        # Determine power shift
-        if b2_buy_pct > b1_buy_pct + 5:
-            shift = "🟢 Buyers gaining strength"
-        elif b1_buy_pct > b2_buy_pct + 5:
-            shift = "🔴 Sellers gaining strength"
-        else:
-            shift = "⚪ Balanced / No clear shift"
-
-        vol_analysis = {
-            "block1_buy_pct": b1_buy_pct,
-            "block1_sell_pct": round(100 - b1_buy_pct, 1),
-            "block2_buy_pct": b2_buy_pct,
-            "block2_sell_pct": round(100 - b2_buy_pct, 1),
-            "shift": shift
-        }
+    # 16. (Volume Blocks removed — low signal, noise)
 
     # ==========================================
     # 🧠 SMART MONEY CONCEPTS (SMC)
@@ -336,15 +286,11 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "change_24h": round(change_24h, 2),
         "recent_label": recent_label,
         "ema7": last['ema7'], "ema25": last['ema25'], "ema99": last['ema99'],
-        "rsi6": last['rsi6'],
-        "rsi12": last['rsi12'],
-        "rsi24": last['rsi24'],
+        "rsi14": last['rsi14'],
         "macd_line": last['macd_line'],
         "macd_signal": last['macd_signal'],
-        "obv_status": obv_status,
         "macd_hist": last['macd_hist'],
-        "volume_decay": "Yes" if last['volume_decay'] else "No",
-        "fibo_levels": fibo,
+        "obv_status": obv_status,
         "supertrend": "🟢 BULLISH" if last['supertrend_dir'] == 1 else "🔴 BEARISH",
         "supertrend_price": last['supertrend'],
         "adx": last['adx'],
@@ -352,11 +298,9 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "mfi": last['mfi'],
         "ichimoku_status": ichi_status,
         "funding_rate": df.get("funding_rate", "Unknown"),
-        "vol_blocks": vol_analysis,
         "bb_upper": last['bb_upper'],
         "bb_lower": last['bb_lower'],
         "bb_mid": last['bb_mid'],
-        "vwap": last['vwap'],
         "cmf": last['cmf'],
         "smc_bullish_ob": bullish_ob,
         "smc_bearish_ob": bearish_ob,
@@ -365,3 +309,19 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     }
 
     return last_indic_row, df
+
+
+def format_tf_summary(indic: dict, tf_label: str) -> str:
+    """Format one timeframe's indicators into a compact text block for AI prompt."""
+    return (
+        f"=== {tf_label} ===\n"
+        f"Price: {indic['close']:.6f} | Change: {indic.get('change_recent', 0):+.2f}% ({indic.get('recent_label', tf_label)}) | 24h: {indic.get('change_24h', 0):+.2f}%\n"
+        f"EMA7: {indic['ema7']:.6f} | EMA25: {indic['ema25']:.6f} | EMA99: {indic['ema99']:.6f}\n"
+        f"RSI(14): {indic['rsi14']:.1f} | StochRSI K/D: {indic['stoch_k']:.1f}/{indic['stoch_d']:.1f} | MFI: {indic['mfi']:.1f}\n"
+        f"MACD: {indic['macd_line']:.6f} / Signal: {indic['macd_signal']:.6f} / Hist: {indic['macd_hist']:.6f}\n"
+        f"SuperTrend: {indic['supertrend']} @ {indic['supertrend_price']:.6f} | ADX: {indic['adx']:.1f}\n"
+        f"Bollinger: {indic['bb_lower']:.6f} / {indic['bb_mid']:.6f} / {indic['bb_upper']:.6f}\n"
+        f"Ichimoku: {indic['ichimoku_status']} | OBV: {indic['obv_status']} | CMF: {indic['cmf']:.4f}\n"
+        f"SMC — Bull OB: {indic['smc_bullish_ob']} | Bear OB: {indic['smc_bearish_ob']}\n"
+        f"SMC — Bull FVG: {indic['smc_bullish_fvg']} | Bear FVG: {indic['smc_bearish_fvg']}"
+    )

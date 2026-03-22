@@ -947,130 +947,104 @@ async def telegram_polling_loop(app_session):
                                 learn_symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
                                 short_coin = learn_symbol.replace("USDT", "")
 
-                                learn_load = f"📚 Analyzing {learn_symbol} indicators..." if lang_pref == "en" else f"📚 Анализирую индикаторы {learn_symbol}..."
+                                learn_load = f"📚 Analyzing {learn_symbol} on 4H + 1H + 15m..." if lang_pref == "en" else f"📚 Анализирую {learn_symbol} на 4Ч + 1Ч + 15м..."
                                 await send_response(app_session, chat_id, learn_load, msg_id)
 
-                                raw_df = await fetch_klines(app_session, learn_symbol, "4h", 100)
-                                if raw_df:
-                                    df = pd.DataFrame(raw_df)
-                                    row, _ = calculate_binance_indicators(df, "4H")
+                                raw_4h = await fetch_klines(app_session, learn_symbol, "4h", 99)
+                                raw_1h = await fetch_klines(app_session, learn_symbol, "1h", 99)
+                                raw_15m = await fetch_klines(app_session, learn_symbol, "15m", 99)
+
+                                if raw_4h:
+                                    row_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
+                                    row_1h = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0] if raw_1h else None
+                                    row_15m = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0] if raw_15m else None
                                     funding = await fetch_funding_rate(app_session, learn_symbol)
 
-                                    price = row.get("close", 0)
-                                    rsi6 = row.get("rsi6", 0)
-                                    rsi12 = row.get("rsi12", 0)
-                                    rsi24 = row.get("rsi24", 0)
-                                    mfi = row.get("mfi", 0)
-                                    adx = row.get("adx", 0)
-                                    stoch = row.get("stoch_k", 0)
-                                    macd_line = row.get("macd_line", 0)
-                                    macd_sig = row.get("macd_signal", 0)
-                                    macd_h = row.get("macd_hist", 0)
-                                    obv = row.get("obv_status", "Unknown")
-                                    ichimoku = row.get("ichimoku_status", "Unknown")
-                                    supertrend = row.get("supertrend", "Unknown")
-                                    vol_decay = row.get("volume_decay", "Unknown")
+                                    def _fmt_tf_learn(row, tf_label, lang):
+                                        price = row.get("close", 0)
+                                        rsi = row.get("rsi14", 0)
+                                        mfi = row.get("mfi", 0)
+                                        adx = row.get("adx", 0)
+                                        stoch = row.get("stoch_k", 0)
+                                        macd_h = row.get("macd_hist", 0)
+                                        obv = row.get("obv_status", "Unknown")
+                                        ichimoku = row.get("ichimoku_status", "Unknown")
+                                        supertrend = row.get("supertrend", "Unknown")
+                                        cmf = row.get("cmf", 0)
 
+                                        if lang == "ru":
+                                            rsi_n = "перекупленность ⚠️" if rsi > 70 else "перепроданность 🟢" if rsi < 30 else "нейтрально"
+                                            mfi_n = "перекупленность" if mfi > 80 else "перепроданность" if mfi < 20 else "нейтрально"
+                                            adx_n = "сильный тренд 💪" if adx > 25 else "слабый/боковой"
+                                            stoch_n = "перекупленность" if stoch > 80 else "перепроданность" if stoch < 20 else "нейтрально"
+                                            macd_n = "бычий 📈" if macd_h > 0 else "медвежий 📉"
+                                            return (
+                                                f"⏱ *{tf_label}* | Цена: `${price:.6f}`\n"
+                                                f"• RSI(14): `{rsi:.1f}` → {rsi_n}\n"
+                                                f"• MFI: `{mfi:.1f}` → {mfi_n} | ADX: `{adx:.1f}` → {adx_n}\n"
+                                                f"• StochRSI: `{stoch:.1f}` → {stoch_n} | MACD: {macd_n}\n"
+                                                f"• SuperTrend: {supertrend} | Ichimoku: {ichimoku}\n"
+                                                f"• OBV: {obv} | CMF: `{cmf:.4f}`\n"
+                                                f"• BB: `{row.get('bb_lower',0):.4f}` / `{row.get('bb_mid',0):.4f}` / `{row.get('bb_upper',0):.4f}`\n"
+                                            )
+                                        else:
+                                            rsi_n = "overbought ⚠️" if rsi > 70 else "oversold 🟢" if rsi < 30 else "neutral"
+                                            mfi_n = "overbought" if mfi > 80 else "oversold" if mfi < 20 else "neutral"
+                                            adx_n = "strong trend 💪" if adx > 25 else "weak/sideways"
+                                            stoch_n = "overbought" if stoch > 80 else "oversold" if stoch < 20 else "neutral"
+                                            macd_n = "bullish 📈" if macd_h > 0 else "bearish 📉"
+                                            return (
+                                                f"⏱ *{tf_label}* | Price: `${price:.6f}`\n"
+                                                f"• RSI(14): `{rsi:.1f}` → {rsi_n}\n"
+                                                f"• MFI: `{mfi:.1f}` → {mfi_n} | ADX: `{adx:.1f}` → {adx_n}\n"
+                                                f"• StochRSI: `{stoch:.1f}` → {stoch_n} | MACD: {macd_n}\n"
+                                                f"• SuperTrend: {supertrend} | Ichimoku: {ichimoku}\n"
+                                                f"• OBV: {obv} | CMF: `{cmf:.4f}`\n"
+                                                f"• BB: `{row.get('bb_lower',0):.4f}` / `{row.get('bb_mid',0):.4f}` / `{row.get('bb_upper',0):.4f}`\n"
+                                            )
+
+                                    header = f"📚 *{'Обучение' if lang_pref == 'ru' else 'Learn'}: {short_coin}*\n"
+                                    header += f"💰 {'Funding Rate' if lang_pref == 'en' else 'Ставка финансирования'}: `{funding}`\n\n"
+
+                                    # Explanations block
                                     if lang_pref == "ru":
-                                        def rsi_note_ru(v): return "перекупленность ⚠️" if v > 70 else "перепроданность 🟢" if v < 30 else "нейтрально"
-                                        mfi_note = "перекупленность (давление продавцов)" if mfi > 80 else "перепроданность (давление покупателей)" if mfi < 20 else "нейтрально"
-                                        adx_note = "сильный тренд 💪" if adx > 25 else "слабый/боковой тренд"
-                                        stoch_note = "перекупленность" if stoch > 80 else "перепроданность" if stoch < 20 else "нейтрально"
-                                        macd_note = "бычий импульс 📈" if macd_h > 0 else "медвежий импульс 📉"
-
-                                        learn_text = (
-                                            f"📚 *Обучение: {short_coin}* (4H)\n"
-                                            f"💰 Цена: `${price:.6f}`\n\n"
-                                            f"📊 *Индикаторы:*\n"
-                                            f"• *RSI(6)* = `{rsi6:.1f}` → {rsi_note_ru(rsi6)}\n"
-                                            f"• *RSI(12)* = `{rsi12:.1f}` → {rsi_note_ru(rsi12)}\n"
-                                            f"• *RSI(24)* = `{rsi24:.1f}` → {rsi_note_ru(rsi24)}\n"
-                                            f"  _RSI показывает скорость изменения цены (0-100). >70 = перекупленность, <30 = перепроданность_\n\n"
-                                            f"• *MFI* = `{mfi:.1f}` → {mfi_note}\n"
-                                            f"  _Money Flow Index — RSI с учётом объёма. Показывает давление денег_\n\n"
-                                            f"• *ADX* = `{adx:.1f}` → {adx_note}\n"
-                                            f"  _Сила тренда (не направление). >25 = тренд, <20 = флэт_\n\n"
-                                            f"• *StochRSI* = `{stoch:.1f}` → {stoch_note}\n"
-                                            f"  _Более чувствительный RSI. Помогает ловить развороты_\n\n"
-                                            f"• *MACD*: Line=`{macd_line:.6f}` Signal=`{macd_sig:.6f}`\n"
-                                            f"  Histogram=`{macd_h:.6f}` → {macd_note}\n"
-                                            f"  _MACD(12,26,9). Гистограмма > 0 = бычий импульс_\n\n"
-                                            f"• *OBV* → `{obv}`\n"
-                                            f"  _Объём покупок vs продаж. Бычий = накопление, медвежий = распределение_\n\n"
-                                            f"• *Ichimoku* → `{ichimoku}`\n"
-                                            f"  _Облако Ишимоку. Выше облака = бычий тренд, ниже = медвежий_\n\n"
-                                            f"• *SuperTrend* → `{supertrend}`\n"
-                                            f"  _Направление основного тренда на основе ATR_\n\n"
-                                            f"• *Volume Decay* → `{vol_decay}`\n"
-                                            f"  _Затухание/рост объёмов. Accumulation = рост интереса_\n\n"
-                                            f"• *Bollinger Bands* → Upper: `${row.get('bb_upper',0):.4f}` Mid: `${row.get('bb_mid',0):.4f}` Lower: `${row.get('bb_lower',0):.4f}`\n"
-                                            f"  _Канал волатильности. Цена у верхней = перекупленность, у нижней = перепроданность_\n\n"
-                                            f"• *VWAP* → `${row.get('vwap',0):.4f}`\n"
-                                            f"  _Средневзвешенная цена по объёму. Выше VWAP = бычий контроль_\n\n"
-                                            f"• *CMF* → `{row.get('cmf',0):.4f}`\n"
-                                            f"  _Chaikin Money Flow. >0 = покупатели доминируют, <0 = продавцы_\n\n"
-                                            f"• *Volume Blocks* →\n"
-                                            f"  Блок 1 (старый): Buy `{row.get('vol_blocks',{}).get('block1_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block1_sell_pct',0)}%`\n"
-                                            f"  Блок 2 (свежий): Buy `{row.get('vol_blocks',{}).get('block2_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block2_sell_pct',0)}%`\n"
-                                            f"  Сдвиг: {row.get('vol_blocks',{}).get('shift','N/A')}\n"
-                                            f"  _Сравнение объёмов покупок и продаж за 20 свечей (2 блока по 10). Показывает кто набирает силу_\n\n"
-                                            f"• *Funding Rate* → `{funding}`\n"
-                                            f"  _Ставка финансирования фьючерсов. + = лонги платят шортам_"
+                                        explain = (
+                                            "📖 *Что означают индикаторы:*\n"
+                                            "• *RSI(14)* — скорость изменения цены (>70 перекуплен, <30 перепродан)\n"
+                                            "• *MFI* — RSI с объёмом, давление денег\n"
+                                            "• *ADX* — сила тренда (>25 тренд, <20 флэт)\n"
+                                            "• *StochRSI* — чувствительный RSI для разворотов\n"
+                                            "• *MACD* — импульс тренда (гистограмма >0 = бычий)\n"
+                                            "• *SuperTrend* — направление тренда по ATR\n"
+                                            "• *Ichimoku* — облако (выше = бычий, ниже = медвежий)\n"
+                                            "• *OBV* — баланс объёмов (накопление/распределение)\n"
+                                            "• *CMF* — денежный поток (>0 покупатели, <0 продавцы)\n"
+                                            "• *BB* — канал волатильности\n"
                                         )
                                     else:
-                                        def rsi_note_en(v): return "overbought ⚠️" if v > 70 else "oversold 🟢" if v < 30 else "neutral"
-                                        mfi_note = "overbought (sell pressure)" if mfi > 80 else "oversold (buy pressure)" if mfi < 20 else "neutral"
-                                        adx_note = "strong trend 💪" if adx > 25 else "weak/sideways"
-                                        stoch_note = "overbought" if stoch > 80 else "oversold" if stoch < 20 else "neutral"
-                                        macd_note = "bullish momentum 📈" if macd_h > 0 else "bearish momentum 📉"
-
-                                        learn_text = (
-                                            f"📚 *Learn: {short_coin}* (4H)\n"
-                                            f"💰 Price: `${price:.6f}`\n\n"
-                                            f"📊 *Indicators Explained:*\n"
-                                            f"• *RSI(6)* = `{rsi6:.1f}` → {rsi_note_en(rsi6)}\n"
-                                            f"• *RSI(12)* = `{rsi12:.1f}` → {rsi_note_en(rsi12)}\n"
-                                            f"• *RSI(24)* = `{rsi24:.1f}` → {rsi_note_en(rsi24)}\n"
-                                            f"  _RSI measures price momentum (0-100). >70 = overbought, <30 = oversold_\n\n"
-                                            f"• *MFI* = `{mfi:.1f}` → {mfi_note}\n"
-                                            f"  _Money Flow Index — RSI weighted by volume. Shows money pressure_\n\n"
-                                            f"• *ADX* = `{adx:.1f}` → {adx_note}\n"
-                                            f"  _Trend strength (not direction). >25 = trending, <20 = ranging_\n\n"
-                                            f"• *StochRSI* = `{stoch:.1f}` → {stoch_note}\n"
-                                            f"  _More sensitive RSI. Helps catch reversals early_\n\n"
-                                            f"• *MACD*: Line=`{macd_line:.6f}` Signal=`{macd_sig:.6f}`\n"
-                                            f"  Histogram=`{macd_h:.6f}` → {macd_note}\n"
-                                            f"  _MACD(12,26,9). Histogram > 0 = bullish momentum_\n\n"
-                                            f"• *OBV* → `{obv}`\n"
-                                            f"  _On-Balance Volume. Bullish = accumulation, Bearish = distribution_\n\n"
-                                            f"• *Ichimoku* → `{ichimoku}`\n"
-                                            f"  _Ichimoku Cloud. Above cloud = bullish, below = bearish_\n\n"
-                                            f"• *SuperTrend* → `{supertrend}`\n"
-                                            f"  _Main trend direction based on ATR volatility_\n\n"
-                                            f"• *Volume Decay* → `{vol_decay}`\n"
-                                            f"  _Volume momentum. Accumulation = growing interest_\n\n"
-                                            f"• *Bollinger Bands* → Upper: `${row.get('bb_upper',0):.4f}` Mid: `${row.get('bb_mid',0):.4f}` Lower: `${row.get('bb_lower',0):.4f}`\n"
-                                            f"  _Volatility channel. Price near upper = overbought, near lower = oversold_\n\n"
-                                            f"• *VWAP* → `${row.get('vwap',0):.4f}`\n"
-                                            f"  _Volume Weighted Average Price. Above VWAP = bullish control_\n\n"
-                                            f"• *CMF* → `{row.get('cmf',0):.4f}`\n"
-                                            f"  _Chaikin Money Flow. >0 = buyers dominate, <0 = sellers dominate_\n\n"
-                                            f"• *Volume Blocks* →\n"
-                                            f"  Block 1 (older): Buy `{row.get('vol_blocks',{}).get('block1_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block1_sell_pct',0)}%`\n"
-                                            f"  Block 2 (recent): Buy `{row.get('vol_blocks',{}).get('block2_buy_pct',0)}%` / Sell `{row.get('vol_blocks',{}).get('block2_sell_pct',0)}%`\n"
-                                            f"  Shift: {row.get('vol_blocks',{}).get('shift','N/A')}\n"
-                                            f"  _Compares buy vs sell volume over 20 candles (2 blocks of 10). Shows who's gaining power_\n\n"
-                                            f"• *Funding Rate* → `{funding}`\n"
-                                            f"  _Futures funding. Positive = longs pay shorts_"
+                                        explain = (
+                                            "📖 *Indicator Guide:*\n"
+                                            "• *RSI(14)* — momentum (>70 overbought, <30 oversold)\n"
+                                            "• *MFI* — RSI with volume, money pressure\n"
+                                            "• *ADX* — trend strength (>25 trending, <20 ranging)\n"
+                                            "• *StochRSI* — sensitive RSI for reversals\n"
+                                            "• *MACD* — trend momentum (histogram >0 = bullish)\n"
+                                            "• *SuperTrend* — trend direction via ATR\n"
+                                            "• *Ichimoku* — cloud (above = bullish, below = bearish)\n"
+                                            "• *OBV* — volume balance (accumulation/distribution)\n"
+                                            "• *CMF* — money flow (>0 buyers, <0 sellers)\n"
+                                            "• *BB* — volatility channel\n"
                                         )
 
-                                    # Split if too long for one message
-                                    if len(learn_text) > 4000:
-                                        mid = learn_text.rfind("\n\n", 0, 4000)
-                                        await send_response(app_session, chat_id, learn_text[:mid], msg_id, parse_mode="Markdown")
-                                        await send_response(app_session, chat_id, learn_text[mid:], parse_mode="Markdown")
-                                    else:
-                                        await send_response(app_session, chat_id, learn_text, msg_id, parse_mode="Markdown")
+                                    msg1 = header + _fmt_tf_learn(row_4h, "4H", lang_pref) + "\n"
+                                    if row_1h:
+                                        msg1 += _fmt_tf_learn(row_1h, "1H", lang_pref) + "\n"
+                                    if row_15m:
+                                        msg1 += _fmt_tf_learn(row_15m, "15m", lang_pref)
+
+                                    # Send data first, then explanations
+                                    await send_response(app_session, chat_id, msg1, msg_id, parse_mode="Markdown")
+                                    await send_response(app_session, chat_id, explain, parse_mode="Markdown")
                                 else:
                                     await send_response(app_session, chat_id, f"⚠️ Pair `{learn_symbol}` not found on Binance Futures.", msg_id, parse_mode="Markdown")
                             else:
@@ -1564,14 +1538,27 @@ async def telegram_polling_loop(app_session):
 
                             # Fetch 199 candles for trend line construction (same as main scanner)
                             raw_df_full = await fetch_klines(app_session, symbol, "4h", 199)
-                            # Also fetch 100 for indicators (lighter)
-                            raw_df = await fetch_klines(app_session, symbol, "4h", 100)
+                            # Fetch multi-timeframe: 4H (primary) + 1H + 15m
+                            raw_df_4h = await fetch_klines(app_session, symbol, "4h", 99)
+                            raw_df_1h = await fetch_klines(app_session, symbol, "1h", 99)
+                            raw_df_15m = await fetch_klines(app_session, symbol, "15m", 99)
+
+                            raw_df = raw_df_4h  # primary TF for compatibility
 
                             if raw_df:
                                 df = pd.DataFrame(raw_df)
                                 last_row, full_df = calculate_binance_indicators(df, "4H")
                                 funding = await fetch_funding_rate(app_session, symbol)
                                 last_row["funding_rate"] = funding
+
+                                # Build multi-TF data
+                                mtf_data = {}
+                                if raw_df_1h:
+                                    indic_1h, _ = calculate_binance_indicators(pd.DataFrame(raw_df_1h), "1H")
+                                    mtf_data["1H"] = indic_1h
+                                if raw_df_15m:
+                                    indic_15m, _ = calculate_binance_indicators(pd.DataFrame(raw_df_15m), "15m")
+                                    mtf_data["15m"] = indic_15m
 
                                 # Build telegram_stream dict for live AI streaming
                                 tg_stream = None
@@ -1583,7 +1570,7 @@ async def telegram_polling_loop(app_session):
                                         "bot_token": BOT_TOKEN
                                     }
 
-                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True)
+                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mtf_data=mtf_data)
 
                                 # Schedule delayed deletion of streaming message (15s after chart sent)
                                 async def _delayed_delete(sess, cid, mid, delay=15):
@@ -1724,12 +1711,19 @@ async def telegram_polling_loop(app_session):
                                     if not coin_to_analyze.endswith("USDT"):
                                         coin_to_analyze += "USDT"
 
-                                raw_df = await fetch_klines(app_session, coin_to_analyze, "4h", 100)
-                                if raw_df:
-                                    last_row, _ = calculate_binance_indicators(pd.DataFrame(raw_df), "4H")
+                                raw_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 99)
+                                raw_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 99)
+                                raw_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 99)
+                                if raw_4h:
+                                    last_row, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
                                     funding = await fetch_funding_rate(app_session, coin_to_analyze)
                                     last_row["funding_rate"] = funding
-                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref)
+                                    mtf_data = {}
+                                    if raw_1h:
+                                        mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                                    if raw_15m:
+                                        mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mtf_data=mtf_data)
                                     await send_response(app_session, chat_id, ai_msg, msg_id)
 
         except Exception as e:
