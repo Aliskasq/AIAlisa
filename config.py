@@ -37,6 +37,48 @@ TREND_STATE_FILE = "data/trend_state.json"
 ALERTS_FILE = "data/pending_alerts.json"
 BREAKOUT_LOG_FILE = "data/breakout_log.json"
 PRICE_ALERTS_FILE = "data/price_alerts.json"
+VIRTUAL_BANK_FILE = "data/virtual_bank.json"
+
+# --- VIRTUAL BANK ($10,000 starting) ---
+VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
+
+def load_virtual_bank():
+    if os.path.exists(VIRTUAL_BANK_FILE):
+        try:
+            with open(VIRTUAL_BANK_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Error reading virtual bank: {e}")
+    return {"starting_balance": 10000, "balance": 10000, "total_trades": 0, "total_wins": 0, "total_losses": 0, "history": []}
+
+def save_virtual_bank(bank):
+    try:
+        os.makedirs(os.path.dirname(VIRTUAL_BANK_FILE), exist_ok=True)
+        with open(VIRTUAL_BANK_FILE, "w") as f:
+            json.dump(bank, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing virtual bank: {e}")
+
+def update_bank_with_trades(trades_pnl):
+    """Update bank balance with list of (symbol, pnl_pct, pnl_dollar) tuples.
+    Returns updated bank dict."""
+    bank = load_virtual_bank()
+    for symbol, pnl_pct, pnl_dollar in trades_pnl:
+        bank["balance"] += pnl_dollar
+        bank["total_trades"] += 1
+        if pnl_pct >= 0:
+            bank["total_wins"] += 1
+        else:
+            bank["total_losses"] += 1
+        bank["history"].append({
+            "symbol": symbol,
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_dollar": round(pnl_dollar, 2),
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        })
+    bank["balance"] = round(bank["balance"], 2)
+    save_virtual_bank(bank)
+    return bank
 
 def load_alerts():
     if os.path.exists(ALERTS_FILE):

@@ -6,7 +6,9 @@ import os
 import pandas as pd
 import json
 from datetime import datetime, timezone, timedelta
-from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts, save_price_alerts
+from config import (BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts,
+                     save_price_alerts, load_virtual_bank, save_virtual_bank, update_bank_with_trades,
+                     VIRTUAL_BANK_POSITION_SIZE)
 
 # --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
 PAPER_FILE = "data/paper_portfolio.json"
@@ -201,7 +203,7 @@ async def build_trend_text(session: aiohttp.ClientSession, lang: str = "ru") -> 
 
 
 async def auto_trend_sender(session: aiohttp.ClientSession):
-    """Background task: sends /trend summary to group at 23:57 UTC daily."""
+    """Background task: at 23:57 UTC daily — send summary to TG, update virtual bank, clear breakout log."""
     while True:
         try:
             now = datetime.now(timezone.utc)
@@ -214,20 +216,111 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             logging.info(f"📊 Trend auto-sender sleeping {sleep_sec:.0f}s until {target.strftime('%Y-%m-%d %H:%M')} UTC")
             await asyncio.sleep(sleep_sec)
 
-            # Build and send trend summary
-            trend_text = await build_trend_text(session)
-            if "Нет пробитий" not in trend_text:
-                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            log = load_breakout_log()
+
+            if not log:
+                logging.info("📭 No breakouts to report, skipping auto-trend.")
+                await asyncio.sleep(120)
+                continue
+
+            # Fetch all prices in batch
+            price_map = {}
+            try:
+                async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                    if resp.status == 200:
+                        all_prices = await resp.json()
+                        for p in all_prices:
+                            price_map[p["symbol"]] = float(p["price"])
+            except Exception as e:
+                logging.error(f"❌ Daily summary price fetch: {e}")
+
+            trades_pnl = []
+            day_wins = 0
+            day_losses = 0
+            trade_lines = []
+
+            for entry in log:
+                sym = entry["symbol"]
+                bp = entry.get("breakout_price", 0)
+                tf = entry.get("tf", "?")
+                ai_dir = entry.get("ai_direction", "")
+                now_price = price_map.get(sym, entry.get("current_price", 0))
+
+                pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
+                pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
+
+                trades_pnl.append((sym, pnl_pct, pnl_dollar))
+
+                if pnl_pct > 0:
+                    day_wins += 1
+                    icon = "🟢"
+                else:
+                    day_losses += 1
+                    icon = "🔴"
+
+                ai_mark = ""
+                if ai_dir:
+                    ai_ok = (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0)
+                    ai_mark = "✅" if ai_ok else "❌"
+
+                short_sym = sym.replace("USDT", "")
+                trade_lines.append(
+                    f"{icon}{ai_mark} `{short_sym}` {tf} | `{bp:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$)"
+                )
+
+            # Update virtual bank
+            bank = update_bank_with_trades(trades_pnl)
+
+            day_total = day_wins + day_losses
+            day_pnl_dollar = sum(t[2] for t in trades_pnl)
+            day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
+            total_pnl = bank["balance"] - bank["starting_balance"]
+            total_pnl_pct = (total_pnl / bank["starting_balance"]) * 100
+            total_wr = (bank["total_wins"] / (bank["total_wins"] + bank["total_losses"]) * 100) if (bank["total_wins"] + bank["total_losses"]) > 0 else 0
+
+            summary = (
+                f"🕐 *Ежедневный итог (23:57 UTC)*\n\n"
+                f"🏦 *Виртуальный банк*\n"
+                f"💰 Старт: `${bank['starting_balance']:,.2f}` → Текущий: `${bank['balance']:,.2f}`\n"
+                f"📊 Общий P&L: `{'+' if total_pnl >= 0 else ''}{total_pnl:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
+                f"📅 *Сегодня:*\n"
+                f"✅ Плюс: {day_wins} шт ({day_wr:.0f}%) | ❌ Минус: {day_losses} шт ({100-day_wr:.0f}%)\n"
+                f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
+                f"📈 *Всего за всё время:*\n"
+                f"✅ {bank['total_wins']} ({total_wr:.0f}%) | ❌ {bank['total_losses']} ({100-total_wr:.0f}%) | 🔢 {bank['total_trades']} сделок\n"
+                f"{'─' * 30}\n"
+            )
+
+            # Build chunks for trades
+            all_msgs = []
+            current_chunk = summary
+            for line in trade_lines:
+                if len(current_chunk) + len(line) + 2 > 3900:
+                    all_msgs.append(current_chunk)
+                    current_chunk = line
+                else:
+                    current_chunk += "\n" + line
+            if current_chunk:
+                all_msgs.append(current_chunk)
+
+            # Send to group
+            tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            for chunk in all_msgs:
                 payload = {
                     "chat_id": GROUP_CHAT_ID,
-                    "text": f"🕐 *Ежедневный итог пробитий (23:57 UTC):*\n\n{trend_text}",
+                    "text": chunk,
                     "parse_mode": "Markdown"
                 }
-                await session.post(url, json=payload)
-                logging.info("✅ Auto trend summary sent to group.")
-            else:
-                logging.info("📭 No breakouts to report, skipping auto-trend.")
-            
+                await session.post(tg_url, json=payload)
+                await asyncio.sleep(0.5)
+
+            logging.info(f"✅ Daily summary sent. Bank: ${bank['balance']:.2f}, day P&L: {day_pnl_dollar:+.2f}$")
+
+            # Clear breakout log AFTER sending & updating bank
+            from config import clear_breakout_log
+            clear_breakout_log()
+            logging.info("🧹 Breakout log cleared for next day.")
+
             await asyncio.sleep(120)  # Prevent double-trigger
         except Exception as e:
             logging.error(f"❌ Auto trend sender error: {e}")
@@ -989,64 +1082,142 @@ async def telegram_polling_loop(app_session):
                         # ==========================================
                         if text.startswith("/signal"):
                             log = load_breakout_log()
+                            bank = load_virtual_bank()
+
                             if not log:
-                                no_signals = "📭 No signals recorded since last scan." if lang_pref == "en" else "📭 Нет записанных сигналов с последнего скана."
-                                await send_response(app_session, chat_id, no_signals, msg_id)
+                                # Show bank stats even if no today signals
+                                total_t = bank["total_trades"]
+                                total_w = bank["total_wins"]
+                                total_l = bank["total_losses"]
+                                total_pend = 0
+                                wr = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+                                pnl_dollar = bank["balance"] - bank["starting_balance"]
+                                pnl_pct = (pnl_dollar / bank["starting_balance"]) * 100
+
+                                if lang_pref == "ru":
+                                    bank_text = (
+                                        f"🏦 *Виртуальный банк*\n\n"
+                                        f"💰 Старт: `${bank['starting_balance']:,.2f}`\n"
+                                        f"💵 Текущий: `${bank['balance']:,.2f}`\n"
+                                        f"📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n"
+                                        f"✅ Плюс: {total_w} ({wr:.0f}%)\n"
+                                        f"❌ Минус: {total_l} ({100-wr:.0f}%)\n"
+                                        f"📈 Всего сделок: {total_t}\n\n"
+                                        f"📭 Сегодня пока нет сигналов."
+                                    )
+                                else:
+                                    bank_text = (
+                                        f"🏦 *Virtual Bank*\n\n"
+                                        f"💰 Start: `${bank['starting_balance']:,.2f}`\n"
+                                        f"💵 Current: `${bank['balance']:,.2f}`\n"
+                                        f"📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n"
+                                        f"✅ Wins: {total_w} ({wr:.0f}%)\n"
+                                        f"❌ Losses: {total_l} ({100-wr:.0f}%)\n"
+                                        f"📈 Total trades: {total_t}\n\n"
+                                        f"📭 No signals today yet."
+                                    )
+                                await send_response(app_session, chat_id, bank_text, msg_id, parse_mode="Markdown")
                                 continue
 
-                            wins = 0
-                            losses = 0
-                            lines = []
+                            # Fetch all current prices in one batch
+                            price_map = {}
+                            try:
+                                async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                                    if resp.status == 200:
+                                        all_prices = await resp.json()
+                                        for p in all_prices:
+                                            price_map[p["symbol"]] = float(p["price"])
+                            except Exception:
+                                pass
+
+                            day_wins = 0
+                            day_losses = 0
+                            day_pending = 0
+                            day_pnl_dollar = 0.0
+                            trade_lines = []
+
                             for entry in log:
                                 sym = entry["symbol"]
                                 bp = entry.get("breakout_price", 0)
-                                cp = entry.get("current_price", 0)
                                 tf = entry.get("tf", "?")
-                                t = entry.get("time", "")[:16].replace("T", " ")
-
-                                # Check current price to see if signal was profitable
-                                try:
-                                    async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as resp:
-                                        if resp.status == 200:
-                                            data = await resp.json()
-                                            now_price = float(data["price"])
-                                        else:
-                                            now_price = cp
-                                except Exception:
-                                    now_price = cp
+                                ai_dir = entry.get("ai_direction", "")
+                                now_price = price_map.get(sym, entry.get("current_price", 0))
 
                                 pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
+                                pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
+
                                 if pnl_pct > 0:
-                                    wins += 1
+                                    day_wins += 1
                                     icon = "🟢"
                                 else:
-                                    losses += 1
+                                    day_losses += 1
                                     icon = "🔴"
 
-                                short_sym = sym.replace("USDT", "")
-                                lines.append(f"{icon} `{short_sym}` {tf} | Entry: `{bp:.6f}` → Now: `{now_price:.6f}` ({pnl_pct:+.2f}%)")
+                                day_pnl_dollar += pnl_dollar
 
-                            total = wins + losses
-                            winrate = (wins / total * 100) if total > 0 else 0
+                                # AI accuracy mark
+                                ai_mark = ""
+                                if ai_dir:
+                                    ai_ok = (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0)
+                                    ai_mark = "✅" if ai_ok else "❌"
+
+                                short_sym = sym.replace("USDT", "")
+                                trade_lines.append(
+                                    f"{icon}{ai_mark} `{short_sym}` {tf} | `{bp:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$)"
+                                )
+
+                            # Overall bank stats
+                            total_w = bank["total_wins"] + day_wins
+                            total_l = bank["total_losses"] + day_losses
+                            total_t = bank["total_trades"] + day_wins + day_losses
+                            wr_all = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+                            projected_balance = bank["balance"] + day_pnl_dollar
+                            total_pnl_dollar = projected_balance - bank["starting_balance"]
+                            total_pnl_pct = (total_pnl_dollar / bank["starting_balance"]) * 100
+
+                            day_total = day_wins + day_losses
+                            day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
 
                             if lang_pref == "ru":
                                 header = (
-                                    f"🏆 *Точность сигналов AiAlisa*\n\n"
-                                    f"📊 Всего: {total} | ✅ Profit: {wins} | ❌ Loss: {losses}\n"
-                                    f"🎯 Winrate: *{winrate:.0f}%*\n\n"
+                                    f"🏦 *Виртуальный банк*\n"
+                                    f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
+                                    f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
+                                    f"📅 *Сегодня:*\n"
+                                    f"✅ Плюс: {day_wins} шт ({day_wr:.0f}%) | ❌ Минус: {day_losses} шт ({100-day_wr:.0f}%)\n"
+                                    f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
+                                    f"📈 *Всего за всё время:*\n"
+                                    f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
+                                    f"{'─' * 30}\n"
                                 )
                             else:
                                 header = (
-                                    f"🏆 *AiAlisa Signal Accuracy*\n\n"
-                                    f"📊 Total: {total} | ✅ Profit: {wins} | ❌ Loss: {losses}\n"
-                                    f"🎯 Winrate: *{winrate:.0f}%*\n\n"
+                                    f"🏦 *Virtual Bank*\n"
+                                    f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
+                                    f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
+                                    f"📅 *Today:*\n"
+                                    f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
+                                    f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
+                                    f"📈 *All-time:*\n"
+                                    f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
+                                    f"{'─' * 30}\n"
                                 )
 
-                            body = "\n".join(lines[:30])  # Limit to 30 signals
-                            full_text = header + body
-                            if len(full_text) > 4000:
-                                full_text = full_text[:4000] + "..."
-                            await send_response(app_session, chat_id, full_text, msg_id, parse_mode="Markdown")
+                            # Send header + trades in chunks (max ~4000 chars per message)
+                            all_messages = []
+                            current_chunk = header
+                            for line in trade_lines:
+                                if len(current_chunk) + len(line) + 2 > 3900:
+                                    all_messages.append(current_chunk)
+                                    current_chunk = line
+                                else:
+                                    current_chunk += "\n" + line
+                            if current_chunk:
+                                all_messages.append(current_chunk)
+
+                            for i, chunk in enumerate(all_messages):
+                                rid = msg_id if i == 0 else None
+                                await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
                             continue
 
                         # ==========================================
