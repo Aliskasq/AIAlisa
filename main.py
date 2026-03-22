@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, load_virtual_bank, save_virtual_bank, VIRTUAL_BANK_START, BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID
+from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification
@@ -95,109 +95,6 @@ async def main():
 
     last_full_calc_date = None
 
-    async def compute_daily_stats(session, day_log, starting_balance):
-        wins = losses = pending = 0
-        total_pnl = 0.0
-        for entry in day_log:
-            sym = entry["symbol"]
-            ai_dir = entry.get("ai_direction", "")
-            ai_entry = entry.get("ai_entry", 0.0)
-            ai_sl = entry.get("ai_sl", 0.0)
-            ai_tp = entry.get("ai_tp", 0.0)
-            ai_lev_str = entry.get("ai_leverage", "")
-            ai_dep_pct_str = entry.get("ai_deposit_pct", "")
-            bp = entry.get("breakout_price", 0)
-            signal_time_str = entry.get("time", "")
-
-            leverage = 1
-            if ai_lev_str:
-                try: leverage = int(ai_lev_str.lower().replace("x", ""))
-                except: leverage = 1
-            if leverage < 1: leverage = 1
-
-            dep_pct = 0.10
-            if ai_dep_pct_str:
-                try: dep_pct = float(ai_dep_pct_str.replace("%", "")) / 100
-                except: dep_pct = 0.10
-            margin_used = starting_balance * dep_pct
-
-            # Fetch current price
-            try:
-                async with session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={sym}", timeout=5) as pr:
-                    if pr.status == 200:
-                        pdata = await pr.json()
-                        now_price = float(pdata["price"])
-                    else:
-                        now_price = bp if not ai_dir else ai_entry
-            except Exception:
-                now_price = bp if not ai_dir else ai_entry
-
-            status = "PENDING"
-            if not ai_dir or ai_entry <= 0 or ai_sl <= 0 or ai_tp <= 0:
-                pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
-                pnl_usd = margin_used * (pnl_pct / 100)
-            else:
-                # Check 15m candles for TP/SL hit
-                try:
-                    async with session.get(f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=15m&limit=97", timeout=10) as resp:
-                        if resp.status == 200:
-                            klines = await resp.json()
-                            signal_ts = 0
-                            if signal_time_str:
-                                try:
-                                    from datetime import datetime as _dt
-                                    st = _dt.fromisoformat(signal_time_str.replace("Z", "+00:00"))
-                                    signal_ts = int(st.timestamp() * 1000)
-                                except Exception:
-                                    signal_ts = 0
-                            hit_sl = hit_tp = False
-                            for k in klines:
-                                k_open_time = k[0]
-                                if signal_ts and k_open_time < signal_ts:
-                                    continue
-                                k_high = float(k[2])
-                                k_low = float(k[3])
-                                if ai_dir == "LONG":
-                                    if k_low <= ai_sl: hit_sl = True
-                                    if k_high >= ai_tp: hit_tp = True
-                                else:  # SHORT
-                                    if k_high >= ai_sl: hit_sl = True
-                                    if k_low <= ai_tp: hit_tp = True
-                                if hit_sl or hit_tp:
-                                    break
-                            if hit_tp:
-                                status = "TP"
-                            elif hit_sl:
-                                status = "SL"
-                            else:
-                                status = "PENDING"
-                        else:
-                            status = "PENDING"
-                except Exception as e:
-                    logging.error(f"Kline fetch error in daily stats for {sym}: {e}")
-                    status = "PENDING"
-
-                if ai_dir == "LONG":
-                    pnl_pct = ((now_price - ai_entry) / ai_entry) * 100 * leverage
-                else:
-                    pnl_pct = ((ai_entry - now_price) / ai_entry) * 100 * leverage
-                pnl_usd = margin_used * (pnl_pct / 100)
-
-            total_pnl += pnl_usd
-            if status == "TP":
-                wins += 1
-            elif status == "SL":
-                losses += 1
-            else:
-                pending += 1
-
-        total_closed = wins + losses
-        winrate = (wins / total_closed * 100) if total_closed > 0 else 0
-        new_balance = starting_balance + total_pnl
-        return {"wins": wins, "losses": losses, "pending": pending,
-                "total_pnl": total_pnl, "new_balance": new_balance,
-                "winrate": winrate, "total_closed": total_closed}
-
     async with aiohttp.ClientSession() as session:
         session.last_weight = "?"
         
@@ -226,44 +123,6 @@ async def main():
             # Dynamic launch time controlled via Telegram /time command
             if last_full_calc_date != now_msk.date() and now_msk.hour == SCAN_SCHEDULE["hour"] and now_msk.minute == SCAN_SCHEDULE["minute"]:
                 await asyncio.sleep(2)
-                # DAILY SUMMARY: compute stats and send to Telegram before clearing log
-                day_log = load_breakout_log()
-                bank = load_virtual_bank()
-                starting_balance = bank.get("balance", VIRTUAL_BANK_START)
-                stats = await compute_daily_stats(session, day_log, starting_balance)
-
-                # Build and send Telegram summary
-                date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                target_chat = GROUP_CHAT_ID if GROUP_CHAT_ID else CHAT_ID
-                sign = "+" if stats["total_pnl"] >= 0 else ""
-                message = (
-                    f"📊 *Ежедневный отчёт за {date_str}*\n"
-                    f"💰 Начало дня: ${starting_balance:,.2f}\n"
-                    f"✅ TP: {stats['wins']} | ❌ SL: {stats['losses']} | ⏳ Открыто: {stats['pending']}\n"
-                    f"🎯 Winrate: {stats['winrate']:.0f}%\n"
-                    f"💵 P&L: *{sign}${stats['total_pnl']:.2f}* ({stats['total_pnl']/starting_balance*100:+.1f}%)\n"
-                    f"📈 Баланс на конец дня: *${stats['new_balance']:,.2f}*"
-                )
-                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                try:
-                    async with aiohttp.ClientSession() as s:
-                        async with s.post(url, json={"chat_id": target_chat, "text": message, "parse_mode": "Markdown"}) as resp:
-                            if resp.status != 200:
-                                logging.error(f"Failed to send daily summary: {resp.status}")
-                except Exception as e:
-                    logging.error(f"Error sending daily summary: {e}")
-
-                # Update bank balance and history
-                bank["balance"] = stats["new_balance"]
-                bank["history"].append({
-                    "date": date_str,
-                    "starting_balance": starting_balance,
-                    "pnl": stats["total_pnl"],
-                    "closing_balance": stats["new_balance"]
-                })
-                save_virtual_bank(bank)
-
-                # Now clear breakout log for the new day
                 clear_breakout_log()
                 logging.info("🚀 STARTING GLOBAL GEOMETRIC ANALYSIS AND DRAWING (1D, 4H)...")
                 symbols = await get_usdt_futures_symbols()
@@ -426,51 +285,16 @@ async def main():
                                 is_sent = True
 
                             if is_sent:
-                                # Parse AI direction + trade params from verdict text
+                                # Parse AI direction from verdict text
                                 _ai_dir = ""
-                                _ai_entry = 0.0
-                                _ai_sl = 0.0
-                                _ai_tp = 0.0
-                                _ai_leverage = ""
-                                _ai_deposit_pct = ""
                                 if ai_verdict:
                                     _v_upper = ai_verdict.upper()
                                     if "LONG" in _v_upper:
                                         _ai_dir = "LONG"
                                     elif "SHORT" in _v_upper:
                                         _ai_dir = "SHORT"
-
-                                    # Parse Entry, SL, TP, leverage, deposit% from AI text
-                                    import re as _re
-                                    _m = _re.search(r'Entry[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
-                                    if _m:
-                                        try: _ai_entry = float(_m.group(1))
-                                        except: pass
-                                    _m = _re.search(r'SL[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
-                                    if _m:
-                                        try: _ai_sl = float(_m.group(1))
-                                        except: pass
-                                    _m = _re.search(r'TP[:\s]*\$?([\d.]+)', ai_verdict, _re.IGNORECASE)
-                                    if _m:
-                                        try: _ai_tp = float(_m.group(1))
-                                        except: pass
-                                    _m = _re.search(r'(\d+)x', ai_verdict, _re.IGNORECASE)
-                                    if _m:
-                                        _ai_leverage = _m.group(0)
-                                    _m = _re.search(r'REC[:\s].*?(\d+%)', ai_verdict, _re.IGNORECASE)
-                                    if _m:
-                                        _ai_deposit_pct = _m.group(1)
-
-                                # Log breakout for /trend and /signals
-                                add_breakout_entry(
-                                    symbol, tf_key, dynamic_trigger, current_price, alert_type,
-                                    ai_direction=_ai_dir,
-                                    ai_entry=_ai_entry,
-                                    ai_sl=_ai_sl,
-                                    ai_tp=_ai_tp,
-                                    ai_leverage=_ai_leverage,
-                                    ai_deposit_pct=_ai_deposit_pct
-                                )
+                                # Log breakout for /trend command
+                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type, ai_direction=_ai_dir)
                                 # ONLY REMOVE FROM JSON IF MESSAGE WAS SUCCESSFULLY DELIVERED!
                                 alerts_to_remove.append(alert)
                             else:
