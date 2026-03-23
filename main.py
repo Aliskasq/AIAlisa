@@ -274,7 +274,19 @@ async def main():
 
                                     # 3b. Multi-timeframe data for better AI accuracy
                                     mtf_data = {}
-                                    if tf_key != "1D":
+                                    if tf_key == "1D":
+                                        # 1D breakout: add 4H, 1H, 15m for full picture
+                                        raw_4h = await fetch_klines(session, symbol, "4h", 120)
+                                        raw_1h = await fetch_klines(session, symbol, "1h", 120)
+                                        raw_15m = await fetch_klines(session, symbol, "15m", 120)
+                                        if raw_4h:
+                                            mtf_data["4H"] = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")[0]
+                                        if raw_1h:
+                                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                                        if raw_15m:
+                                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+                                    else:
+                                        # 4H breakout: add 1H, 15m (no 1D needed)
                                         raw_1h = await fetch_klines(session, symbol, "1h", 120)
                                         raw_15m = await fetch_klines(session, symbol, "15m", 120)
                                         if raw_1h:
