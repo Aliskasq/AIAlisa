@@ -175,8 +175,6 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
                 risk_prompt_rule = f"\nCALCULATE EXACT STOP LOSS. Start your entire response exactly like this:\n'To avoid losing more than {max_loss}% of your margin (${margin}) at {lev}x leverage, your Stop Loss must be [CALCULATED PRICE].'\nLeave a blank line, then continue with the standard VERDICT structure."
 
     breakout_context = ""
-    if line_price:
-        breakout_context = f"Trigger line breakout at {line_price:.6f}."
 
     if lang == "en":
         lang_directive = "Respond strictly in ENGLISH."
@@ -207,20 +205,30 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     # =========================================================
     # 1. SYSTEM SETUP — UNIFIED MULTI-TF FORMAT
     # =========================================================
+    # Build dynamic TF list based on available data
+    available_tfs = [tf_key]
+    if mtf_data:
+        available_tfs = list(mtf_data.keys()) + [tf_key]
+    # Deduplicate and order: 1D, 4H, 1H, 15m
+    tf_order = ["1D", "4H", "1H", "15m"]
+    available_tfs = [t for t in tf_order if t in available_tfs]
+    tf_list_str = " + ".join(available_tfs)
+
+    # TF lines for output format
+    tf_format_lines = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (key reasons)" for t in available_tfs])
+    tf_format_lines_short = "\n".join([f"⏱ {t}: LONG X% / SHORT Y%" for t in available_tfs])
+
     if extended:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
 {skills_note}
-You receive MULTI-TIMEFRAME data: 1D + 4H + 1H + 15m. Analyze ALL timeframes.
+You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze ALL timeframes.
 
 MANDATORY OUTPUT FORMAT (max 1000 chars, split into 2 messages if needed):
 
 ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 
-⏱ 15m: LONG X% / SHORT Y% (key reasons: RSI=.., MACD=.., etc)
-⏱ 1H: LONG X% / SHORT Y% (key reasons)
-⏱ 4H: LONG X% / SHORT Y% (key reasons)
-⏱ 1D: LONG X% / SHORT Y% (key reasons)
+{tf_format_lines}
 
 🏆 VERDICT: LONG or SHORT
 📊 Overall: LONG X% / SHORT Y%
@@ -238,26 +246,22 @@ Detailed breakdown of each TF, SMC zones, EMA alignment, divergences between TFs
 
 CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
-2. Absence of Smart Money or Social Hype data is NOT a bearish signal — just skip those.
-3. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
-4. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
-5. If lower TFs contradict higher TFs — mention pullback/reversal risk.
-6. DO NOT ADD HASHTAGS.
+2. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
+3. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
+4. If lower TFs contradict higher TFs — mention pullback/reversal risk.
+5. DO NOT ADD HASHTAGS.
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
 {skills_note}
-You receive MULTI-TIMEFRAME data: 1D + 4H + 1H + 15m.
+You receive MULTI-TIMEFRAME data: {tf_list_str}.
 
 MANDATORY OUTPUT FORMAT (STRICT MAX 1000 CHARACTERS):
 
 ${base_coin} 📊 Price: ${price:.6f}
 
-⏱ 15m: LONG X% / SHORT Y% (RSI=.., MACD=..)
-⏱ 1H: LONG X% / SHORT Y%
-⏱ 4H: LONG X% / SHORT Y%
-⏱ 1D: LONG X% / SHORT Y%
+{tf_format_lines_short}
 
 🏆 VERDICT: LONG or SHORT
 📊 Overall: LONG X% / SHORT Y%
@@ -271,11 +275,10 @@ ${base_coin} 📊 Price: ${price:.6f}
 
 RULES:
 1. Pick ONE direction. % shows confidence level.
-2. Absence of Smart Money or Hype is NOT bearish — just skip.
-3. Entry ≠ current price. Use support/OB/BB levels.
-4. SL: use ATR-based or below Order Block — avoid tight SLs.
-5. DO NOT ADD HASHTAGS.
-6. MAX 1000 CHARACTERS total.
+2. Entry ≠ current price. Use support/OB/BB levels.
+3. SL: use ATR-based or below Order Block — avoid tight SLs.
+4. DO NOT ADD HASHTAGS.
+5. MAX 1000 CHARACTERS total.
 """
 
 
@@ -298,7 +301,7 @@ RULES:
                     clean_mtf[k] = v
             mtf_text += "\n" + format_tf_summary(clean_mtf, mtf_label)
 
-    user_prompt = f"""Evaluate {symbol}. {breakout_context} {user_risk_text}
+    user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
 [MULTI-TIMEFRAME DATA]
 {primary_tf_text}
@@ -306,7 +309,6 @@ RULES:
 
 Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 
-TF HIERARCHY: 1D=macro trend, 4H=medium trend, 1H=short momentum, 15m=entry timing.
 Cross-TF divergences = pullback risk. Entry from support/OB, NOT current price.
 """
 

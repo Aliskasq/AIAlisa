@@ -272,9 +272,6 @@ async def main():
 
                                     # 3b. Multi-timeframe data for better AI accuracy
                                     mtf_data = {}
-                                    raw_1d = await fetch_klines(session, symbol, "1d", 120)
-                                    if raw_1d:
-                                        mtf_data["1D"] = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")[0]
                                     if tf_key != "1D":
                                         raw_1h = await fetch_klines(session, symbol, "1h", 120)
                                         raw_15m = await fetch_klines(session, symbol, "15m", 120)
