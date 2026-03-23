@@ -314,7 +314,7 @@ Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
 ### Step 6: Create a Background Service (systemd)
 To keep the bot running 24/7, create a system service:
 ```bash
-sudo tee /etc/systemd/system/alisa.service > /dev/null << 'EOF'
+sudo tee /etc/systemd/system/AI.service > /dev/null << 'EOF'
 [Unit]
 Description=AI Alisa Copilot Bot (OpenClaw SDK)
 After=network.target
@@ -338,8 +338,8 @@ EOF
 Enable and start the daemon:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable alisa.service
-sudo systemctl start alisa.service
+sudo systemctl enable AI.service
+sudo systemctl start AI.service
 ```
 
 ### Step 7: Verify Installation
@@ -356,7 +356,7 @@ python -c 'from agent.analyzer import TradeVerdict; print("✅ TradeVerdict mode
 
 Watch the live logs to ensure the bot is online:
 ```bash
-journalctl -u alisa.service -f
+journalctl -u AI.service -f
 ```
 
 You should see these lines confirming the 3-service OpenClaw integration:
