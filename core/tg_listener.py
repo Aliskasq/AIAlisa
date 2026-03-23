@@ -179,36 +179,78 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
     day_wins = 0
     day_losses = 0
+    day_pending = 0
     day_pnl_dollar = 0.0
     trade_lines = []
 
     for entry in log:
         sym = entry["symbol"]
-        bp = entry.get("breakout_price", 0)
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
         now_price = price_map.get(sym, entry.get("current_price", 0))
 
-        pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
+        # Use AI entry/SL/TP if available, otherwise fallback to breakout_price
+        ai_entry = entry.get("ai_entry")
+        ai_sl = entry.get("ai_sl")
+        ai_tp = entry.get("ai_tp")
+        entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+
+        # Determine trade status: TP hit, SL hit, or still open
+        status = "open"  # pending
+        if ai_dir and entry_price > 0:
+            if ai_dir == "LONG":
+                if ai_tp and now_price >= ai_tp:
+                    status = "tp"
+                elif ai_sl and now_price <= ai_sl:
+                    status = "sl"
+            elif ai_dir == "SHORT":
+                if ai_tp and now_price <= ai_tp:
+                    status = "tp"
+                elif ai_sl and now_price >= ai_sl:
+                    status = "sl"
+
+        # Calculate P&L based on direction and entry
+        if entry_price > 0:
+            if ai_dir == "SHORT":
+                # SHORT: profit when price goes down
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                else:
+                    pnl_pct = ((entry_price - now_price) / entry_price) * 100
+            else:
+                # LONG: profit when price goes up
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                else:
+                    pnl_pct = ((now_price - entry_price) / entry_price) * 100
+        else:
+            pnl_pct = 0
+
         pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
 
-        if pnl_pct > 0:
+        if status == "tp":
             day_wins += 1
             icon = "🟢"
-        else:
+            status_tag = " ✅TP"
+        elif status == "sl":
             day_losses += 1
             icon = "🔴"
+            status_tag = " 🚫SL"
+        else:
+            day_pending += 1
+            icon = "🟡" if pnl_pct >= 0 else "🟠"
+            status_tag = " ⏳"
 
         day_pnl_dollar += pnl_dollar
 
-        ai_mark = ""
-        if ai_dir:
-            ai_ok = (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0)
-            ai_mark = "✅" if ai_ok else "❌"
-
         short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
         trade_lines.append(
-            f"{icon}{ai_mark} `{short_sym}` {tf} | `{bp:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$)"
+            f"{icon} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
         )
 
     total_w = bank["total_wins"] + day_wins
@@ -219,28 +261,31 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     total_pnl_dollar = projected_balance - bank["starting_balance"]
     total_pnl_pct = (total_pnl_dollar / bank["starting_balance"]) * 100
 
-    day_total = day_wins + day_losses
-    day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
+    day_closed = day_wins + day_losses
+    day_total = day_closed + day_pending
+    day_wr = (day_wins / day_closed * 100) if day_closed > 0 else 0
 
     if lang == "ru":
+        pending_text = f" | ⏳ Открытых: {day_pending}" if day_pending > 0 else ""
         header = (
             f"🏦 *Виртуальный банк*\n"
             f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
             f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
-            f"📅 *Сегодня:*\n"
-            f"✅ Плюс: {day_wins} шт ({day_wr:.0f}%) | ❌ Минус: {day_losses} шт ({100-day_wr:.0f}%)\n"
+            f"📅 *Сегодня ({day_total} сигналов):*\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *Всего за всё время:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
             f"{'─' * 30}\n"
         )
     else:
+        pending_text = f" | ⏳ Open: {day_pending}" if day_pending > 0 else ""
         header = (
             f"🏦 *Virtual Bank*\n"
             f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
             f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
-            f"📅 *Today:*\n"
-            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"📅 *Today ({day_total} signals):*\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *All-time:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
@@ -293,9 +338,46 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             trades_pnl = []
             for entry in log:
                 sym = entry["symbol"]
-                bp = entry.get("breakout_price", 0)
+                ai_dir = entry.get("ai_direction", "")
+                ai_entry = entry.get("ai_entry")
+                ai_sl = entry.get("ai_sl")
+                ai_tp = entry.get("ai_tp")
+                entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
                 now_price = price_map.get(sym, entry.get("current_price", 0))
-                pnl_pct = ((now_price - bp) / bp) * 100 if bp > 0 else 0
+
+                # Determine TP/SL hit
+                status = "open"
+                if ai_dir and entry_price > 0:
+                    if ai_dir == "LONG":
+                        if ai_tp and now_price >= ai_tp:
+                            status = "tp"
+                        elif ai_sl and now_price <= ai_sl:
+                            status = "sl"
+                    elif ai_dir == "SHORT":
+                        if ai_tp and now_price <= ai_tp:
+                            status = "tp"
+                        elif ai_sl and now_price >= ai_sl:
+                            status = "sl"
+
+                # Calculate P&L based on direction
+                if entry_price > 0:
+                    if ai_dir == "SHORT":
+                        if status == "tp" and ai_tp:
+                            pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                        elif status == "sl" and ai_sl:
+                            pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                        else:
+                            pnl_pct = ((entry_price - now_price) / entry_price) * 100
+                    else:
+                        if status == "tp" and ai_tp:
+                            pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                        elif status == "sl" and ai_sl:
+                            pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                        else:
+                            pnl_pct = ((now_price - entry_price) / entry_price) * 100
+                else:
+                    pnl_pct = 0
+
                 pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
                 trades_pnl.append((sym, pnl_pct, pnl_dollar))
 

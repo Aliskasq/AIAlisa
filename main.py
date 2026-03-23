@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log
+from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification
@@ -178,6 +178,7 @@ async def main():
             # =========================================================
             alerts = load_alerts()
             alerts_to_remove = []
+            processed_symbols = set()  # Prevent duplicate processing of same symbol in one cycle
 
             if alerts:
                 logging.info(f"👀 Checking {len(alerts)} coins wating for breakout... Time (UTC+3): {now_msk.strftime('%H:%M:%S')}")
@@ -249,7 +250,8 @@ async def main():
                                 trigger_hit = True
 
                         # --- TRIGGER ALERT TO TELEGRAM ---
-                        if trigger_hit:
+                        if trigger_hit and symbol not in processed_symbols:
+                            processed_symbols.add(symbol)
                             logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price})")
                             line_data = stored_lines.get(tf_key, {}).get(symbol)
                             is_sent = False # Default to not sent
@@ -280,14 +282,29 @@ async def main():
                                         if raw_15m:
                                             mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
-                                    # 4. Request AI verdict
+                                    # 4. Request AI verdict with 429 retry logic
                                     ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
 
-                                    # 5. Wait for confirmation from the send function (Returns True or False)
+                                    # Check for 429 error — retry once after delay
+                                    ai_got_429 = False
+                                    if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
+                                        logging.warning(f"⚠️ AI 429 for {symbol}, retrying in 30s...")
+                                        await asyncio.sleep(30)
+                                        ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
+                                        if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
+                                            ai_got_429 = True
+                                            logging.error(f"❌ AI 429 retry failed for {symbol}, sending empty chart and removing from queue")
+                                            ai_verdict = ""
+
+                                    # 5. Send chart (with AI text if available, empty if 429)
                                     is_sent = await send_breakout_notification(
                                         symbol, full_df, line_data, tf_key, alert_type, session,
-                                        dynamic_trigger, ai_verdict # Passing AI text to the drawer
+                                        dynamic_trigger, ai_verdict
                                     )
+
+                                    # If 429 after retry — force remove from queue
+                                    if ai_got_429:
+                                        is_sent = True
                                 else:
                                     logging.error(f"❌ Failed to download chart for {symbol}. Will retry next cycle.")
                             else:
@@ -295,17 +312,22 @@ async def main():
                                 is_sent = True
 
                             if is_sent:
-                                # Parse AI direction from verdict text
+                                # Parse AI direction and trade params from verdict text
                                 _ai_dir = ""
+                                _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
                                 if ai_verdict:
                                     _v_upper = ai_verdict.upper()
                                     if "LONG" in _v_upper:
                                         _ai_dir = "LONG"
                                     elif "SHORT" in _v_upper:
                                         _ai_dir = "SHORT"
-                                # Log breakout for /trend command
-                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type, ai_direction=_ai_dir)
-                                # ONLY REMOVE FROM JSON IF MESSAGE WAS SUCCESSFULLY DELIVERED!
+                                # Log breakout with AI entry/SL/TP (only if AI responded)
+                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type,
+                                                   ai_direction=_ai_dir,
+                                                   ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
+                                                   ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
+                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None)
+                                # REMOVE FROM QUEUE — delivered or 429 exhausted
                                 alerts_to_remove.append(alert)
                             else:
                                 logging.warning(f"🔄 Signal {symbol} ({tf_key}) LEFT IN QUEUE. Will retry in 5 minutes.")

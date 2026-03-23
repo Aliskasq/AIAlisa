@@ -113,12 +113,36 @@ def save_breakout_log(log):
     except Exception as e:
         logging.error(f"Error writing breakout log: {e}")
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction=""):
+def parse_ai_trade_params(ai_text: str) -> dict:
+    """Parse Entry, SL, TP prices from AI verdict text."""
+    import re
+    result = {"ai_entry": None, "ai_sl": None, "ai_tp": None}
+    if not ai_text:
+        return result
+    # Match patterns like: Entry: $0.1234 or Entry: 0.1234 or 💰 Entry: $0.1234
+    # Also matches Russian: Вход: $0.1234
+    for key, patterns in [
+        ("ai_entry", [r"(?:entry|вход)[:\s]*\$?([\d]+\.[\d]+)", r"💰[^:]*:\s*\$?([\d]+\.[\d]+)"]),
+        ("ai_sl", [r"(?:sl|stop\s*loss|стоп)[:\s]*\$?([\d]+\.[\d]+)", r"🚫[^:]*:\s*\$?([\d]+\.[\d]+)"]),
+        ("ai_tp", [r"(?:tp|take\s*profit|тейк)[:\s]*\$?([\d]+\.[\d]+)", r"🎯[^:]*:\s*\$?([\d]+\.[\d]+)"]),
+    ]:
+        for pat in patterns:
+            m = re.search(pat, ai_text, re.IGNORECASE)
+            if m:
+                try:
+                    result[key] = float(m.group(1))
+                except ValueError:
+                    pass
+                break
+    return result
+
+
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
     # Don't duplicate same symbol+tf
     if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
-        log.append({
+        entry = {
             "symbol": symbol,
             "tf": tf,
             "breakout_price": round(breakout_price, 8),
@@ -126,7 +150,14 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             "type": line_type,
             "ai_direction": ai_direction.upper() if ai_direction else "",
             "time": datetime.now(timezone.utc).isoformat()
-        })
+        }
+        if ai_entry is not None:
+            entry["ai_entry"] = round(ai_entry, 8)
+        if ai_sl is not None:
+            entry["ai_sl"] = round(ai_sl, 8)
+        if ai_tp is not None:
+            entry["ai_tp"] = round(ai_tp, 8)
+        log.append(entry)
         save_breakout_log(log)
 
 def clear_breakout_log():
