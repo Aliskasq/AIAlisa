@@ -18,7 +18,7 @@ Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
 |---|---|
 | 🔴 **Live AI Streaming** | Real-time SSE token streaming — watch AI think live in Telegram |
 | 📚 **Education Mode** | `/learn BTC` — explains every indicator in plain language for beginners |
-| 🏆 **Signal Tracker** | `/signals` — live winrate accuracy of all bot predictions |
+| 🏆 **Signal Tracker** | `/signals` *(admin only)* — live winrate accuracy of all bot predictions |
 | ✅❌ **AI Accuracy in /trend** | Each breakout shows ✅ if AI prediction (LONG/SHORT) matched price direction, ❌ if wrong |
 | 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 16+ indicators + 7 Web3 skills |
 | 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support, per-chat persistent |
@@ -210,7 +210,7 @@ Alisa provides a comprehensive control panel via Telegram:
 |---|---|---|
 | `scan BTC` | `look BTC`, `check BTC`, `analyze BTC`, `посмотри BTC`, `глянь BTC`, `чекни BTC`, `анализ BTC` | 🔍 **AI analysis with real-time streaming** — 🔴 LIVE AI thinking → chart with logarithmic trendline → extended verdict with all indicators + Web3 skills |
 | `/learn BTC` | _(any futures coin)_ | 📚 **Education Mode** — explains ALL 16+ indicators with current values in plain language (RSI 6/12/24, MACD Line/Signal/Histogram, ADX, MFI, StochRSI, Ichimoku, SuperTrend, OBV, Bollinger Bands, VWAP, CMF, Volume Blocks, Funding Rate, SMC Order Blocks, FVG) |
-| `/signals` | | 🏆 **Signal Accuracy Tracker** — live winrate of all bot predictions, compares entry vs current price |
+| `/signals` | *(admin only)* | 🏆 **Signal Accuracy Tracker** — live winrate of all bot predictions, compares entry vs current price (admin DM only) |
 | `/skills` | | 🛠 **Web3 Skills Dashboard** — interactive buttons for Smart Money, Social Hype, Meme Rank, Inflow, PnL, Token Rank |
 | `margin 100 leverage 10 max 20%` | `маржа 100 плечо 10 макс 20%` | 💰 **Risk Calculator** — reply to any signal for exact Stop-Loss math |
 | `/top gainers` | | 📈 Top 10 Futures growth (24h) |

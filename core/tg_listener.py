@@ -391,13 +391,13 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             if chunks:
                 chunks[0] = f"🕐 *Ежедневный итог (23:57 UTC)*\n\n{chunks[0]}"
 
-            # 3. Send to group
+            # 3. Send to admin DM (not group)
             tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
             for chunk in chunks:
-                await session.post(tg_url, json={"chat_id": GROUP_CHAT_ID, "text": chunk, "parse_mode": "Markdown"})
+                await session.post(tg_url, json={"chat_id": CHAT_ID, "text": chunk, "parse_mode": "Markdown"})
                 await asyncio.sleep(0.5)
 
-            logging.info(f"✅ Daily summary sent to group.")
+            logging.info(f"✅ Daily summary sent to admin DM.")
 
             # 4. Clear breakout log for next day
             from config import clear_breakout_log
@@ -644,7 +644,7 @@ async def telegram_polling_loop(app_session):
                                     "*📋 Commands / Команды:*\n\n"
                                     "🔍 `scan BTC` / `посмотри BTC` — _AI analysis / анализ_\n"
                                     "📚 `/learn BTC` _(any coin)_ — _education / обучение_\n"
-                                    "🏆 `/signals` — _winrate / точность_\n"
+                                    "🏆 `/signals` — _winrate / точность (admin)_\n"
                                     "💰 `margin 100 leverage 10` — _stop-loss calc_\n"
                                     "🛠 `/skills` — _Web3 Skills_\n"
                                     "📈 `/top gainers` · 📉 `/top losers`\n"
@@ -765,7 +765,7 @@ async def telegram_polling_loop(app_session):
                                 "    _AI analysis + chart / AI анализ + график_\n\n"
                                 "📚 `/learn BTC` _(any futures coin / любая фьючерсная монета)_\n"
                                 "    _Education: indicators explained / Обучение: объяснение индикаторов_\n\n"
-                                "🏆 `/signals`\n"
+                                "🏆 `/signals` _(admin)_\n"
                                 "    _Signal accuracy & winrate / Точность сигналов_\n\n"
                                 "💰 `margin 100 leverage 10 max 20%`\n"
                                 "    _Stop-loss calculator / Расчёт стоп-лосса_\n\n"
@@ -1135,9 +1135,13 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         # ==========================================
-                        # SIGNAL ACCURACY: /signals — winrate from breakout log
+                        # SIGNAL ACCURACY: /signals — winrate from breakout log (ADMIN ONLY)
                         # ==========================================
                         if text.startswith("/signal"):
+                            if not is_admin(msg):
+                                deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
+                                await send_response(app_session, chat_id, deny, msg_id)
+                                continue
                             try:
                                 chunks = await build_signals_text(app_session, lang=lang_pref)
                                 for i, chunk in enumerate(chunks):
