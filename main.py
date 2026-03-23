@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight
 from core.geometry_scanner import find_trend_line
-from core.chart_drawer import send_breakout_notification
+from core.chart_drawer import send_breakout_notification, delete_telegram_message
 import aiohttp
 
 # --- AI AND INDICATOR IMPORTS ---
@@ -285,26 +285,37 @@ async def main():
                                     # 4. Request AI verdict with 429 retry logic
                                     ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
 
-                                    # Check for 429 error — retry once after delay
+                                    # Check for 429 error — send chart with error, then retry AI
                                     ai_got_429 = False
+                                    error_msg_id = None
                                     if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
-                                        logging.warning(f"⚠️ AI 429 for {symbol}, retrying in 30s...")
+                                        logging.warning(f"⚠️ AI 429 for {symbol}, sending chart with error, will retry...")
+                                        # Send chart immediately with 429 error text
+                                        _sent_err, error_msg_id = await send_breakout_notification(
+                                            symbol, full_df, line_data, tf_key, alert_type, session,
+                                            dynamic_trigger, "⏳ AI rate limit (429) — retrying..."
+                                        )
                                         await asyncio.sleep(30)
                                         ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
                                         if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
                                             ai_got_429 = True
-                                            logging.error(f"❌ AI 429 retry failed for {symbol}, sending empty chart and removing from queue")
+                                            logging.error(f"❌ AI 429 retry failed for {symbol}, keeping error chart")
                                             ai_verdict = ""
+                                        else:
+                                            # AI responded! Delete old error message from TG
+                                            logging.info(f"✅ AI retry succeeded for {symbol}, replacing error chart")
+                                            await delete_telegram_message(session, error_msg_id)
+                                            error_msg_id = None
 
-                                    # 5. Send chart (with AI text if available, empty if 429)
-                                    is_sent = await send_breakout_notification(
-                                        symbol, full_df, line_data, tf_key, alert_type, session,
-                                        dynamic_trigger, ai_verdict
-                                    )
-
-                                    # If 429 after retry — force remove from queue
+                                    # 5. Send chart (with AI text if available; skip if 429 error chart already sent and retry failed)
                                     if ai_got_429:
+                                        # Error chart already in TG, just mark as sent
                                         is_sent = True
+                                    else:
+                                        is_sent, _ = await send_breakout_notification(
+                                            symbol, full_df, line_data, tf_key, alert_type, session,
+                                            dynamic_trigger, ai_verdict
+                                        )
                                 else:
                                     logging.error(f"❌ Failed to download chart for {symbol}. Will retry next cycle.")
                             else:

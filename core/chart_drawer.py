@@ -166,6 +166,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     send_success = False
+    sent_message_id = None
 
     for attempt in range(1, 6):
         try:
@@ -181,6 +182,11 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                     if resp.status == 200:
                         logging.info(f"✅ Signal sent to GROUP ({tf}): {symbol}")
                         send_success = True
+                        try:
+                            resp_json = await resp.json()
+                            sent_message_id = resp_json.get('result', {}).get('message_id')
+                        except:
+                            pass
                         break
                     elif resp.status == 429:
                         retry_after = 5
@@ -206,7 +212,28 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             os.remove(file_path)
     except: pass
 
-    return send_success
+    return send_success, sent_message_id
+
+
+async def delete_telegram_message(session, message_id):
+    """Delete a message from Telegram group chat by message_id."""
+    if not message_id:
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+    try:
+        async with session.post(url, json={
+            'chat_id': str(GROUP_CHAT_ID),
+            'message_id': message_id
+        }, timeout=10) as resp:
+            if resp.status == 200:
+                logging.info(f"🗑️ Deleted TG message {message_id}")
+                return True
+            else:
+                resp_text = await resp.text()
+                logging.error(f"❌ Failed to delete TG message {message_id}: {resp.status} - {resp_text}")
+    except Exception as e:
+        logging.error(f"❌ Error deleting TG message {message_id}: {repr(e)}")
+    return False
 
 
 async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) -> str | None:
