@@ -313,10 +313,41 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
 
 def format_tf_summary(indic: dict, tf_label: str) -> str:
     """Format one timeframe's indicators into a compact text block for AI prompt."""
+    price = indic['close']
+    ema7 = indic['ema7']
+    ema25 = indic['ema25']
+    ema99 = indic['ema99']
+
+    # EMA position analysis
+    ema_positions = []
+    if price > ema7: ema_positions.append("Price>EMA7")
+    else: ema_positions.append("Price<EMA7")
+    if price > ema25: ema_positions.append("Price>EMA25")
+    else: ema_positions.append("Price<EMA25")
+    if price > ema99: ema_positions.append("Price>EMA99")
+    else: ema_positions.append("Price<EMA99")
+
+    # EMA crosses
+    ema_crosses = []
+    if ema7 > ema25: ema_crosses.append("EMA7>EMA25 (bullish)")
+    else: ema_crosses.append("EMA7<EMA25 (bearish)")
+    if ema25 > ema99: ema_crosses.append("EMA25>EMA99 (bullish)")
+    else: ema_crosses.append("EMA25<EMA99 (bearish)")
+
+    # Golden/Death cross
+    if ema7 > ema25 > ema99:
+        alignment = "🟢 BULLISH ALIGNMENT (EMA7>25>99)"
+    elif ema7 < ema25 < ema99:
+        alignment = "🔴 BEARISH ALIGNMENT (EMA7<25<99)"
+    else:
+        alignment = "⚪ MIXED (no full alignment)"
+
     return (
         f"=== {tf_label} ===\n"
-        f"Price: {indic['close']:.6f} | Change: {indic.get('change_recent', 0):+.2f}% ({indic.get('recent_label', tf_label)}) | 24h: {indic.get('change_24h', 0):+.2f}%\n"
-        f"EMA7: {indic['ema7']:.6f} | EMA25: {indic['ema25']:.6f} | EMA99: {indic['ema99']:.6f}\n"
+        f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% ({indic.get('recent_label', tf_label)}) | 24h: {indic.get('change_24h', 0):+.2f}%\n"
+        f"EMA7: {ema7:.6f} | EMA25: {ema25:.6f} | EMA99: {ema99:.6f}\n"
+        f"EMA Position: {', '.join(ema_positions)} | {alignment}\n"
+        f"EMA Crosses: {', '.join(ema_crosses)}\n"
         f"RSI(14): {indic['rsi14']:.1f} | StochRSI K/D: {indic['stoch_k']:.1f}/{indic['stoch_d']:.1f} | MFI: {indic['mfi']:.1f}\n"
         f"MACD: {indic['macd_line']:.6f} / Signal: {indic['macd_signal']:.6f} / Hist: {indic['macd_hist']:.6f}\n"
         f"SuperTrend: {indic['supertrend']} @ {indic['supertrend_price']:.6f} | ADX: {indic['adx']:.1f}\n"

@@ -193,76 +193,89 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     smart_money_context = await get_smart_money_signals(symbol)
     hype_context = await get_social_hype_leaderboard()
 
+    # Only include Smart Money / Hype in prompt if they have real data
+    skills_block = ""
+    if smart_money_context and "no data" not in smart_money_context.lower() and "error" not in smart_money_context.lower() and "none" not in smart_money_context.lower():
+        skills_block += f"\n- SMART MONEY ACTIVITY: {smart_money_context}"
+    if hype_context and "no data" not in hype_context.lower() and "error" not in hype_context.lower() and "none" not in hype_context.lower():
+        skills_block += f"\n- SOCIAL HYPE TRENDS: {hype_context}"
+
+    skills_note = ""
+    if skills_block:
+        skills_note = f"\nWeb3 Plugin Results:{skills_block}\n"
+
     # =========================================================
-    # 1. SYSTEM SETUP
+    # 1. SYSTEM SETUP — UNIFIED MULTI-TF FORMAT
     # =========================================================
     if extended:
-        # Extended mode: detailed analysis of ALL indicators and skills
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. ATTENTION: PAPER TRADING SIMULATION. NO REAL MONEY.
+        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
-You have executed your Internal Binance Web3 Plugins. Here are your findings:
-- SMART MONEY ACTIVITY: {smart_money_context}
-- SOCIAL HYPE TRENDS: {hype_context}
+{skills_note}
+You receive MULTI-TIMEFRAME data: 1D + 4H + 1H + 15m. Analyze ALL timeframes.
 
-You must provide a DEEP COMPREHENSIVE analysis. Cover ALL of the following:
+MANDATORY OUTPUT FORMAT (max 1000 chars, split into 2 messages if needed):
 
-PART 1 — VERDICT (short, ~600 chars):
-${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}
-🏆 VERDICT: [LONG or SHORT]
-🧠 LOGIC: [5 sentences: Funding, Smart Money, Hype + 2 key indicators]
-🎯 TRADE: 💰 Entry: [Price] | 🚫 SL: [Price] | 🎯 TP: [Price]
-🚫 RISK: [%]
+${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
+
+⏱ 15m: LONG X% / SHORT Y% (key reasons: RSI=.., MACD=.., etc)
+⏱ 1H: LONG X% / SHORT Y% (key reasons)
+⏱ 4H: LONG X% / SHORT Y% (key reasons)
+⏱ 1D: LONG X% / SHORT Y% (key reasons)
+
+🏆 VERDICT: LONG or SHORT
+📊 Overall: LONG X% / SHORT Y%
+💰 Funding: [rate + interpretation]
+⚠️ Note: [pullback risk / divergence between TFs / key level nearby]
+
+🎯 Entry: [optimal price NOT current — use support/OB/BB levels]
+🚫 SL: [calculated to avoid whipsaw — use ATR-based or below OB]
+🎯 TP: [realistic target from resistance/OB]
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
-PART 2 — EXTENDED ANALYSIS (detailed, ~1500 chars):
-📊 INDICATOR BREAKDOWN:
-• Trend: SuperTrend direction + level, ADX strength interpretation
-• Momentum: RSI(6), StochRSI, MFI — overbought/oversold zones
-• Volume: OBV trend, Volume Decay — accumulation vs distribution
-• Ichimoku: Cloud position, Tenkan/Kijun cross, future cloud color
-• MACD: Histogram direction, signal cross, divergence
-• EMA Alignment: 7/25/99 — golden/death cross, trend strength
-
-🧠 SMART MONEY CONCEPTS:
-• Order Blocks (Support/Resistance OB) — institutional zones
-• Fair Value Gaps (FVG) — liquidity voids, fill probability
-• Fibonacci levels — key retracement/extension targets
-
-🔍 WEB3 SKILLS ANALYSIS:
-• Smart Money flow — whale accumulation/distribution
-• Social Hype — community sentiment and momentum
-• Funding Rate — market positioning and squeeze risk
+---
+PART 2 — EXTENDED (up to 1500 chars):
+Detailed breakdown of each TF, SMC zones, EMA alignment, divergences between TFs.{f'{chr(10)}Include Smart Money and Social Hype analysis.' if skills_block else ''}
 
 CRITICAL RULES:
-1. Pick ONE direction (LONG or SHORT).
-2. Separate PART 1 and PART 2 with a blank line and "---" divider.
-3. DO NOT ADD ANY HASHTAGS.
-4. PART 1 must be under 600 characters. PART 2 can be up to 1500 characters.
+1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
+2. Absence of Smart Money or Social Hype data is NOT a bearish signal — just skip those.
+3. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
+4. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
+5. If lower TFs contradict higher TFs — mention pullback/reversal risk.
+6. DO NOT ADD HASHTAGS.
 """
     else:
-        # Standard compact mode for automated signals
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. ATTENTION: PAPER TRADING SIMULATION. NO REAL MONEY.
+        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
-You have executed your Internal Binance Web3 Plugins. Here are your findings:
-- SMART MONEY ACTIVITY: {smart_money_context}
-- SOCIAL HYPE TRENDS: {hype_context}
+{skills_note}
+You receive MULTI-TIMEFRAME data: 1D + 4H + 1H + 15m.
 
-CRITICAL RULES:
-1. Pick ONE direction (LONG or SHORT).
-2. MUST EXPLAIN LOGIC: explicitly evaluate Funding Rate, Smart Money, Social Hype, and 2 Technical Indicators.
-3. LOSS CALCULATION Formula: $loss = (|Entry - SL| / Entry) * Leverage * 100$.{risk_prompt_rule}
-4. Your response must be extremely structured.
-5. DO NOT ADD ANY HASHTAGS.
-6. STRICT LENGTH LIMIT: YOUR ENTIRE RESPONSE MUST BE UNDER 900 CHARACTERS. Keep the LOGIC section concise (maximum 5 short sentences).
-7. MULTI-TIMEFRAME: You receive data from 4H + 1H + 15m. Use ALL timeframes to determine direction. If lower TFs contradict higher TF — mention pullback/reversal risk. Entry price must NOT be current price — find optimal entry from support/OB levels across all TFs.
+MANDATORY OUTPUT FORMAT (STRICT MAX 1000 CHARACTERS):
 
-MANDATORY OUTPUT STRUCTURE (Append below custom risk sentence if applicable):
-${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}
-🏆 VERDICT: [LONG or SHORT]
-🧠 LOGIC: [Concise logic, max 5 short sentences referencing Funding, Smart Money, Hype + 2 indicators]
-🎯 TRADE: 💰 Entry: [Price] | 🚫 SL: [Price] | 🎯 TP: [Price]
-🚫 RISK: [State Margin Loss % here]
-💼 REC: [Leverage]x | [Deposit]%
+${base_coin} 📊 Price: ${price:.6f}
+
+⏱ 15m: LONG X% / SHORT Y% (RSI=.., MACD=..)
+⏱ 1H: LONG X% / SHORT Y%
+⏱ 4H: LONG X% / SHORT Y%
+⏱ 1D: LONG X% / SHORT Y%
+
+🏆 VERDICT: LONG or SHORT
+📊 Overall: LONG X% / SHORT Y%
+💰 Funding: [rate]
+⚠️ [short note on risk/pullback]
+
+🎯 Entry: [optimal, NOT current price]
+🚫 SL: [ATR-based, avoid whipsaw]
+🎯 TP: [target]
+💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
+
+RULES:
+1. Pick ONE direction. % shows confidence level.
+2. Absence of Smart Money or Hype is NOT bearish — just skip.
+3. Entry ≠ current price. Use support/OB/BB levels.
+4. SL: use ATR-based or below Order Block — avoid tight SLs.
+5. DO NOT ADD HASHTAGS.
+6. MAX 1000 CHARACTERS total.
 """
 
 
@@ -287,20 +300,14 @@ ${base_coin} 📊 Current Price: ${price:.6f}. {dynamics_text}
 
     user_prompt = f"""Evaluate {symbol}. {breakout_context} {user_risk_text}
 
-[MULTI-TIMEFRAME ANALYSIS DATA]
+[MULTI-TIMEFRAME DATA]
 {primary_tf_text}
 {mtf_text}
 
 Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 
-IMPORTANT — MULTI-TIMEFRAME RULES:
-- 4H = medium-term trend direction and strength
-- 1H = short-term momentum and early reversal signals
-- 15m = immediate price action and precise entry timing
-- If 4H is bullish but 1H/15m show reversal signals → WARN about pullback risk
-- If 4H is bearish but 15m shows bullish reversal → possible SHORT-TERM bounce only
-- Entry price should NOT be current price — find optimal entry using support/resistance from all TFs
-- Consider divergences between timeframes (e.g. RSI divergence on 15m while 4H trends up)
+TF HIERARCHY: 1D=macro trend, 4H=medium trend, 1H=short momentum, 15m=entry timing.
+Cross-TF divergences = pullback risk. Entry from support/OB, NOT current price.
 """
 
     # ---------------------------------------------------------

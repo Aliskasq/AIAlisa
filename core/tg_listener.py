@@ -950,9 +950,9 @@ async def telegram_polling_loop(app_session):
                                 learn_load = f"📚 Analyzing {learn_symbol} on 4H + 1H + 15m..." if lang_pref == "en" else f"📚 Анализирую {learn_symbol} на 4Ч + 1Ч + 15м..."
                                 await send_response(app_session, chat_id, learn_load, msg_id)
 
-                                raw_4h = await fetch_klines(app_session, learn_symbol, "4h", 99)
-                                raw_1h = await fetch_klines(app_session, learn_symbol, "1h", 99)
-                                raw_15m = await fetch_klines(app_session, learn_symbol, "15m", 99)
+                                raw_4h = await fetch_klines(app_session, learn_symbol, "4h", 120)
+                                raw_1h = await fetch_klines(app_session, learn_symbol, "1h", 120)
+                                raw_15m = await fetch_klines(app_session, learn_symbol, "15m", 120)
 
                                 if raw_4h:
                                     row_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
@@ -1538,10 +1538,11 @@ async def telegram_polling_loop(app_session):
 
                             # Fetch 199 candles for trend line construction (same as main scanner)
                             raw_df_full = await fetch_klines(app_session, symbol, "4h", 199)
-                            # Fetch multi-timeframe: 4H (primary) + 1H + 15m
-                            raw_df_4h = await fetch_klines(app_session, symbol, "4h", 99)
-                            raw_df_1h = await fetch_klines(app_session, symbol, "1h", 99)
-                            raw_df_15m = await fetch_klines(app_session, symbol, "15m", 99)
+                            # Fetch multi-timeframe: 4H (primary) + 1H + 15m + 1D
+                            raw_df_4h = await fetch_klines(app_session, symbol, "4h", 120)
+                            raw_df_1h = await fetch_klines(app_session, symbol, "1h", 120)
+                            raw_df_15m = await fetch_klines(app_session, symbol, "15m", 120)
+                            raw_df_1d = await fetch_klines(app_session, symbol, "1d", 120)
 
                             raw_df = raw_df_4h  # primary TF for compatibility
 
@@ -1553,12 +1554,12 @@ async def telegram_polling_loop(app_session):
 
                                 # Build multi-TF data
                                 mtf_data = {}
+                                if raw_df_1d:
+                                    mtf_data["1D"] = calculate_binance_indicators(pd.DataFrame(raw_df_1d), "1D")[0]
                                 if raw_df_1h:
-                                    indic_1h, _ = calculate_binance_indicators(pd.DataFrame(raw_df_1h), "1H")
-                                    mtf_data["1H"] = indic_1h
+                                    mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_df_1h), "1H")[0]
                                 if raw_df_15m:
-                                    indic_15m, _ = calculate_binance_indicators(pd.DataFrame(raw_df_15m), "15m")
-                                    mtf_data["15m"] = indic_15m
+                                    mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_df_15m), "15m")[0]
 
                                 # Build telegram_stream dict for live AI streaming
                                 tg_stream = None
@@ -1711,14 +1712,17 @@ async def telegram_polling_loop(app_session):
                                     if not coin_to_analyze.endswith("USDT"):
                                         coin_to_analyze += "USDT"
 
-                                raw_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 99)
-                                raw_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 99)
-                                raw_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 99)
+                                raw_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 120)
+                                raw_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 120)
+                                raw_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 120)
+                                raw_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 120)
                                 if raw_4h:
                                     last_row, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
                                     funding = await fetch_funding_rate(app_session, coin_to_analyze)
                                     last_row["funding_rate"] = funding
                                     mtf_data = {}
+                                    if raw_1d:
+                                        mtf_data["1D"] = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")[0]
                                     if raw_1h:
                                         mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
                                     if raw_15m:
