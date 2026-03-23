@@ -216,7 +216,7 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
 
     # TF lines for output format
     tf_format_lines = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (key reasons)" for t in available_tfs])
-    tf_format_lines_short = "\n".join([f"⏱ {t}: LONG X% / SHORT Y%" for t in available_tfs])
+    tf_format_lines_short = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (brief reason)" for t in available_tfs])
 
     if extended:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -281,6 +281,7 @@ RULES:
 4. SL: use ATR-based or below Order Block — avoid tight SLs.
 5. DO NOT ADD HASHTAGS.
 6. MAX 1000 CHARACTERS total.
+7. EVERY timeframe line MUST include a brief reason in parentheses. Example: ⏱ 4H: LONG 60% / SHORT 40% (Bullish EMA alignment, above cloud)
 """
 
 
