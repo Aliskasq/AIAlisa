@@ -246,10 +246,11 @@ Detailed breakdown of each TF, SMC zones, EMA alignment, divergences between TFs
 
 CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
-2. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
-3. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
-4. If lower TFs contradict higher TFs — mention pullback/reversal risk.
-5. DO NOT ADD HASHTAGS.
+2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
+3. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
+4. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
+5. If lower TFs contradict higher TFs — mention pullback/reversal risk.
+6. DO NOT ADD HASHTAGS.
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -275,10 +276,11 @@ ${base_coin} 📊 Price: ${price:.6f}
 
 RULES:
 1. Pick ONE direction. % shows confidence level.
-2. Entry ≠ current price. Use support/OB/BB levels.
-3. SL: use ATR-based or below Order Block — avoid tight SLs.
-4. DO NOT ADD HASHTAGS.
-5. MAX 1000 CHARACTERS total.
+2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
+3. Entry ≠ current price. Use support/OB/BB levels.
+4. SL: use ATR-based or below Order Block — avoid tight SLs.
+5. DO NOT ADD HASHTAGS.
+6. MAX 1000 CHARACTERS total.
 """
 
 
