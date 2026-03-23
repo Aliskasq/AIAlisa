@@ -307,11 +307,11 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
 
 async def auto_trend_sender(session: aiohttp.ClientSession):
-    """Background task: at 23:57 UTC daily — send daily summary to TG group, update virtual bank, clear log."""
+    """Background task: at 23:59:15 UTC daily — send daily summary to admin DM, update virtual bank, clear log."""
     while True:
         try:
             now = datetime.now(timezone.utc)
-            target = now.replace(hour=23, minute=57, second=0, microsecond=0)
+            target = now.replace(hour=23, minute=59, second=15, microsecond=0)
             if target <= now:
                 target += timedelta(days=1)
             
