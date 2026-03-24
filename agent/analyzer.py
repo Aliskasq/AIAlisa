@@ -237,8 +237,8 @@ ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 
 💰 Entry: [CURRENT PRICE at breakout — this is auto-filled, write current price]
 🔰 Safe Entry: [better entry from support/OB/BB — for patient traders]
-🚫 SL: [calculated to avoid whipsaw — use ATR-based or below OB]
-🎯 TP: [realistic target from resistance/OB]
+🚫 SL: [price] ([reason: EMA/OB/support/ATR level])
+🎯 TP: [price] ([reason: resistance/OB/EMA/fib level])
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
 ---
@@ -249,8 +249,8 @@ CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
 3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
-4. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
-5. RISK:REWARD RATIO must be at least 1:1.5 (ideally 1:2+). TP distance from entry MUST be >= 1.5× SL distance. Example: if SL is 2% below entry, TP must be at least 3% above entry. NEVER give TP closer than SL.
+4. SL and TP MUST be based on real technical levels (EMA, BB, support/resistance, Order Block, Ichimoku cloud, ATR, Fibonacci). Write the reason in parentheses after each price. NO random numbers.
+5. RISK:REWARD RATIO must be at least 1:1.5 (ideally 1:2+). TP distance from entry MUST be >= 1.5× SL distance. NEVER give TP closer than SL.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
 """
@@ -273,16 +273,16 @@ ${base_coin} 📊 Price: ${price:.6f}
 
 💰 Entry: [CURRENT PRICE at breakout]
 🔰 Safe: [better entry from support/OB/BB]
-🚫 SL: [ATR-based, avoid whipsaw]
-🎯 TP: [target]
+🚫 SL: [price] ([reason: EMA/OB/support/ATR])
+🎯 TP: [price] ([reason: resistance/OB/EMA/fib])
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
 RULES:
 1. Pick ONE direction. % shows confidence level.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
 3. Entry = current price. Safe Entry = optimal from support/OB for better R:R.
-4. SL: use ATR-based or below Order Block — avoid tight SLs.
-5. R:R minimum 1:1.5 (ideally 1:2+). TP distance ≥ 1.5× SL distance from entry. NEVER give TP closer than SL.
+4. SL and TP MUST be based on real technical levels (EMA, BB, support, OB, ATR, fib). Write reason in () after price. NO random numbers.
+5. R:R minimum 1:1.5 (ideally 1:2+). TP distance ≥ 1.5× SL distance. NEVER give TP closer than SL.
 6. DO NOT ADD HASHTAGS.
 7. MAX 1000 CHARACTERS total.
 8. EVERY timeframe line MUST include a brief reason in parentheses. Example: ⏱ 4H: LONG 60% / SHORT 40% (Bullish EMA alignment, above cloud)
