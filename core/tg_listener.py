@@ -183,6 +183,8 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     day_pnl_dollar = 0.0
     trade_lines = []
 
+    day_skipped = 0
+
     for entry in log:
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
@@ -193,7 +195,37 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         ai_entry = entry.get("ai_entry")
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
+        ai_leverage = entry.get("ai_leverage", 1) or 1
+        ai_deposit_pct = entry.get("ai_deposit_pct")
         entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+
+        short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        # Check if price ever reached AI entry (for LONG: price must have dipped to entry or below; for SHORT: risen to entry or above)
+        # We check current price vs entry as proxy — if AI entry was never touched, mark as skipped
+        entry_reached = True
+        if ai_entry and ai_dir and entry.get("breakout_price"):
+            bp = entry["breakout_price"]
+            if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
+                # AI wanted lower entry (buy the dip), price may not have reached it
+                # If current price is above entry AND breakout price was above entry, entry may not have been hit
+                # We can't know for sure without historical candles, so we check: if entry < breakout and price never went below entry
+                # Simple heuristic: if ai_entry is significantly below breakout (>1%), likely not reached
+                gap_pct = ((bp - ai_entry) / bp) * 100
+                if gap_pct > 1.0 and now_price > ai_entry:
+                    entry_reached = False
+            elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
+                gap_pct = ((ai_entry - bp) / bp) * 100
+                if gap_pct > 1.0 and now_price < ai_entry:
+                    entry_reached = False
+
+        if not entry_reached:
+            day_skipped += 1
+            trade_lines.append(
+                f"⚪ `{short_sym}` {tf}{dir_tag} | вход `{entry_price:.6f}` не достигнут (сейчас `{now_price:.6f}`) 🚫"
+            )
+            continue
 
         # Determine trade status: TP hit, SL hit, or still open
         # Sanity: TP/SL must make sense for direction (LONG TP > entry, SL < entry; vice versa for SHORT)
@@ -213,7 +245,6 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         # Calculate P&L based on direction and entry
         if entry_price > 0:
             if ai_dir == "SHORT":
-                # SHORT: profit when price goes down
                 if status == "tp" and ai_tp:
                     pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
                 elif status == "sl" and ai_sl:
@@ -221,7 +252,6 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
                 else:
                     pnl_pct = ((entry_price - now_price) / entry_price) * 100
             else:
-                # LONG: profit when price goes up
                 if status == "tp" and ai_tp:
                     pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
                 elif status == "sl" and ai_sl:
@@ -231,7 +261,16 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         else:
             pnl_pct = 0
 
-        pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
+        # Apply leverage to P&L percentage
+        pnl_pct_leveraged = pnl_pct * ai_leverage
+
+        # Position size: deposit_pct% of bank, or fallback to VIRTUAL_BANK_POSITION_SIZE
+        if ai_deposit_pct:
+            position_size = bank["balance"] * (ai_deposit_pct / 100)
+        else:
+            position_size = VIRTUAL_BANK_POSITION_SIZE
+
+        pnl_dollar = (pnl_pct_leveraged / 100) * position_size
 
         # AI prediction match: ✅ if direction matches P&L, ❌ if not
         ai_match = ""
@@ -256,10 +295,9 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         day_pnl_dollar += pnl_dollar
 
-        short_sym = sym.replace("USDT", "")
-        dir_tag = f" {ai_dir}" if ai_dir else ""
+        lev_tag = f" {ai_leverage}x" if ai_leverage > 1 else ""
         trade_lines.append(
-            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
         )
 
     total_w = bank["total_wins"] + day_wins
@@ -276,12 +314,13 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
     if lang == "ru":
         pending_text = f" | ⏳ Открытых: {day_pending}" if day_pending > 0 else ""
+        skip_text = f" | ⚪ Не вошли: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🏦 *Виртуальный банк*\n"
             f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
             f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Сегодня ({day_total} сигналов):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *Всего за всё время:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
@@ -289,12 +328,13 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         )
     else:
         pending_text = f" | ⏳ Open: {day_pending}" if day_pending > 0 else ""
+        skip_text = f" | ⚪ Skipped: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🏦 *Virtual Bank*\n"
             f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
             f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Today ({day_total} signals):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *All-time:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
@@ -335,8 +375,10 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     except Exception:
         pass
 
+    bank = load_virtual_bank()
     day_wins = 0
     day_losses = 0
+    day_skipped = 0
     day_pnl_dollar = 0.0
     trade_lines = []
 
@@ -349,10 +391,34 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         ai_entry = entry.get("ai_entry")
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
+        ai_leverage = entry.get("ai_leverage", 1) or 1
+        ai_deposit_pct = entry.get("ai_deposit_pct")
         entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
 
+        short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        # Check if price reached AI entry
+        entry_reached = True
+        if ai_entry and ai_dir and entry.get("breakout_price"):
+            bp = entry["breakout_price"]
+            if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
+                gap_pct = ((bp - ai_entry) / bp) * 100
+                if gap_pct > 1.0 and now_price > ai_entry:
+                    entry_reached = False
+            elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
+                gap_pct = ((ai_entry - bp) / bp) * 100
+                if gap_pct > 1.0 and now_price < ai_entry:
+                    entry_reached = False
+
+        if not entry_reached:
+            day_skipped += 1
+            trade_lines.append(
+                f"⚪ `{short_sym}` {tf}{dir_tag} | вход `{entry_price:.6f}` не достигнут (сейчас `{now_price:.6f}`) 🚫"
+            )
+            continue
+
         # Determine original status (TP/SL already hit or still open)
-        # Sanity: TP/SL must make sense for direction
         status = "open"
         if ai_dir and entry_price > 0:
             if ai_dir == "LONG":
@@ -385,9 +451,18 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         else:
             pnl_pct = 0
 
-        pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
+        # Apply leverage
+        pnl_pct_leveraged = pnl_pct * ai_leverage
 
-        # AI prediction match: ✅ if direction matches P&L, ❌ if not
+        # Position size
+        if ai_deposit_pct:
+            position_size = bank["balance"] * (ai_deposit_pct / 100)
+        else:
+            position_size = VIRTUAL_BANK_POSITION_SIZE
+
+        pnl_dollar = (pnl_pct_leveraged / 100) * position_size
+
+        # AI prediction match
         ai_match = ""
         if ai_dir:
             if (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0):
@@ -405,9 +480,7 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         day_pnl_dollar += pnl_dollar
 
-        short_sym = sym.replace("USDT", "")
-        dir_tag = f" {ai_dir}" if ai_dir else ""
-        # Already hit TP/SL keeps original tag, pending closed now → TP if profit, SL if loss
+        lev_tag = f" {ai_leverage}x" if ai_leverage > 1 else ""
         if status == "tp":
             closed_tag = " ✅TP"
         elif status == "sl":
@@ -415,25 +488,27 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         else:
             closed_tag = " ✅TP" if pnl_pct >= 0 else " 🚫SL"
         trade_lines.append(
-            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
         )
 
     day_total = day_wins + day_losses
     day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
 
     if lang == "ru":
+        skip_text = f"\n⚪ Не вошли: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🔒 *Закрытие всех позиций (снимок)*\n\n"
             f"📅 *Сегодня ({day_total} сделок):*\n"
-            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%){skip_text}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
     else:
+        skip_text = f"\n⚪ Skipped: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🔒 *Close all positions (snapshot)*\n\n"
             f"📅 *Today ({day_total} trades):*\n"
-            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%){skip_text}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
@@ -481,6 +556,7 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             except Exception as e:
                 logging.error(f"❌ Daily summary price fetch: {e}")
 
+            bank = load_virtual_bank()
             trades_pnl = []
             for entry in log:
                 sym = entry["symbol"]
@@ -488,8 +564,25 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 ai_entry = entry.get("ai_entry")
                 ai_sl = entry.get("ai_sl")
                 ai_tp = entry.get("ai_tp")
+                ai_leverage = entry.get("ai_leverage", 1) or 1
+                ai_deposit_pct = entry.get("ai_deposit_pct")
                 entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
                 now_price = price_map.get(sym, entry.get("current_price", 0))
+
+                # Skip trades where entry was never reached
+                entry_reached = True
+                if ai_entry and ai_dir and entry.get("breakout_price"):
+                    bp = entry["breakout_price"]
+                    if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
+                        gap_pct = ((bp - ai_entry) / bp) * 100
+                        if gap_pct > 1.0:
+                            entry_reached = False
+                    elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
+                        gap_pct = ((ai_entry - bp) / bp) * 100
+                        if gap_pct > 1.0:
+                            entry_reached = False
+                if not entry_reached:
+                    continue
 
                 # Determine TP/SL hit (sanity: TP/SL must make sense for direction)
                 status = "open"
@@ -524,8 +617,14 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 else:
                     pnl_pct = 0
 
-                pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
-                trades_pnl.append((sym, pnl_pct, pnl_dollar))
+                # Apply leverage and position size
+                pnl_pct_leveraged = pnl_pct * ai_leverage
+                if ai_deposit_pct:
+                    position_size = bank["balance"] * (ai_deposit_pct / 100)
+                else:
+                    position_size = VIRTUAL_BANK_POSITION_SIZE
+                pnl_dollar = (pnl_pct_leveraged / 100) * position_size
+                trades_pnl.append((sym, pnl_pct_leveraged, pnl_dollar))
 
             # Update bank with today's results
             update_bank_with_trades(trades_pnl)

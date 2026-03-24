@@ -128,9 +128,9 @@ def save_breakout_log(log):
         logging.error(f"Error writing breakout log: {e}")
 
 def parse_ai_trade_params(ai_text: str) -> dict:
-    """Parse Entry, SL, TP prices from AI verdict text."""
+    """Parse Entry, SL, TP, Leverage, Deposit% from AI verdict text."""
     import re
-    result = {"ai_entry": None, "ai_sl": None, "ai_tp": None}
+    result = {"ai_entry": None, "ai_sl": None, "ai_tp": None, "ai_leverage": None, "ai_deposit_pct": None}
     if not ai_text:
         return result
     # Match patterns like: Entry: $0.1234 or Entry: 0.1234 or 💰 Entry: $0.1234
@@ -148,10 +148,27 @@ def parse_ai_trade_params(ai_text: str) -> dict:
                 except ValueError:
                     pass
                 break
+
+    # Parse leverage: "💼 REC: 5x | 10%" or "Leverage: 10x" or just "5x"
+    lev_match = re.search(r"(?:REC|leverage|плечо)[:\s]*(\d+)\s*x", ai_text, re.IGNORECASE)
+    if lev_match:
+        try:
+            result["ai_leverage"] = int(lev_match.group(1))
+        except ValueError:
+            pass
+
+    # Parse deposit %: "💼 REC: 5x | 10%" or "Deposit: 10%"
+    dep_match = re.search(r"(?:REC[^|]*\|\s*|deposit|депозит)[:\s]*(\d+(?:\.\d+)?)\s*%", ai_text, re.IGNORECASE)
+    if dep_match:
+        try:
+            result["ai_deposit_pct"] = float(dep_match.group(1))
+        except ValueError:
+            pass
+
     return result
 
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
     # Don't duplicate same symbol+tf
@@ -171,6 +188,10 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             entry["ai_sl"] = round(ai_sl, 8)
         if ai_tp is not None:
             entry["ai_tp"] = round(ai_tp, 8)
+        if ai_leverage is not None:
+            entry["ai_leverage"] = ai_leverage
+        if ai_deposit_pct is not None:
+            entry["ai_deposit_pct"] = ai_deposit_pct
         log.append(entry)
         save_breakout_log(log)
 

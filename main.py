@@ -349,7 +349,9 @@ async def main():
                                                    ai_direction=_ai_dir,
                                                    ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
                                                    ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
-                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None)
+                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
+                                                   ai_leverage=_ai_params.get("ai_leverage") if _ai_params else None,
+                                                   ai_deposit_pct=_ai_params.get("ai_deposit_pct") if _ai_params else None)
                                 # REMOVE FROM QUEUE — delivered or 429 exhausted
                                 alerts_to_remove.append(alert)
                             else:
