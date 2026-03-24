@@ -133,12 +133,12 @@ def parse_ai_trade_params(ai_text: str) -> dict:
     result = {"ai_entry": None, "ai_sl": None, "ai_tp": None, "ai_leverage": None, "ai_deposit_pct": None}
     if not ai_text:
         return result
-    # Match patterns like: Entry: $0.1234 or Entry: 0.1234 or 💰 Entry: $0.1234
-    # Also matches Russian: Вход: $0.1234
+    # Match patterns: 💰 Entry: 0.1234 or Entry: $0.1234 or Вход: 0.1234
+    # Be specific to avoid matching "💰 Current Price:" or "💰 Funding:"
     for key, patterns in [
-        ("ai_entry", [r"(?:entry|вход)[:\s]*\$?([\d]+\.[\d]+)", r"💰[^:]*:\s*\$?([\d]+\.[\d]+)"]),
-        ("ai_sl", [r"(?:sl|stop\s*loss|стоп)[:\s]*\$?([\d]+\.[\d]+)", r"🚫[^:]*:\s*\$?([\d]+\.[\d]+)"]),
-        ("ai_tp", [r"(?:tp|take\s*profit|тейк)[:\s]*\$?([\d]+\.[\d]+)", r"🎯[^:]*:\s*\$?([\d]+\.[\d]+)"]),
+        ("ai_entry", [r"💰\s*entry[:\s]*\$?([\d]+\.[\d]+)", r"(?:entry|вход)[:\s]*\$?([\d]+\.[\d]+)"]),
+        ("ai_sl", [r"🚫\s*sl[:\s]*\$?([\d]+\.[\d]+)", r"(?:sl|stop\s*loss|стоп)[:\s]*\$?([\d]+\.[\d]+)"]),
+        ("ai_tp", [r"🎯\s*tp[:\s]*\$?([\d]+\.[\d]+)", r"(?:tp|take\s*profit|тейк)[:\s]*\$?([\d]+\.[\d]+)"]),
     ]:
         for pat in patterns:
             m = re.search(pat, ai_text, re.IGNORECASE)

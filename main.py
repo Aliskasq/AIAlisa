@@ -352,11 +352,16 @@ async def main():
                                 _ai_dir = ""
                                 _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
                                 if ai_verdict:
-                                    _v_upper = ai_verdict.upper()
-                                    if "LONG" in _v_upper:
-                                        _ai_dir = "LONG"
-                                    elif "SHORT" in _v_upper:
-                                        _ai_dir = "SHORT"
+                                    # Parse direction from VERDICT line specifically, not from TF lines
+                                    import re as _re
+                                    _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT)", ai_verdict, _re.IGNORECASE)
+                                    if _verdict_match:
+                                        _ai_dir = _verdict_match.group(1).upper()
+                                    else:
+                                        # Fallback: last LONG/SHORT in text (verdict is usually at the end of analysis)
+                                        _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
+                                        if _all_dirs:
+                                            _ai_dir = _all_dirs[-1]
                                 # Log breakout with AI entry/SL/TP (only if AI responded)
                                 add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type,
                                                    ai_direction=_ai_dir,
