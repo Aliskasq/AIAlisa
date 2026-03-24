@@ -249,7 +249,7 @@ CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
 3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
-4. SL and TP MUST be based on real technical levels from the data provided: EMA, BB, Order Block, FVG, EQH/EQL, Ichimoku cloud, ATR, support/resistance. Write the reason in parentheses after each price. If SMC Indicator data is provided, USE IT for SL/TP placement. NO random numbers.
+4. SL and TP: analyze ALL indicators together — EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR, SuperTrend, support/resistance. Look for CONFLUENCE: where multiple levels overlap = strongest SL/TP. Example: if EMA99 and a Bullish OB are at the same zone → strong SL level. Write all supporting reasons in parentheses. NO random numbers.
 5. RISK:REWARD RATIO must be at least 1:1.5 (ideally 1:2+). TP distance from entry MUST be >= 1.5× SL distance. NEVER give TP closer than SL.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
@@ -281,7 +281,7 @@ RULES:
 1. Pick ONE direction. % shows confidence level.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
 3. Entry = current price. Safe Entry = optimal from support/OB for better R:R.
-4. SL/TP from real levels: EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR. Use SMC Indicator data if provided. Write reason in (). NO random numbers.
+4. SL/TP: use ALL indicators. Find CONFLUENCE — where multiple levels overlap (EMA+OB, BB+FVG, Ichimoku+EQH etc.) = best SL/TP. Write reasons in (). NO random numbers.
 5. R:R minimum 1:1.5 (ideally 1:2+). TP distance ≥ 1.5× SL distance. NEVER give TP closer than SL.
 6. DO NOT ADD HASHTAGS.
 7. MAX 1000 CHARACTERS total.
@@ -328,7 +328,7 @@ Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 {smc_text}
 
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
-Use SMC Indicator data (Order Blocks, FVG, BOS/CHoCH structure) to set SL/TP at real levels. OB = key support/resistance for SL. FVG = potential targets.
+For SL/TP: cross-reference ALL data — find where indicators CONVERGE (e.g. OB + EMA at same zone, FVG + BB band, EQH + resistance). Confluence = strongest levels.
 """
 
     # ---------------------------------------------------------
