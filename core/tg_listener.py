@@ -966,7 +966,7 @@ async def telegram_polling_loop(app_session):
                                     "⏰ `/time 18:30` — scan schedule\n"
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
-                                    "⏰ `/autopost time 09:00 21:00` — post times\n"
+                                    "⏰ `/autopost time 09:00 15:00 21:00` — post times\n"
                                     "✏️ `/post text` — post to Square\n"
                                     "✏️ reply `/post text` — AI + your opinion\n"
                                     "💼 `/paper BTC 74000 long 5x sl 73000 tp 75000`\n"

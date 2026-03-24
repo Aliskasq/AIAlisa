@@ -161,20 +161,17 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 except Exception as e:
                     logging.error(f"❌ SMC autopost error: {e}")
 
-                # Extended AI analysis with MTF + SMC Indicator
-                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", extended=True, mtf_data=mtf_data, smc_data=smc_data)
+                # Short AI analysis for Square post (not extended — fits post limit)
+                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", extended=False, mtf_data=mtf_data, smc_data=smc_data)
 
-                # Build Square post with proper header
-                square_text = (
-                    f"🤖 AI-ALISA-COPILOTCLAW Automated Analysis\n\n"
-                    f"{ai_text}\n\n"
-                    f"🦞 Powered by OpenClaw AI | Binance Futures\n"
-                    f"#AIBinance #BinanceSquare #{short_coin} #Write2Earn"
-                )
-
-                # Trim to 1950 chars (Square post limit ~2000, keep margin)
-                if len(square_text) > 1950:
-                    square_text = square_text[:1940] + "..."
+                # Build Square post — POST format (not article), ~1000 chars max
+                tags = "#AIBinance #BinanceSquare #Write2Earn"
+                header = f"🤖 AI-ALISA-COPILOTCLAW\n\n"
+                footer = f"\n\n🦞 OpenClaw AI | Binance Futures\n{tags}"
+                max_ai_len = 950 - len(header) - len(footer)
+                if len(ai_text) > max_ai_len:
+                    ai_text = ai_text[:max_ai_len - 3] + "..."
+                square_text = f"{header}{ai_text}{footer}"
 
                 res = await post_to_binance_square(square_text)
                 logging.info(f"✅ Square Auto-Post result for {symbol}: {res}")

@@ -12,134 +12,147 @@ Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
 3. **Education:** `/learn` mode explains all 16+ indicators in plain language — making crypto accessible to beginners.
 4. **Community Marketing:** Empowers Crypto-Influencers with automated AI publications to **Binance Square** with extended analysis.
 
-### ⚡ NEW: Real-Time AI Streaming, Education & Signal Tracking
+---
+
+### ⚡ Key Features
 
 | Feature | Description |
 |---|---|
 | 🔴 **Live AI Streaming** | Real-time SSE token streaming — watch AI think live in Telegram |
+| 📐 **SMC Indicator** | Full Smart Money Concepts engine: BOS/CHoCH structure, Order Blocks, Fair Value Gaps, EQH/EQL, Premium/Discount zones — ported from LuxAlgo TradingView. Runs on 4H, 1H, 15m with 250 candles |
 | 📚 **Education Mode** | `/learn BTC` — explains every indicator in plain language for beginners |
-| 🏆 **Signal Tracker** | `/signals` *(admin only)* — live winrate accuracy of all bot predictions |
-| ✅❌ **AI Accuracy in /trend** | Each breakout shows ✅ if AI prediction (LONG/SHORT) matched price direction, ❌ if wrong |
-| 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 16+ indicators + 7 Web3 skills |
+| 🏆 **Signal Tracker** | `/signals` — virtual bank with live P&L, leverage, deposit%, winrate. Tracks TP/SL hits, AI prediction accuracy (✅/❌) |
+| 🔒 **Signals Close** | `/signals close` — snapshot: what if you closed all open positions right now? |
+| 🔄 **Signals Clear** | `/signals clear` — reset virtual bank to $10k, keep today's signals |
+| 🔬 **Extended Analysis** | `scan BTC` returns deep breakdown of all 16+ indicators + SMC Indicator + 7 Web3 skills |
 | 🌐 **Bilingual** | `/lang en` / `/lang ru` — full English & Russian support, per-chat persistent |
 | 🔔 **Smart Alerts** | `/alert BTC 75000` — persistent price alerts that survive restarts |
-| 📢 **Smart Auto-Post** | Extended AI analysis auto-published to Binance Square with funding, indicators & skills |
+| 📢 **Smart Auto-Post** | AI analysis auto-published to Binance Square (post format, ~1000 chars) with SMC data |
 | 💼 **Paper Trading** | `/paper BTC 74000 long 5x` — virtual portfolio with live P&L from real Binance prices |
 | 👋 **Auto-Welcome** | New group members receive full command list automatically |
 
-### 🦞 Deep OpenClaw SDK Integration (4 Services)
+---
 
-AiAlisa is not just "using OpenClaw for chat" — the entire AI pipeline is built on **four distinct CMDOP/OpenClaw SDK services**:
+### 📐 SMC Indicator (Smart Money Concepts) — NEW
+
+Full port of the **LuxAlgo Smart Money Concepts** TradingView indicator into Python (`core/smc.py`).
+
+Analyzes **250 candles** on each timeframe (4H, 1H, 15m) and detects:
+
+| Component | Description |
+|---|---|
+| **BOS** (Break of Structure) | Trend continuation — price broke the last swing high/low |
+| **CHoCH** (Change of Character) | Trend reversal — price broke in the opposite direction |
+| **Order Blocks** (OB) | Key candles at structure breaks — real support/resistance levels |
+| **Fair Value Gaps** (FVG) | 3-candle imbalances — price magnets, unfilled gaps |
+| **EQH / EQL** | Equal Highs/Lows — liquidity pools where stops cluster |
+| **Premium / Discount** | Current zone relative to swing range — overbought vs oversold |
+
+**Internal structure** (size=5) for short-term moves, **Swing structure** (size=50) for major trends.  
+ATR-based volatility filter for Order Blocks (high-volatility bars parsed separately, same as LuxAlgo).
+
+SMC data is fed directly into the AI prompt so that **SL/TP are placed on real Order Blocks, FVG levels, and structure breaks** — not random numbers.
+
+> ⚠️ **Not to confuse with** the Binance Web3 "Smart Money" skill (`/skills smart money`) which tracks whale wallets via Binance DeFi API. The SMC Indicator is a technical analysis tool based on price action.
+
+---
+
+### 🏆 Virtual Bank & Signal Tracking
+
+The `/signals` system tracks every breakout signal with a virtual bank:
+
+- **Entry price** = breakout price (price at the moment the signal was pushed)
+- **Leverage** and **deposit %** from AI recommendation are applied to P&L
+- **SL/TP** sanity check: TP must be above entry for LONG (below for SHORT), otherwise ignored
+- **R:R minimum 1:1.5** — AI must give TP distance ≥ 1.5× SL distance
+- **AI prediction match**: ✅ if AI direction (LONG/SHORT) matches actual P&L direction, ❌ if not
+- **SL/TP must be justified** by real technical levels (EMA, OB, support, ATR, Fibonacci) with reason in parentheses
+
+Commands:
+- `/signals` — full view: virtual bank + today's signals + all-time stats
+- `/signals close` — snapshot: close all open positions at current price, show day P&L
+- `/signals clear` — reset bank to $10,000, clear all-time stats (keep today's signals)
+
+---
+
+### 🦞 Deep OpenClaw SDK Integration (4 Services)
 
 | SDK Service | Purpose | Fallback |
 |---|---|---|
-| **`client.extract.run(model=TradeVerdict)`** | Returns **typed Pydantic models** (entry, SL, TP as floats) instead of raw text. Enables programmatic signal validation. | `agent.run()` → OpenRouter |
-| **`client.skills.run(skill_name, prompt)`** | All 7 Binance Web3 Skills are routed through the **OpenClaw Skills API** for orchestrated execution. | Direct HTTP to Binance Web3 API |
-| **`client.agent.run(prompt)`** | Core AI inference for trading verdicts via CMDOP Cloud relay. | OpenRouter aiohttp failsafe |
-| **SSE Streaming** | Real-time token-by-token streaming to Telegram via `stream=true`. Users see AI reasoning appear live with 🔴 LIVE indicator. | Progressive display fallback |
+| **`client.extract.run(model=TradeVerdict)`** | Returns **typed Pydantic models** (entry, SL, TP as floats) for programmatic signal validation | `agent.run()` → OpenRouter |
+| **`client.skills.run(skill_name, prompt)`** | All 7 Binance Web3 Skills routed through **OpenClaw Skills API** | Direct HTTP to Binance Web3 API |
+| **`client.agent.run(prompt)`** | Core AI inference for trading verdicts via CMDOP Cloud relay | OpenRouter aiohttp failsafe |
+| **SSE Streaming** | Real-time token-by-token streaming to Telegram via `stream=true` | Progressive display fallback |
 
-**Why this matters:** Every AI decision passes through OpenClaw's typed extraction pipeline. The `TradeVerdict` Pydantic model ensures the agent returns **validated floats** for Entry/SL/TP — not just text that might hallucinate wrong numbers. This is critical for real trading risk management.
+The 3-tier fallback chain (`Extract → Agent → OpenRouter`) ensures **zero downtime**.
 
 ---
 
 ## 📸 Proof of Concept & Killer Features
 
 ### 1. Autonomous Global Scanning & Safe 1-Click Publishing
-Exactly at `00:00 UTC` (the start of a new daily candle), Alisa analyzes over 540 futures pairs. Using a custom logarithmic algorithm, she builds geometric trendlines. When a true breakout occurs, the OpenClaw Agent analyzes the chart and sends a fully generated push notification to a dedicated Telegram group.
-* **Binance Square Integration:** The signal features an inline button to instantly publish the AI analysis to Binance Square. 
-* **Zero-Trust Security:** To prevent sabotage, the button verifies Telegram roles. You can invite friends to your signal group—only the Admin can trigger the Binance Square publishing. Routine commands are kept in a separate private DM to keep the main group clean.
+At the configured scan time, Alisa analyzes over 540 futures pairs. Using a custom logarithmic algorithm, she builds geometric trendlines. When a true breakout occurs, the OpenClaw Agent analyzes the chart with **SMC Indicator + 16+ technical indicators** and sends a fully generated push notification to the Telegram group.
 
 <img width="1600" height="1327" alt="frames-export-1773344230773_edit_462820069716103" src="https://github.com/user-attachments/assets/bad291f2-d21c-44d6-97d7-e6b3611c3c3c" />
 
 ### 2. Interactive Analysis & Dynamic Risk Management
-Traders can manually request an analysis by typing `look [coin]` (e.g., `look btc`). The OpenClaw agent immediately processes the chart, applies Web3 skills, and delivers a verdict.
-* **Smart Risk Manager:** If a user replies to an AI signal with text like: *"Margin 100, leverage 5x. What stop-loss should I set to avoid losing more than 10%?"* — the OpenClaw LLM strictly calculates the exact asset price for the Stop-Loss to defensively protect the portfolio.
-  
+Type `scan BTC` or `посмотри BTC` for full AI analysis with SMC Indicator data. Reply to any signal with margin/leverage for exact Stop-Loss calculation.
+
 <img width="1600" height="1331" alt="frames-export-1773344720986_edit_463360898442876" src="https://github.com/user-attachments/assets/9f24d943-5d69-4a49-9d84-309c4ab77e67" />
 
-
-### 3. Fully Automated "Hands-Free" Influencer Mode & Scheduling
-Alisa is not just a responder; she operates in the background. The bot features an internal `Square Publisher` task that utilizes OpenClaw to automatically generate and post bi-daily market updates to Binance Square without any human intervention.
-* **Dynamic Time Configuration:** You don't need to modify code or restart the server. Admins can dynamically change the global scanning or posting schedule directly via Telegram (e.g., `/time 03 00` shifts the internal chronometer on the fly).
-
+### 3. Automated Influencer Mode
+The Square Publisher generates and posts AI market updates to Binance Square automatically. Post format (~1000 chars, not article) with `#AIBinance #BinanceSquare #Write2Earn`. Supports **unlimited schedule times** via `/autopost time 09:00 12:30 15:00 18:00 21:00`.
 
 ![7469](https://github.com/user-attachments/assets/ef30b84b-ae3f-4341-a16e-62cb03315da3)
 
-
-
 ### 4. Real-Time AI Streaming (🔴 LIVE)
-When users type `scan BTC` or `look ETH`, AiAlisa streams the AI's reasoning **token by token** directly into Telegram via Server-Sent Events (SSE). The message updates live every 1.5 seconds, showing the AI's thought process in real-time with a blinking cursor (▌) and a 🔴 LIVE indicator. After completion, the streaming message is replaced with the final chart + verdict.
+`scan BTC` streams the AI's reasoning **token by token** directly into Telegram via SSE. The message updates live every 1.5s with a blinking cursor (▌) and 🔴 LIVE indicator.
 
-This creates a unique "AI thinking" experience that no other Binance bot offers.
-
-### 5. Education Mode: Learn Crypto Indicators
-The `/learn BTC` command transforms AiAlisa into a **crypto educator**. It fetches real-time indicator values for any coin and explains each one in plain language:
-
-- **RSI = 72.1** → "Overbought ⚠️ — price momentum is high, potential pullback"
-- **ADX = 18.5** → "Weak/sideways trend — no clear direction"
-- **Ichimoku → Above Cloud** → "Bullish trend — price is above the Ichimoku cloud"
-
-Covers all 10+ indicators: RSI, MFI, ADX, StochRSI, MACD, OBV, Ichimoku, SuperTrend, Volume Decay, Funding Rate. Available in English and Russian.
+### 5. Education Mode
+`/learn BTC` explains all indicators with real-time values in plain language. Covers RSI, MFI, ADX, StochRSI, MACD, OBV, Ichimoku, SuperTrend, Volume Decay, Funding Rate, and more.
 
 ### 6. Signal Accuracy Tracker
-The `/signals` command provides **full transparency** on bot performance. It compares every breakout signal's entry price against the current market price, calculating real-time profit/loss and overall winrate. This builds user trust and demonstrates the geometric scanner's effectiveness.
+`/signals` provides full transparency on bot performance with virtual bank P&L, leverage-adjusted returns, AI prediction accuracy (✅/❌), and winrate stats.
 
-### 7. Interactive Binance Web3 Skills Dashboard
-Powered by the new Binance OpenClaw Web3 API integration, Alisa provides an interactive `/skills` dashboard. Instead of browsing multiple websites, users can instantly retrieve on-chain data directly inside the chat to validate their trading bias.
+### 7. Binance Web3 Skills Dashboard
+`/skills` provides interactive access to on-chain data: Smart Money signals, Social Hype, Meme Rank, Inflow, Top Traders PnL, Token Rank.
 
 ![Screenshot_20260312_221445_org_telegram_messenger_LaunchActivity](https://github.com/user-attachments/assets/d077ac2b-7295-438b-a960-9d1744dcd74a)
 
-
 <details>
-<summary><b>🔌 The Core: OpenClaw Web3 Skills Arsenal (Click to Expand)</b></summary>
+<summary><b>🔌 OpenClaw Web3 Skills Arsenal (Click to Expand)</b></summary>
 <br>
-To give the AI true market awareness, Alisa deeply integrates with the newly released **Binance OpenClaw Web3 API**. Instead of relying purely on mathematical indicators, the agent requests real-time on-chain data and social sentiment before making a final verdict. 
 
-Through the intuitive Telegram `/skills` dashboard, users and the AI can execute the following proprietary skills:
-
-1. **🐋 Smart Money Signals (`get_smart_money_signals`):** Queries Binance Defi API to track massive whale wallets. It filters the on-chain noise to detect distinct buy/sell directions in real-time for specific base assets (e.g., BTC, ETH).
-2. **🔥 Social Hype Leaderboard (`get_social_hype_leaderboard`):** Analyzes global community sentiment. The LLM uses this to measure retail FOMO (Fear Of Missing Out) and identify overcrowded trades.
-3. **💸 Smart Money Net Inflow (`get_smart_money_inflow_rank`):** Scans multi-chain networks (ChainId: 56) to rank tokens by pure 24h capital inflow. Alisa uses this to find hidden accumulation phases before the price breaks out.
-4. **📊 Unified Token Rank (`get_unified_token_rank`):** Fetches Binance's internal macro pulse (Trending and Top Search rankings) to align the AI's bias with the broader market direction.
-5. **🐶 Breakthrough Meme Rank (`get_meme_rank`):** Utilizes Binance's exclusive pulse scoring system to algorithmically identify meme coins with the highest probability of an explosive breakout.
-6. **👨‍💻 Top Traders PnL (`get_address_pnl_rank`):** Tracks the 30-day Win Rate and Realized PnL of the absolute best on-chain traders, allowing the user to follow "smart money" wallet behavior.
-7. **📢 Binance Square OpenAPI (`post_to_binance_square`):** A custom write-skill that bypasses manual entry, allowing the AI to format, hashtag, and push the final financial report directly to the millions of users on the Binance Square social network in under 1 second.
+1. **🐋 Smart Money Signals** — whale wallet tracking via Binance DeFi API
+2. **🔥 Social Hype Leaderboard** — community sentiment and retail FOMO
+3. **💸 Smart Money Net Inflow** — 24h capital inflow ranking across chains
+4. **📊 Unified Token Rank** — Binance trending + top search rankings
+5. **🐶 Meme Rank** — explosive breakout probability scoring
+6. **👨‍💻 Top Traders PnL** — 30-day win rate of best on-chain traders
+7. **📢 Binance Square OpenAPI** — auto-publish AI reports to Square
 </details>
 
----
-
 <details>
-<summary><b>🧠 The Brain: Deep Technical Analysis Arsenal (Click to Expand)</b></summary>
+<summary><b>🧠 Technical Analysis Arsenal (Click to Expand)</b></summary>
 <br>
-To ensure the OpenClaw Agent delivers professional-grade verdicts, we feed it highly structured mathematical data. The prompt injection includes real-time values from:
 
 **Custom Mathematics:**
-*   **Logarithmic Trendline Formula:** Calculates geometric slopes using $Price = e^{(m \cdot x + c)}$ to filter market noise.
-*   **Smart Money Concepts (SMC):** Real-time mapping of Order Blocks (OB) and Fair Value Gaps (FVG).
-
-**Market Sentiment (via Binance Web3 Skills):**
-*   🐋 **Smart Money Detection** — whale wallet tracking via Binance DeFi API
-*   🔥 **Social Hype Leaderboard** — community sentiment and retail FOMO measurement
-*   💸 **Smart Money Net Inflow** — 24h capital inflow ranking across chains
-*   📊 **Unified Token Rank** — Binance trending + top search rankings
-*   🐶 **Meme Rank** — explosive breakout probability scoring
-*   👨‍💻 **Top Traders PnL** — 30-day win rate of best on-chain traders
-*   Live Binance Futures **Funding Rates** — monitored for short squeeze prediction
+- **Logarithmic Trendline Formula:** $Price = e^{(m \cdot x + c)}$ for geometric slope filtering
+- **SMC Indicator:** BOS/CHoCH, Order Blocks, FVG, EQH/EQL, Premium/Discount zones (ported from LuxAlgo TradingView)
 
 **16+ Technical Indicators:**
-*   **Trend & Momentum:** EMA (7, 25, 99), RSI (6, 12, 24), MACD (Line, Signal, Histogram), ADX, SuperTrend, Ichimoku Cloud, StochRSI.
-*   **Volume & Money Flow:** OBV, MFI (Money Flow Index), CMF (Chaikin Money Flow), Volume Decay, VWAP, Volume Block Analysis (buy/sell power shift).
-*   **Volatility:** Bollinger Bands (20, 2), ATR (14).
-*   **SMC (Smart Money Concepts):** Order Blocks (Support/Resistance OB), Fair Value Gaps (Bullish/Bearish FVG) — validated for unfilled gaps and unbroken levels.
-*   **Grid:** Dynamic Fibonacci retracements based on local extremums.
-*   **Funding Rate:** Real-time from Binance Futures API.
+- **Trend & Momentum:** EMA (7, 25, 99), RSI (6, 12, 24), MACD, ADX, SuperTrend, Ichimoku Cloud, StochRSI
+- **Volume & Money Flow:** OBV, MFI, CMF, Volume Decay, VWAP, Volume Block Analysis
+- **Volatility:** Bollinger Bands (20, 2), ATR (14)
+- **Grid:** Dynamic Fibonacci retracements
+- **Funding Rate:** Real-time from Binance Futures API
 
-All indicators + skills are explained in plain language via `/learn` education mode.
+**250 candles** per timeframe for accurate SMC detection on 4H, 1H, 15m.
 </details>
 
 ---
 
-## 🏗️ OpenClaw SDK Architecture: How It Works
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -148,175 +161,94 @@ All indicators + skills are explained in plain language via `/learn` education m
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│        BINANCE FUTURES API (540+ pairs, 4H+1D)       │
-│    fetch_klines() → Logarithmic Geometry Scanner     │
-│    199 candles × 4H/1D → find_trend_line()           │
-│    Smart API Weight Limiter (auto-pause > 2000)      │
+│        BINANCE FUTURES API (540+ pairs)               │
+│    250 candles × 4H/1H/15m/1D                        │
+│    Logarithmic Geometry Scanner + API Weight Limiter  │
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│        OPENCLAW SKILLS SDK (client.skills.run)       │
-│  ┌─────────────────┐  ┌──────────────────────────┐  │
-│  │ smart_money_     │  │ social_hype_leaderboard  │  │
-│  │ signals          │  │ meme_rank                │  │
-│  │ inflow_rank      │  │ unified_token_rank       │  │
-│  │ address_pnl_rank │  │ post_to_binance_square   │  │
-│  └─────────────────┘  └──────────────────────────┘  │
-│          ↓ fallback: Direct Binance Web3 HTTP        │
+│        SMC INDICATOR (core/smc.py)                    │
+│  BOS/CHoCH │ Order Blocks │ FVG │ EQH/EQL │ Zones   │
+│  Internal (size=5) + Swing (size=50) structure        │
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│      OPENCLAW EXTRACT (client.extract.run)           │
-│   TradeVerdict(BaseModel):                           │
-│     direction: "LONG" | entry: 98245.50 (float)     │
-│     stop_loss: 96100.00 | take_profit: 103500.00    │
-│        ↓ fallback: agent.run() → OpenRouter          │
+│        OPENCLAW SKILLS + EXTRACT + STREAMING          │
+│  Web3 Skills │ TradeVerdict │ SSE Live Streaming      │
+│  3-tier fallback: Extract → Agent → OpenRouter        │
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│      🔴 REAL-TIME SSE STREAMING (stream=true)        │
-│   Token-by-token AI reasoning → Telegram Live Edit   │
-│   Updates every 1.5s | Cursor ▌ | LIVE indicator    │
-│        ↓ fallback: Progressive display               │
-└──────────────┬──────────────────────────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────┐
-│        TELEGRAM + BINANCE SQUARE OUTPUT              │
-│  📊 Chart + AI Verdict + Extended Analysis           │
-│  📚 /learn (Education) | 🏆 /signals (Winrate)      │
-│  📢 [Post to Square] | 🔔 Price Alerts              │
+│        OUTPUT: TELEGRAM + BINANCE SQUARE              │
+│  📊 Chart + AI Verdict + SMC │ 📢 Auto-Post          │
+│  🏆 Signal Tracker │ 📚 Education │ 🔔 Alerts        │
 └─────────────────────────────────────────────────────┘
 ```
 
-The 3-tier fallback chain (`Extract → Agent → OpenRouter`) ensures **zero downtime** — if any OpenClaw service is temporarily unavailable, the bot seamlessly degrades to the next layer without the user noticing.
-
 ---
 
-## 🛡️ Enterprise-Grade Engine (Respecting Binance Infrastructure)
+## 🎙️ Command Reference
 
-A great bot doesn't just trade; it protects the ecosystem it lives in. 
-We implemented a strict **Binance API Rate Limit Manager** (`core/binance_api.py`). The bot actively listens to the `X-MBX-USED-WEIGHT-1M` headers from Binance APIs. 
-If the API weight exceeds `2350 / 2400`, the bot automatically triggers a safe throttle, pauses its asynchronous gather loops, and broadcasts a warning message to the administrator, completely eliminating the risk of receiving an IP ban (HTTP 429).
-
----
-
-## 🎙️ Telegram Command Center
-
-Alisa provides a comprehensive control panel via Telegram:
-
-**👥 Public Commands (all users):**
-
-| Command | Aliases | Description |
-|---|---|---|
-| `scan BTC` | `look BTC`, `check BTC`, `analyze BTC`, `посмотри BTC`, `глянь BTC`, `чекни BTC`, `анализ BTC` | 🔍 **AI analysis with real-time streaming** — 🔴 LIVE AI thinking → chart with logarithmic trendline → extended verdict with all indicators + Web3 skills |
-| `/learn BTC` | _(any futures coin)_ | 📚 **Education Mode** — explains ALL 16+ indicators with current values in plain language (RSI 6/12/24, MACD Line/Signal/Histogram, ADX, MFI, StochRSI, Ichimoku, SuperTrend, OBV, Bollinger Bands, VWAP, CMF, Volume Blocks, Funding Rate, SMC Order Blocks, FVG) |
-| `/signals` | *(admin only)* | 🏆 **Signal Accuracy Tracker** — live winrate of all bot predictions, compares entry vs current price (admin DM only) |
-| `/skills` | | 🛠 **Web3 Skills Dashboard** — interactive buttons for Smart Money, Social Hype, Meme Rank, Inflow, PnL, Token Rank |
-| `margin 100 leverage 10 max 20%` | `маржа 100 плечо 10 макс 20%` | 💰 **Risk Calculator** — reply to any signal for exact Stop-Loss math |
-| `/top gainers` | | 📈 Top 10 Futures growth (24h) |
-| `/top losers` | | 📉 Top 10 Futures drops (24h) |
-| `/trend` | | 📊 All breakout coins since last scan + ✅❌ AI prediction accuracy (LONG/SHORT vs actual price movement) |
-| `/alert BTC 69500` | | 🔔 Set persistent price alert (survives restarts) |
-| `/alert list` | | 🔔 View active alerts |
-| `/alert clear` | | 🔔 Remove all alerts |
-| `/lang en` | `/lang ru` | 🌐 Switch language — English / Russian (persistent per chat) |
-| `/start` | `/help`, `hello`, `привет` | 📋 Show all commands (bilingual EN + RU) |
-
-**🔐 Admin Commands (bot owner only):**
+**👥 Public Commands:**
 
 | Command | Description |
 |---|---|
-| `/models` | 🧠 Interactive AI engine selector (Free / GPT / Gemini via OpenRouter) |
-| `/time HH:MM` | ⏰ Dynamically set global geometric scan schedule |
-| `/autopost` | 📢 Show auto-posting status (coins, times, on/off) |
-| `/autopost on` / `off` | Toggle Binance Square auto-publisher |
-| `/autopost SOL BTC ETH` | Set coins for auto-posting |
-| `/autopost time 13:30 22:50` | Set auto-post schedule |
-| `/post [text]` | ✏️ Manually publish text to Binance Square |
-| Reply `/post` | ✏️ Publish replied message to Binance Square (auto-adds header + hashtags) |
-| Reply `/post [your opinion]` | ✏️ Combine AI analysis + your opinion → publish to Square |
-| `/paper BTC 74000 long 5x sl 73000 tp 75000` | 💼 Open paper position with optional SL/TP |
-| `/paper` | 💼 View portfolio with live P&L + SL/TP status (auto-closes on hit) |
-| `/paper close 1` | 💼 Manually close position #1 at current market price |
-| `/paper history` | 💼 View all closed trades with winrate |
-| `/paper clear` | 💼 Reset entire paper portfolio + history |
-| `📢 Post to Square` button | Admin-verified inline publishing under each signal |
+| `scan BTC` / `look BTC` / `посмотри BTC` | 🔍 AI analysis with SMC + streaming |
+| `/learn BTC` | 📚 Education mode |
+| `margin 100 leverage 10 max 20%` | 💰 Risk calculator |
+| `/skills` | 🛠 Web3 Skills dashboard |
+| `/top gainers` / `/top losers` | 📈📉 Top 10 (24h) |
+| `/trend` | 📊 All breakouts + AI accuracy |
+| `/alert BTC 69500` | 🔔 Price alert |
+| `/alert list` / `/alert clear` | 🔔 Manage alerts |
+| `/lang en` / `/lang ru` | 🌐 Language switch |
 
-**🤖 Automated Tasks:**
-*   **Global Geometric Scan** — Runs at configured `/time` schedule. Scans all 540+ Futures coins on 4H & 1D.
-*   **Daily Trend Summary** — Auto-sends all breakout coins at 23:57 UTC.
-*   **Square Auto-Publisher** — Extended AI analysis with funding rate, all indicators, Web3 skills + `#AIBinance` hashtags. Enable via `/autopost on`.
-*   **Price Alert Monitor** — Checks every 30 seconds, persists across restarts.
-*   **New Member Welcome** — Auto-sends command list when users join the group.
+**🔐 Admin Commands:**
+
+| Command | Description |
+|---|---|
+| `/signals` | 🏆 Virtual bank + signal winrate |
+| `/signals close` | 🔒 Close all open — day P&L snapshot |
+| `/signals clear` | 🔄 Reset bank to $10k |
+| `/models` | 🧠 AI engine selector |
+| `/time HH:MM` | ⏰ Set scan schedule |
+| `/autopost on` / `off` | 📢 Toggle Square publisher |
+| `/autopost SOL BTC ETH` | 🪙 Set coins |
+| `/autopost time 09:00 12:00 15:00 18:00 21:00` | ⏰ Set times (unlimited) |
+| `/post [text]` | ✏️ Manual post to Square |
+| `/paper BTC 74000 long 5x sl 73000 tp 75000` | 💼 Open paper position |
+| `/paper` / `/paper close 1` / `/paper history` / `/paper clear` | 💼 Paper trading |
 
 ---
 
-## 🚀 Easy Installation Guide (Production Ready)
+## 🚀 Installation
 
-This project is built for Ubuntu/Linux servers. To avoid dependency conflicts and ensure complete compatibility with the **OpenClaw SDK** (`openclaw` + `cmdop`), we strictly use **Python 3.11** in an isolated environment. Follow these exact steps to deploy the agent 24/7.
+### Prerequisites
+- Ubuntu/Linux server
+- Python 3.11
+- Telegram Bot Token, Binance API keys, OpenRouter API key
 
-### Step 1: Install Python 3.11
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install software-properties-common -y
-sudo add-apt-repository ppa:deadsnakes/ppa -y
-sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-dev build-essential -y
-```
-
-### Step 2: Clone and Setup Environment
+### Quick Setup
 ```bash
 git clone https://github.com/Aliskasq/AIAlisa.git
 cd AIAlisa
-
-# Create and activate virtual environment
 python3.11 -m venv venv
 source venv/bin/activate
-```
-
-### Step 3: Install Dependencies
-```bash
 pip install --upgrade pip
 pip install openclaw cmdop
 pip install -r requirements.txt
-```
 
-### Step 4: OpenClaw Library Hotfix (Crucial)
-*Note: Currently, the beta release of the `cmdop` package (an OpenClaw dependency) is missing the `TimeoutError` import. This causes the SDK to throw an OS dependency error (`WARNING ⚠️ OpenClaw core detected missing OS dependencies`) on boot and forces the agent into the failsafe routing mode (bypassing `client.extract.run` and `client.skills.run`).* 
-
-Apply this 1-line patch to fix the library code directly via terminal:
-```bash
+# OpenClaw SDK hotfix
 echo "TimeoutError = TimeoutError" >> venv/lib/python3.11/site-packages/cmdop/exceptions.py
-```
 
-### Step 5: Configure Environment
-Copy `.env.example` to `.env`:
-```bash
+# Configure
 cp .env.example .env
-nano .env
-```
-Fill in the following values:
+nano .env  # Fill in API keys
 
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Your Telegram bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Your personal Telegram user ID (admin) |
-| `TELEGRAM_GROUP_CHAT_ID` | Signal group chat ID |
-| `OPENROUTER_API_KEY` | OpenRouter API key (failsafe AI routing) |
-| `CMDOP_API_KEY` | CMDOP/OpenClaw API key (primary AI routing) |
-| `SQUARE_OPENAPI_KEY` | Binance Square OpenAPI key |
-| `ENCRYPTION_KEY` | Fernet key for Binance API encryption |
-| `ENCRYPTED_API_KEY` | Encrypted Binance API key |
-| `ENCRYPTED_SECRET_KEY` | Encrypted Binance Secret key |
-
-Save and exit (`Ctrl+O`, `Enter`, `Ctrl+X`).
-
-### Step 6: Create a Background Service (systemd)
-To keep the bot running 24/7, create a system service:
-```bash
+# Create systemd service
 sudo tee /etc/systemd/system/AI.service > /dev/null << 'EOF'
 [Unit]
-Description=AI Alisa Copilot Bot (OpenClaw SDK)
+Description=AI Alisa Copilot Bot
 After=network.target
 
 [Service]
@@ -325,54 +257,49 @@ WorkingDirectory=/root/AIAlisa
 ExecStart=/root/AIAlisa/venv/bin/python main.py
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=alisa-bot
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
 EOF
-```
 
-Enable and start the daemon:
-```bash
 sudo systemctl daemon-reload
 sudo systemctl enable AI.service
 sudo systemctl start AI.service
-```
 
-### Step 7: Verify Installation
-Verify that the OpenClaw SDK is successfully compiled and patched:
-```bash
-source venv/bin/activate
-python -c 'import openclaw; print("✅ OPENCLAW SDK READY")'
-```
-
-Verify the new Structured Output model loads:
-```bash
-python -c 'from agent.analyzer import TradeVerdict; print("✅ TradeVerdict model:", TradeVerdict.model_fields.keys())'
-```
-
-Watch the live logs to ensure the bot is online:
-```bash
+# Watch logs
 journalctl -u AI.service -f
 ```
 
-You should see these lines confirming the 3-service OpenClaw integration:
+### Verify
+```bash
+source venv/bin/activate
+python -c 'import openclaw; print("✅ OPENCLAW SDK READY")'
+python -c 'from agent.analyzer import TradeVerdict; print("✅ TradeVerdict model:", TradeVerdict.model_fields.keys())'
+python -c 'from core.smc import analyze_smc; print("✅ SMC Indicator READY")'
 ```
-⚙️ [OpenClaw Architecture] Executing Agentic Binance Skills...
-✅ [OpenClaw SDK] Skill 'smart_money_signals' executed successfully
-📊 [OpenClaw Extract] Requesting structured TradeVerdict...
-✅ OpenClaw Extract: Structured verdict received → LONG (Entry: ..., SL: ..., TP: ...)
+
+---
+
+## 📁 Project Structure
+
+```
+AIAlisa/
+├── main.py                  # Entry point: geometry scanner + breakout engine
+├── config.py                # Virtual bank, breakout log, alerts, AI param parser
+├── agent/
+│   ├── analyzer.py          # AI prompt builder + OpenClaw SDK integration
+│   └── square_publisher.py  # Binance Square auto-publisher
+├── core/
+│   ├── smc.py               # SMC Indicator (BOS/CHoCH, OB, FVG, EQH/EQL)
+│   ├── indicators.py        # 16+ technical indicators calculator
+│   ├── tg_listener.py       # Telegram command handler (scan, signals, paper, etc.)
+│   ├── geometry_scanner.py  # Logarithmic trendline builder
+│   ├── chart_drawer.py      # Chart image generator with trendlines
+│   └── binance_api.py       # Binance API wrapper with rate limiting
+└── data/                    # Runtime data (breakout log, virtual bank, alerts, etc.)
 ```
 
-### Step 8: Trigger the Geometric Scan (Bootstrapping)
-By default, the global logarithmic mathematical scan is heavily resource-intensive and is scheduled to trigger exactly at `00:00 UTC` (the start of a new daily candle). 
-If you want to test the breakout detection **immediately**, enter your Telegram bot chat and dynamically change the schedule using the `/time` command.
+---
 
-*(Note: The server time zone logs operate in UTC+3)*. 
-Example: If your local server time is `17:54`, type this to the bot:
-**`/time 17 55`**
-
-The bot will reply: `✅ Global scan time successfully changed to 17:55 (UTC+3)`. Once the minute hits, the scanning sequence will execute, and you will begin receiving real-time AI analytical signals and charts!
+*Built with ❤️ on [OpenClaw](https://github.com/openclaw) for the Binance ecosystem.*

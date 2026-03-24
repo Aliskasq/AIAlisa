@@ -127,7 +127,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
     # --- PREPARE BINANCE SQUARE PUBLICATION ---
     post_id = str(uuid.uuid4())[:8]
-    square_text = f"🚀 ${symbol} Technical Breakout Alert!\n\nTimeframe: {tf}\nCurrent Price: ${current_price:.4f}\n\n{ai_text}\n\n#AIBinance #BinanceSquare #Write2Earn"
+    square_text = f"🚀 ${symbol} Technical Breakout Alert!\n\nTimeframe: {tf}\nCurrent Price: ${current_price:.4f}\n\n{ai_text}"
     # Save to file-based cache (no circular import needed)
     try:
         cache = {}
