@@ -237,8 +237,8 @@ ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 
 💰 Entry: [CURRENT PRICE at breakout — this is auto-filled, write current price]
 🔰 Safe Entry: [better entry from support/OB/BB — for patient traders]
-🚫 SL: [price] ([reason: EMA/OB/support/ATR level])
-🎯 TP: [price] ([reason: resistance/OB/EMA/fib level])
+🚫 SL: [price] ([reason: EMA/OB/FVG/support/ATR level])
+🎯 TP: [price] ([reason: resistance/OB/EMA/FVG/EQH level])
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
 ---
@@ -249,7 +249,7 @@ CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
 3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
-4. SL and TP MUST be based on real technical levels (EMA, BB, support/resistance, Order Block, Ichimoku cloud, ATR, Fibonacci). Write the reason in parentheses after each price. NO random numbers.
+4. SL and TP MUST be based on real technical levels from the data provided: EMA, BB, Order Block, FVG, EQH/EQL, Ichimoku cloud, ATR, support/resistance. Write the reason in parentheses after each price. If SMC Indicator data is provided, USE IT for SL/TP placement. NO random numbers.
 5. RISK:REWARD RATIO must be at least 1:1.5 (ideally 1:2+). TP distance from entry MUST be >= 1.5× SL distance. NEVER give TP closer than SL.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
@@ -274,14 +274,14 @@ ${base_coin} 📊 Price: ${price:.6f}
 💰 Entry: [CURRENT PRICE at breakout]
 🔰 Safe: [better entry from support/OB/BB]
 🚫 SL: [price] ([reason: EMA/OB/support/ATR])
-🎯 TP: [price] ([reason: resistance/OB/EMA/fib])
+🎯 TP: [price] ([reason: resistance/OB/EMA/FVG/EQH])
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
 RULES:
 1. Pick ONE direction. % shows confidence level.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
 3. Entry = current price. Safe Entry = optimal from support/OB for better R:R.
-4. SL and TP MUST be based on real technical levels (EMA, BB, support, OB, ATR, fib). Write reason in () after price. NO random numbers.
+4. SL/TP from real levels: EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR. Use SMC Indicator data if provided. Write reason in (). NO random numbers.
 5. R:R minimum 1:1.5 (ideally 1:2+). TP distance ≥ 1.5× SL distance. NEVER give TP closer than SL.
 6. DO NOT ADD HASHTAGS.
 7. MAX 1000 CHARACTERS total.
