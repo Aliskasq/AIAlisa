@@ -766,7 +766,7 @@ async def telegram_polling_loop(app_session):
                                     "*📋 Commands / Команды:*\n\n"
                                     "🔍 `scan BTC` / `посмотри BTC` — _AI analysis / анализ_\n"
                                     "📚 `/learn BTC` _(any coin)_ — _education / обучение_\n"
-                                    "🏆 `/signals` — _winrate / точность (admin)_\n"
+                                    "🏆 `/signals` — _winrate (admin)_\n"
                                     "💰 `margin 100 leverage 10` — _stop-loss calc_\n"
                                     "🛠 `/skills` — _Web3 Skills_\n"
                                     "📈 `/top gainers` · 📉 `/top losers`\n"
@@ -887,8 +887,6 @@ async def telegram_polling_loop(app_session):
                                 "    _AI analysis + chart / AI анализ + график_\n\n"
                                 "📚 `/learn BTC` _(any futures coin / любая фьючерсная монета)_\n"
                                 "    _Education: indicators explained / Обучение: объяснение индикаторов_\n\n"
-                                "🏆 `/signals` _(admin)_\n"
-                                "    _Signal accuracy & winrate / Точность сигналов_\n\n"
                                 "💰 `margin 100 leverage 10 max 20%`\n"
                                 "    _Stop-loss calculator / Расчёт стоп-лосса_\n\n"
                                 "🛠 `/skills`\n"
@@ -907,6 +905,9 @@ async def telegram_polling_loop(app_session):
                             if is_admin(msg):
                                 welcome_text += (
                                     "\n\n🔐 *Admin:*\n"
+                                    "🏆 `/signals` — signal winrate & bank\n"
+                                    "🔒 `/signals close` — snapshot: close all open now\n"
+                                    "🔄 `/signals clear` — reset bank to $10k\n"
                                     "🧠 `/models` — AI engine\n"
                                     "⏰ `/time 18:30` — scan schedule\n"
                                     "📢 `/autopost on/off` — auto Square\n"
