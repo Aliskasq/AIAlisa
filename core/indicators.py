@@ -176,72 +176,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     mf_volume = mf_multiplier * df['volume']
     df['cmf'] = mf_volume.rolling(20).sum() / df['volume'].rolling(20).sum()
 
-    # 16. (Volume Blocks removed — low signal, noise)
-
-    # ==========================================
-    # 🧠 SMART MONEY CONCEPTS (SMC)
-    # ==========================================
-
-    current_price = df['close'].iloc[-1]
-
-    # --- FVG (Fair Value Gap) ---
-    # Bullish FVG: candle[i] low > candle[i-2] high (gap up — unfilled = support)
-    # Bearish FVG: candle[i-2] low > candle[i] high (gap down — unfilled = resistance)
-    last_bull_fvg = "None"
-    last_bear_fvg = "None"
-
-    for i in range(len(df) - 1, 2, -1):
-        gap_bottom = df['high'].iloc[i - 2]
-        gap_top = df['low'].iloc[i]
-        if gap_top > gap_bottom:
-            # Bullish FVG exists — check if still unfilled (price hasn't dropped through it)
-            if current_price >= gap_bottom:
-                last_bull_fvg = f"{gap_bottom:.5f} - {gap_top:.5f}"
-                break
-
-    for i in range(len(df) - 1, 2, -1):
-        gap_top = df['low'].iloc[i - 2]
-        gap_bottom = df['high'].iloc[i]
-        if gap_top > gap_bottom:
-            # Bearish FVG exists — check if still unfilled (price hasn't risen through it)
-            if current_price <= gap_top:
-                last_bear_fvg = f"{gap_bottom:.5f} - {gap_top:.5f}"
-                break
-
-    # --- Order Blocks ---
-    df['is_green'] = df['close'] > df['open']
-    df['is_red'] = df['close'] < df['open']
-    df['body_size'] = np.abs(df['close'] - df['open'])
-
-    strong_bull = df[(df['is_green']) & (df['body_size'] > df['atr'] * 1.5)]
-    strong_bear = df[(df['is_red']) & (df['body_size'] > df['atr'] * 1.5)]
-
-    bullish_ob = "None"
-    bearish_ob = "None"
-
-    # Bullish OB: last red candle before a strong green move, still holding as support
-    if not strong_bull.empty:
-        for sb_idx in reversed(strong_bull.index.tolist()):
-            reds_before = df.loc[:sb_idx][df.loc[:sb_idx]['is_red']]
-            if not reds_before.empty:
-                ob_low = reds_before['low'].iloc[-1]
-                ob_high = reds_before['high'].iloc[-1]
-                # OB is valid only if price is still above it (not broken)
-                if current_price >= ob_low:
-                    bullish_ob = f"{ob_low:.5f} - {ob_high:.5f} (Support OB)"
-                    break
-
-    # Bearish OB: last green candle before a strong red move, still holding as resistance
-    if not strong_bear.empty:
-        for sb_idx in reversed(strong_bear.index.tolist()):
-            greens_before = df.loc[:sb_idx][df.loc[:sb_idx]['is_green']]
-            if not greens_before.empty:
-                ob_low = greens_before['low'].iloc[-1]
-                ob_high = greens_before['high'].iloc[-1]
-                # OB is valid only if price is still below it (not broken)
-                if current_price <= ob_high:
-                    bearish_ob = f"{ob_low:.5f} - {ob_high:.5f} (Resist OB)"
-                    break
+    # (Old SMC code removed — replaced by core/smc.py with full LuxAlgo port)
 
     # ==========================================
     # ⏳ DYNAMIC PRICE CHANGE (1H/4H & 24H)
@@ -301,11 +236,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "bb_upper": last['bb_upper'],
         "bb_lower": last['bb_lower'],
         "bb_mid": last['bb_mid'],
-        "cmf": last['cmf'],
-        "smc_bullish_ob": bullish_ob,
-        "smc_bearish_ob": bearish_ob,
-        "smc_bullish_fvg": last_bull_fvg,
-        "smc_bearish_fvg": last_bear_fvg
+        "cmf": last['cmf']
     }
 
     return last_indic_row, df
@@ -352,7 +283,5 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"MACD: {indic['macd_line']:.6f} / Signal: {indic['macd_signal']:.6f} / Hist: {indic['macd_hist']:.6f}\n"
         f"SuperTrend: {indic['supertrend']} @ {indic['supertrend_price']:.6f} | ADX: {indic['adx']:.1f}\n"
         f"Bollinger: {indic['bb_lower']:.6f} / {indic['bb_mid']:.6f} / {indic['bb_upper']:.6f}\n"
-        f"Ichimoku: {indic['ichimoku_status']} | OBV: {indic['obv_status']} | CMF: {indic['cmf']:.4f}\n"
-        f"SMC — Bull OB: {indic['smc_bullish_ob']} | Bear OB: {indic['smc_bearish_ob']}\n"
-        f"SMC — Bull FVG: {indic['smc_bullish_fvg']} | Bear FVG: {indic['smc_bearish_fvg']}"
+        f"Ichimoku: {indic['ichimoku_status']} | OBV: {indic['obv_status']} | CMF: {indic['cmf']:.4f}"
     )
