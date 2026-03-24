@@ -183,49 +183,21 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     day_pnl_dollar = 0.0
     trade_lines = []
 
-    day_skipped = 0
-
     for entry in log:
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
         now_price = price_map.get(sym, entry.get("current_price", 0))
 
-        # Use AI entry/SL/TP if available, otherwise fallback to breakout_price
-        ai_entry = entry.get("ai_entry")
+        # Entry = breakout price (price when signal was pushed)
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
         ai_leverage = entry.get("ai_leverage", 1) or 1
         ai_deposit_pct = entry.get("ai_deposit_pct")
-        entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
-
-        # Check if price ever reached AI entry (for LONG: price must have dipped to entry or below; for SHORT: risen to entry or above)
-        # We check current price vs entry as proxy — if AI entry was never touched, mark as skipped
-        entry_reached = True
-        if ai_entry and ai_dir and entry.get("breakout_price"):
-            bp = entry["breakout_price"]
-            if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
-                # AI wanted lower entry (buy the dip), price may not have reached it
-                # If current price is above entry AND breakout price was above entry, entry may not have been hit
-                # We can't know for sure without historical candles, so we check: if entry < breakout and price never went below entry
-                # Simple heuristic: if ai_entry is significantly below breakout (>1%), likely not reached
-                gap_pct = ((bp - ai_entry) / bp) * 100
-                if gap_pct > 1.0 and now_price > ai_entry:
-                    entry_reached = False
-            elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
-                gap_pct = ((ai_entry - bp) / bp) * 100
-                if gap_pct > 1.0 and now_price < ai_entry:
-                    entry_reached = False
-
-        if not entry_reached:
-            day_skipped += 1
-            trade_lines.append(
-                f"⚪ `{short_sym}` {tf}{dir_tag} | вход `{entry_price:.6f}` не достигнут (сейчас `{now_price:.6f}`) 🚫"
-            )
-            continue
 
         # Determine trade status: TP hit, SL hit, or still open
         # Sanity: TP/SL must make sense for direction (LONG TP > entry, SL < entry; vice versa for SHORT)
@@ -314,13 +286,12 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
     if lang == "ru":
         pending_text = f" | ⏳ Открытых: {day_pending}" if day_pending > 0 else ""
-        skip_text = f" | ⚪ Не вошли: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🏦 *Виртуальный банк*\n"
             f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
             f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Сегодня ({day_total} сигналов):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *Всего за всё время:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
@@ -328,13 +299,12 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         )
     else:
         pending_text = f" | ⏳ Open: {day_pending}" if day_pending > 0 else ""
-        skip_text = f" | ⚪ Skipped: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🏦 *Virtual Bank*\n"
             f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
             f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Today ({day_total} signals):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *All-time:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
@@ -378,7 +348,6 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     bank = load_virtual_bank()
     day_wins = 0
     day_losses = 0
-    day_skipped = 0
     day_pnl_dollar = 0.0
     trade_lines = []
 
@@ -388,35 +357,15 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         ai_dir = entry.get("ai_direction", "")
         now_price = price_map.get(sym, entry.get("current_price", 0))
 
-        ai_entry = entry.get("ai_entry")
+        # Entry = breakout price (price when signal was pushed)
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
         ai_leverage = entry.get("ai_leverage", 1) or 1
         ai_deposit_pct = entry.get("ai_deposit_pct")
-        entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
-
-        # Check if price reached AI entry
-        entry_reached = True
-        if ai_entry and ai_dir and entry.get("breakout_price"):
-            bp = entry["breakout_price"]
-            if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
-                gap_pct = ((bp - ai_entry) / bp) * 100
-                if gap_pct > 1.0 and now_price > ai_entry:
-                    entry_reached = False
-            elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
-                gap_pct = ((ai_entry - bp) / bp) * 100
-                if gap_pct > 1.0 and now_price < ai_entry:
-                    entry_reached = False
-
-        if not entry_reached:
-            day_skipped += 1
-            trade_lines.append(
-                f"⚪ `{short_sym}` {tf}{dir_tag} | вход `{entry_price:.6f}` не достигнут (сейчас `{now_price:.6f}`) 🚫"
-            )
-            continue
 
         # Determine original status (TP/SL already hit or still open)
         status = "open"
@@ -495,20 +444,18 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
 
     if lang == "ru":
-        skip_text = f"\n⚪ Не вошли: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🔒 *Закрытие всех позиций (снимок)*\n\n"
             f"📅 *Сегодня ({day_total} сделок):*\n"
-            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%){skip_text}\n"
+            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%)\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
     else:
-        skip_text = f"\n⚪ Skipped: {day_skipped}" if day_skipped > 0 else ""
         header = (
             f"🔒 *Close all positions (snapshot)*\n\n"
             f"📅 *Today ({day_total} trades):*\n"
-            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%){skip_text}\n"
+            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
@@ -561,28 +508,12 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             for entry in log:
                 sym = entry["symbol"]
                 ai_dir = entry.get("ai_direction", "")
-                ai_entry = entry.get("ai_entry")
                 ai_sl = entry.get("ai_sl")
                 ai_tp = entry.get("ai_tp")
                 ai_leverage = entry.get("ai_leverage", 1) or 1
                 ai_deposit_pct = entry.get("ai_deposit_pct")
-                entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+                entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
                 now_price = price_map.get(sym, entry.get("current_price", 0))
-
-                # Skip trades where entry was never reached
-                entry_reached = True
-                if ai_entry and ai_dir and entry.get("breakout_price"):
-                    bp = entry["breakout_price"]
-                    if ai_dir == "LONG" and ai_entry < bp and now_price > ai_entry:
-                        gap_pct = ((bp - ai_entry) / bp) * 100
-                        if gap_pct > 1.0:
-                            entry_reached = False
-                    elif ai_dir == "SHORT" and ai_entry > bp and now_price < ai_entry:
-                        gap_pct = ((ai_entry - bp) / bp) * 100
-                        if gap_pct > 1.0:
-                            entry_reached = False
-                if not entry_reached:
-                    continue
 
                 # Determine TP/SL hit (sanity: TP/SL must make sense for direction)
                 status = "open"

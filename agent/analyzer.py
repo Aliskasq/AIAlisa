@@ -235,7 +235,8 @@ ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 💰 Funding: [rate + interpretation]
 ⚠️ Note: [pullback risk / divergence between TFs / key level nearby]
 
-🎯 Entry: [optimal price NOT current — use support/OB/BB levels]
+💰 Entry: [CURRENT PRICE at breakout — this is auto-filled, write current price]
+🔰 Safe Entry: [better entry from support/OB/BB — for patient traders]
 🚫 SL: [calculated to avoid whipsaw — use ATR-based or below OB]
 🎯 TP: [realistic target from resistance/OB]
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
@@ -247,7 +248,7 @@ Detailed breakdown of each TF, SMC zones, EMA alignment, divergences between TFs
 CRITICAL RULES:
 1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
-3. Entry price must NOT be current price. Find optimal entry from support/resistance across TFs.
+3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
 4. SL must be calculated optimally — avoid tight SLs that get whipsawed. Use ATR or OB-based SL.
 5. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 6. DO NOT ADD HASHTAGS.
@@ -269,7 +270,8 @@ ${base_coin} 📊 Price: ${price:.6f}
 💰 Funding: [rate]
 ⚠️ [short note on risk/pullback]
 
-🎯 Entry: [optimal, NOT current price]
+💰 Entry: [CURRENT PRICE at breakout]
+🔰 Safe: [better entry from support/OB/BB]
 🚫 SL: [ATR-based, avoid whipsaw]
 🎯 TP: [target]
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
@@ -277,7 +279,7 @@ ${base_coin} 📊 Price: ${price:.6f}
 RULES:
 1. Pick ONE direction. % shows confidence level.
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
-3. Entry ≠ current price. Use support/OB/BB levels.
+3. Entry = current price. Safe Entry = optimal from support/OB for better R:R.
 4. SL: use ATR-based or below Order Block — avoid tight SLs.
 5. DO NOT ADD HASHTAGS.
 6. MAX 1000 CHARACTERS total.
@@ -312,7 +314,7 @@ RULES:
 
 Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 
-Cross-TF divergences = pullback risk. Entry from support/OB, NOT current price.
+Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
 """
 
     # ---------------------------------------------------------
