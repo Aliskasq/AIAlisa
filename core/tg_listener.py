@@ -306,6 +306,128 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     return all_msgs
 
 
+async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
+    """Snapshot view: close all pending trades at current price, show day P&L summary. Read-only — changes nothing."""
+    log = load_breakout_log()
+
+    if not log:
+        if lang == "ru":
+            return ["📭 Сегодня пока нет сигналов."]
+        else:
+            return ["📭 No signals today yet."]
+
+    # Batch prices
+    price_map = {}
+    try:
+        async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+            if resp.status == 200:
+                for p in await resp.json():
+                    price_map[p["symbol"]] = float(p["price"])
+    except Exception:
+        pass
+
+    day_wins = 0
+    day_losses = 0
+    day_pnl_dollar = 0.0
+    trade_lines = []
+
+    for entry in log:
+        sym = entry["symbol"]
+        tf = entry.get("tf", "?")
+        ai_dir = entry.get("ai_direction", "")
+        now_price = price_map.get(sym, entry.get("current_price", 0))
+
+        ai_entry = entry.get("ai_entry")
+        ai_sl = entry.get("ai_sl")
+        ai_tp = entry.get("ai_tp")
+        entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
+
+        # Determine original status (TP/SL already hit or still open)
+        status = "open"
+        if ai_dir and entry_price > 0:
+            if ai_dir == "LONG":
+                if ai_tp and now_price >= ai_tp:
+                    status = "tp"
+                elif ai_sl and now_price <= ai_sl:
+                    status = "sl"
+            elif ai_dir == "SHORT":
+                if ai_tp and now_price <= ai_tp:
+                    status = "tp"
+                elif ai_sl and now_price >= ai_sl:
+                    status = "sl"
+
+        # P&L — for TP/SL use their prices, for open use current (= "close now")
+        if entry_price > 0:
+            if ai_dir == "SHORT":
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                else:
+                    pnl_pct = ((entry_price - now_price) / entry_price) * 100
+            else:
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                else:
+                    pnl_pct = ((now_price - entry_price) / entry_price) * 100
+        else:
+            pnl_pct = 0
+
+        pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
+
+        # Everything counts as closed
+        if pnl_pct >= 0:
+            day_wins += 1
+            icon = "🟢"
+        else:
+            day_losses += 1
+            icon = "🔴"
+
+        day_pnl_dollar += pnl_dollar
+
+        short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
+        closed_tag = " ✅TP" if status == "tp" else " 🚫SL" if status == "sl" else " 🔒"
+        trade_lines.append(
+            f"{icon} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
+        )
+
+    day_total = day_wins + day_losses
+    day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
+
+    if lang == "ru":
+        header = (
+            f"🔒 *Закрытие всех позиций (снимок)*\n\n"
+            f"📅 *Сегодня ({day_total} сделок):*\n"
+            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
+            f"{'─' * 30}\n"
+        )
+    else:
+        header = (
+            f"🔒 *Close all positions (snapshot)*\n\n"
+            f"📅 *Today ({day_total} trades):*\n"
+            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
+            f"{'─' * 30}\n"
+        )
+
+    all_msgs = []
+    current_chunk = header
+    for line in trade_lines:
+        if len(current_chunk) + len(line) + 2 > 3900:
+            all_msgs.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += "\n" + line
+    if current_chunk:
+        all_msgs.append(current_chunk)
+
+    return all_msgs
+
+
 async def auto_trend_sender(session: aiohttp.ClientSession):
     """Background task: at 23:59:15 UTC daily — send daily summary to admin DM, update virtual bank, clear log."""
     while True:
@@ -1161,6 +1283,18 @@ async def telegram_polling_loop(app_session):
                                         "📊 All-time stats cleared\n"
                                         "📋 Today's signals kept in the list",
                                         msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /signal close — snapshot: close all pending at current price, show day P&L
+                            if len(sig_parts) >= 2 and sig_parts[1] in ("close", "закрыть"):
+                                try:
+                                    chunks = await build_signals_close_text(app_session, lang=lang_pref)
+                                    for i, chunk in enumerate(chunks):
+                                        rid = msg_id if i == 0 else None
+                                        await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
+                                except Exception as e:
+                                    logging.error(f"❌ /signals close error: {e}")
+                                    await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
                                 continue
 
                             try:
