@@ -316,7 +316,7 @@ RULES:
             if isinstance(smc_result, dict) and "summary" in smc_result:
                 smc_parts.append(smc_result["summary"])
         if smc_parts:
-            smc_text = "\n\n[SMART MONEY CONCEPTS]\n" + "\n\n".join(smc_parts)
+            smc_text = "\n\n[SMC INDICATOR — Structure, Order Blocks, FVG, Liquidity]\n" + "\n\n".join(smc_parts)
 
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
@@ -328,7 +328,7 @@ Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 {smc_text}
 
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
-Use SMC data (Order Blocks, FVG, structure) to set SL/TP at real levels. OB = key support/resistance for SL. FVG = potential targets.
+Use SMC Indicator data (Order Blocks, FVG, BOS/CHoCH structure) to set SL/TP at real levels. OB = key support/resistance for SL. FVG = potential targets.
 """
 
     # ---------------------------------------------------------

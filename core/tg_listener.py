@@ -2036,7 +2036,20 @@ async def telegram_polling_loop(app_session):
                                         mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
                                     if raw_15m:
                                         mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
-                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mtf_data=mtf_data)
+
+                                    # SMC Indicator (Structure, Order Blocks, FVG)
+                                    smc_data = {}
+                                    try:
+                                        from core.smc import analyze_smc
+                                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                                        if raw_1h:
+                                            smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                                        if raw_15m:
+                                            smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                                    except Exception as e:
+                                        logging.error(f"❌ SMC look error: {e}")
+
+                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mtf_data=mtf_data, smc_data=smc_data)
                                     await send_response(app_session, chat_id, ai_msg, msg_id)
 
         except Exception as e:

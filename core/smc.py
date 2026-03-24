@@ -409,7 +409,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         zones = get_premium_discount(df, swing_size)
 
         # ── BUILD TEXT SUMMARY ──
-        lines = [f"📐 SMC [{tf_label}]:"]
+        lines = [f"📐 SMC Indicator [{tf_label}]:"]
 
         # Current trend from last swing structure
         if swing_structures:

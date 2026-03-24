@@ -128,20 +128,41 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 short_coin = symbol.replace("USDT", "")
                 logging.info(f"📢 Generating Square post for {symbol}...")
 
-                # Fetch 4H candles for better analysis (not 1H)
-                raw_df = await fetch_klines(session, symbol, "4h", 100)
-                if not raw_df:
+                # Fetch 250 candles per TF for SMC + indicators
+                raw_4h = await fetch_klines(session, symbol, "4h", 250)
+                if not raw_4h:
                     continue
 
-                df = pd.DataFrame(raw_df)
+                df = pd.DataFrame(raw_4h)
                 last_row, _ = calculate_binance_indicators(df, "4H")
 
-                # Fetch funding rate (was missing — caused "unknown")
+                # Fetch funding rate
                 funding = await fetch_funding_rate(session, symbol)
                 last_row["funding_rate"] = funding
 
-                # Extended AI analysis for richer Square posts
-                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", extended=True)
+                # Multi-TF indicators
+                raw_1h = await fetch_klines(session, symbol, "1h", 250)
+                raw_15m = await fetch_klines(session, symbol, "15m", 250)
+                mtf_data = {}
+                if raw_1h:
+                    mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                if raw_15m:
+                    mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+
+                # SMC Indicator (Structure, Order Blocks, FVG)
+                smc_data = {}
+                try:
+                    from core.smc import analyze_smc
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                    if raw_1h:
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                    if raw_15m:
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                except Exception as e:
+                    logging.error(f"❌ SMC autopost error: {e}")
+
+                # Extended AI analysis with MTF + SMC Indicator
+                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", extended=True, mtf_data=mtf_data, smc_data=smc_data)
 
                 # Build Square post with proper header
                 square_text = (
