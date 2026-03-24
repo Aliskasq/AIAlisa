@@ -1833,7 +1833,7 @@ async def telegram_polling_loop(app_session):
                             )
 
                             # Fetch 199 candles for trend line construction (same as main scanner)
-                            raw_df_full = await fetch_klines(app_session, symbol, "4h", 250)
+                            raw_df_full = await fetch_klines(app_session, symbol, "4h", 199)
                             # Fetch multi-timeframe: 4H (primary) + 1H + 15m + 1D (250 candles for SMC)
                             raw_df_4h = await fetch_klines(app_session, symbol, "4h", 250)
                             raw_df_1h = await fetch_klines(app_session, symbol, "1h", 250)

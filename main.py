@@ -134,8 +134,8 @@ async def main():
                         tasks = []
 
                         for s in chunk:
-                            tasks.append(fetch_klines(session, s, '1d', 250))
-                            tasks.append(fetch_klines(session, s, '4h', 250))
+                            tasks.append(fetch_klines(session, s, '1d', 199))
+                            tasks.append(fetch_klines(session, s, '4h', 199))
 
                         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -257,8 +257,8 @@ async def main():
                             is_sent = False # Default to not sent
 
                             if line_data:
-                                # 1. Breakout confirmed! Downloading DEEP history (499) for SMC patterns
-                                limit_k = 499
+                                # 1. Breakout confirmed! Download history for chart + SMC
+                                limit_k = 250
                                 interval_fetch = '1d' if tf_key == "1D" else '4h'
                                 full_raw = await fetch_klines(session, symbol, interval_fetch, limit_k)
 
