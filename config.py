@@ -59,6 +59,20 @@ def save_virtual_bank(bank):
     except Exception as e:
         logging.error(f"Error writing virtual bank: {e}")
 
+def reset_virtual_bank():
+    """Reset virtual bank to starting state (balance=10000, all-time stats zeroed).
+    Does NOT clear today's breakout log — only resets bank + cumulative counters."""
+    bank = {
+        "starting_balance": 10000,
+        "balance": 10000,
+        "total_trades": 0,
+        "total_wins": 0,
+        "total_losses": 0,
+        "history": []
+    }
+    save_virtual_bank(bank)
+    return bank
+
 def update_bank_with_trades(trades_pnl):
     """Update bank balance with list of (symbol, pnl_pct, pnl_dollar) tuples.
     Returns updated bank dict."""

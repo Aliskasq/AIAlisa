@@ -8,7 +8,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from config import (BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts,
                      save_price_alerts, load_virtual_bank, save_virtual_bank, update_bank_with_trades,
-                     VIRTUAL_BANK_POSITION_SIZE)
+                     reset_virtual_bank, VIRTUAL_BANK_POSITION_SIZE)
 
 # --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
 PAPER_FILE = "data/paper_portfolio.json"
@@ -1142,6 +1142,27 @@ async def telegram_polling_loop(app_session):
                                 deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
                                 await send_response(app_session, chat_id, deny, msg_id)
                                 continue
+
+                            # /signal clear — reset bank + all-time stats, keep today's breakout list
+                            sig_parts = text.split()
+                            if len(sig_parts) >= 2 and sig_parts[1] in ("clear", "reset", "сброс"):
+                                reset_virtual_bank()
+                                if lang_pref == "ru":
+                                    await send_response(app_session, chat_id,
+                                        "🔄 *Банк сброшен!*\n\n"
+                                        "💰 Баланс: `$10,000.00`\n"
+                                        "📊 All-time статистика обнулена\n"
+                                        "📋 Сегодняшние сигналы остались в списке",
+                                        msg_id, parse_mode="Markdown")
+                                else:
+                                    await send_response(app_session, chat_id,
+                                        "🔄 *Bank reset!*\n\n"
+                                        "💰 Balance: `$10,000.00`\n"
+                                        "📊 All-time stats cleared\n"
+                                        "📋 Today's signals kept in the list",
+                                        msg_id, parse_mode="Markdown")
+                                continue
+
                             try:
                                 chunks = await build_signals_text(app_session, lang=lang_pref)
                                 for i, chunk in enumerate(chunks):
