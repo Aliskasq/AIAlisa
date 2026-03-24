@@ -196,17 +196,18 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
 
         # Determine trade status: TP hit, SL hit, or still open
+        # Sanity: TP/SL must make sense for direction (LONG TP > entry, SL < entry; vice versa for SHORT)
         status = "open"  # pending
         if ai_dir and entry_price > 0:
             if ai_dir == "LONG":
-                if ai_tp and now_price >= ai_tp:
+                if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
                     status = "tp"
-                elif ai_sl and now_price <= ai_sl:
+                elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
                     status = "sl"
             elif ai_dir == "SHORT":
-                if ai_tp and now_price <= ai_tp:
+                if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
                     status = "tp"
-                elif ai_sl and now_price >= ai_sl:
+                elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
                     status = "sl"
 
         # Calculate P&L based on direction and entry
@@ -242,11 +243,11 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         if status == "tp":
             day_wins += 1
-            icon = "🟢"
+            icon = "🟢" if pnl_pct >= 0 else "🔴"
             status_tag = " ✅TP"
         elif status == "sl":
             day_losses += 1
-            icon = "🔴"
+            icon = "🔴" if pnl_pct < 0 else "🟢"
             status_tag = " 🚫SL"
         else:
             day_pending += 1
@@ -351,17 +352,18 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
 
         # Determine original status (TP/SL already hit or still open)
+        # Sanity: TP/SL must make sense for direction
         status = "open"
         if ai_dir and entry_price > 0:
             if ai_dir == "LONG":
-                if ai_tp and now_price >= ai_tp:
+                if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
                     status = "tp"
-                elif ai_sl and now_price <= ai_sl:
+                elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
                     status = "sl"
             elif ai_dir == "SHORT":
-                if ai_tp and now_price <= ai_tp:
+                if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
                     status = "tp"
-                elif ai_sl and now_price >= ai_sl:
+                elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
                     status = "sl"
 
         # P&L — for TP/SL use their prices, for open use current (= "close now")
@@ -489,18 +491,18 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 entry_price = ai_entry if ai_entry else entry.get("breakout_price", 0)
                 now_price = price_map.get(sym, entry.get("current_price", 0))
 
-                # Determine TP/SL hit
+                # Determine TP/SL hit (sanity: TP/SL must make sense for direction)
                 status = "open"
                 if ai_dir and entry_price > 0:
                     if ai_dir == "LONG":
-                        if ai_tp and now_price >= ai_tp:
+                        if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
                             status = "tp"
-                        elif ai_sl and now_price <= ai_sl:
+                        elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
                             status = "sl"
                     elif ai_dir == "SHORT":
-                        if ai_tp and now_price <= ai_tp:
+                        if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
                             status = "tp"
-                        elif ai_sl and now_price >= ai_sl:
+                        elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
                             status = "sl"
 
                 # Calculate P&L based on direction
