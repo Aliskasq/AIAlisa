@@ -232,6 +232,14 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
 
+        # AI prediction match: ✅ if direction matches P&L, ❌ if not
+        ai_match = ""
+        if ai_dir:
+            if (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0):
+                ai_match = "✅"
+            else:
+                ai_match = "❌"
+
         if status == "tp":
             day_wins += 1
             icon = "🟢"
@@ -250,7 +258,7 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
         trade_lines.append(
-            f"{icon} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
         )
 
     total_w = bank["total_wins"] + day_wins
@@ -377,7 +385,15 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         pnl_dollar = (pnl_pct / 100) * VIRTUAL_BANK_POSITION_SIZE
 
-        # Everything counts as closed
+        # AI prediction match: ✅ if direction matches P&L, ❌ if not
+        ai_match = ""
+        if ai_dir:
+            if (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0):
+                ai_match = "✅"
+            else:
+                ai_match = "❌"
+
+        # Everything counts as closed — plus = TP, minus = SL
         if pnl_pct >= 0:
             day_wins += 1
             icon = "🟢"
@@ -389,9 +405,15 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
-        closed_tag = " ✅TP" if status == "tp" else " 🚫SL" if status == "sl" else " 🔒"
+        # Already hit TP/SL keeps original tag, pending closed now → TP if profit, SL if loss
+        if status == "tp":
+            closed_tag = " ✅TP"
+        elif status == "sl":
+            closed_tag = " 🚫SL"
+        else:
+            closed_tag = " ✅TP" if pnl_pct >= 0 else " 🚫SL"
         trade_lines.append(
-            f"{icon} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
         )
 
     day_total = day_wins + day_losses
