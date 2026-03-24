@@ -134,8 +134,8 @@ async def main():
                         tasks = []
 
                         for s in chunk:
-                            tasks.append(fetch_klines(session, s, '1d', 199))
-                            tasks.append(fetch_klines(session, s, '4h', 199))
+                            tasks.append(fetch_klines(session, s, '1d', 250))
+                            tasks.append(fetch_klines(session, s, '4h', 250))
 
                         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -272,13 +272,13 @@ async def main():
                                     funding_history = await fetch_funding_history(session, symbol)
                                     last_indic_row["funding_rate"] = funding_history
 
-                                    # 3b. Multi-timeframe data for better AI accuracy
+                                    # 3b. Multi-timeframe data for better AI accuracy (250 candles for SMC)
                                     mtf_data = {}
+                                    smc_data = {}
                                     if tf_key == "1D":
-                                        # 1D breakout: add 4H, 1H, 15m for full picture
-                                        raw_4h = await fetch_klines(session, symbol, "4h", 120)
-                                        raw_1h = await fetch_klines(session, symbol, "1h", 120)
-                                        raw_15m = await fetch_klines(session, symbol, "15m", 120)
+                                        raw_4h = await fetch_klines(session, symbol, "4h", 250)
+                                        raw_1h = await fetch_klines(session, symbol, "1h", 250)
+                                        raw_15m = await fetch_klines(session, symbol, "15m", 250)
                                         if raw_4h:
                                             mtf_data["4H"] = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")[0]
                                         if raw_1h:
@@ -286,16 +286,29 @@ async def main():
                                         if raw_15m:
                                             mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
                                     else:
-                                        # 4H breakout: add 1H, 15m (no 1D needed)
-                                        raw_1h = await fetch_klines(session, symbol, "1h", 120)
-                                        raw_15m = await fetch_klines(session, symbol, "15m", 120)
+                                        raw_1h = await fetch_klines(session, symbol, "1h", 250)
+                                        raw_15m = await fetch_klines(session, symbol, "15m", 250)
                                         if raw_1h:
                                             mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
                                         if raw_15m:
                                             mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
+                                    # 3c. SMC analysis (Smart Money Concepts)
+                                    try:
+                                        from core.smc import analyze_smc
+                                        if tf_key == "4H" and full_raw:
+                                            smc_data["4H"] = analyze_smc(pd.DataFrame(full_raw), "4H")
+                                        if tf_key == "1D" and raw_4h:
+                                            smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                                        if raw_1h:
+                                            smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                                        if raw_15m:
+                                            smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                                    except Exception as e:
+                                        logging.error(f"❌ SMC auto-scan error: {e}")
+
                                     # 4. Request AI verdict with 429 retry logic
-                                    ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
+                                    ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
 
                                     # Check for 429 error — send chart with error, then retry AI
                                     ai_got_429 = False
@@ -308,7 +321,7 @@ async def main():
                                             dynamic_trigger, "⏳ AI rate limit (429) — retrying..."
                                         )
                                         await asyncio.sleep(30)
-                                        ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data)
+                                        ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
                                         if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
                                             ai_got_429 = True
                                             logging.error(f"❌ AI 429 retry failed for {symbol}, keeping error chart")

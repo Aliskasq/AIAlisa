@@ -127,7 +127,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, mtf_data: dict = None) -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, mtf_data: dict = None, smc_data: dict = None) -> str:
     """
     OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
     and sends aggregated context to OpenRouter.
@@ -308,6 +308,16 @@ RULES:
                     clean_mtf[k] = v
             mtf_text += "\n" + format_tf_summary(clean_mtf, mtf_label)
 
+    # Build SMC block if available
+    smc_text = ""
+    if smc_data:
+        smc_parts = []
+        for tf_lbl, smc_result in smc_data.items():
+            if isinstance(smc_result, dict) and "summary" in smc_result:
+                smc_parts.append(smc_result["summary"])
+        if smc_parts:
+            smc_text = "\n\n[SMART MONEY CONCEPTS]\n" + "\n\n".join(smc_parts)
+
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
 [MULTI-TIMEFRAME DATA]
@@ -315,8 +325,10 @@ RULES:
 {mtf_text}
 
 Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
+{smc_text}
 
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
+Use SMC data (Order Blocks, FVG, structure) to set SL/TP at real levels. OB = key support/resistance for SL. FVG = potential targets.
 """
 
     # ---------------------------------------------------------
