@@ -422,18 +422,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"   [{votes_str}]"
     )
 
-    # Build info-only lines for non-voting indicators
-    info_lines = []
-    if not is_1h_or_higher:
-        info_lines.append(f"ℹ️ SuperTrend: {st} @ {st_price:.6f} (info only on {tf_label})")
-    if not is_higher_tf:
-        info_lines.append(f"ℹ️ Ichimoku: {ichi} (info only on {tf_label})")
-    info_lines.append(f"ℹ️ StochRSI: {stoch_signal} (info — overlaps RSI)")
-    info_lines.append(f"ℹ️ CMF: {cmf_signal} (info — overlaps OBV)")
-    info_lines.append(f"ℹ️ MFI: {mfi_signal} (info — overlaps RSI+OBV)")
-    info_block = "\n".join(info_lines)
-
-    # Voting indicators block
+    # Build indicator lines (only voting indicators — no noise)
     voting_lines = [
         f"1. EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99",
         f"2. RSI: {rsi_signal}",
@@ -454,6 +443,5 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"=== {tf_label} ===\n"
         f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% | 24h: {indic.get('change_24h', 0):+.2f}%\n"
         + "\n".join(voting_lines) + "\n"
-        + info_block + "\n"
         + consensus
     )
