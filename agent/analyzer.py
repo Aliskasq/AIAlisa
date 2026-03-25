@@ -513,8 +513,10 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.2,
-            "reasoning": {"enabled": bool(telegram_stream)},  # reasoning ON for manual (/a, look), OFF for auto-scanner
         }
+        # Enable reasoning only for manual analysis (not all models/providers support it)
+        if telegram_stream:
+            payload["reasoning"] = {"enabled": True}
 
         # === REAL-TIME SSE STREAMING to Telegram ===
         if telegram_stream:
