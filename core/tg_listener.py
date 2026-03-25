@@ -1416,9 +1416,12 @@ async def telegram_polling_loop(app_session):
                                         adx = row.get("adx", 0)
                                         stoch = row.get("stoch_k", 0)
                                         macd_h = row.get("macd_hist", 0)
-                                        obv = row.get("obv_status", "Unknown")
+                                        obv_val = row.get("obv", 0)
+                                        obv_sma = row.get("obv_sma20", 0)
+                                        obv = "Accumulation" if obv_val > obv_sma else "Distribution"
                                         ichimoku = row.get("ichimoku_status", "Unknown")
-                                        supertrend = row.get("supertrend", "Unknown")
+                                        st_dir = row.get("supertrend_dir", 1)
+                                        supertrend = "BULLISH" if st_dir == 1 else "BEARISH"
                                         cmf = row.get("cmf", 0)
 
                                         if lang == "ru":
