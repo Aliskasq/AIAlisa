@@ -423,24 +423,26 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"   [{votes_str}]"
     )
 
-    # Build indicator lines: RAW VALUES + interpretation + scorecard
+    # Build indicator lines: RAW VALUES ONLY — AI analyzes itself
     st_dist_pct = ((price - st_price) / st_price) * 100 if st_price > 0 else 0
+    obv_sma = indic.get('obv_sma20', 0)
+    obv_val = indic.get('obv', 0)
 
     raw_lines = [
-        f"1. EMA: EMA7={ema7:.6f} | EMA25={ema25:.6f} | EMA99={ema99:.6f} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99 → {ema_signal}",
-        f"2. RSI: {rsi:.1f} → {rsi_signal}",
-        f"3. MACD: line={macd_line:.6f} signal={macd_signal_val:.6f} hist={macd_hist:.6f} → {macd_signal}",
-        f"4. OBV: {obv_signal}",
-        f"5. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} Width={bb_width_pct:.1f}% → {bb_signal}",
+        f"EMA: EMA7={ema7:.6f} | EMA25={ema25:.6f} | EMA99={ema99:.6f} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99",
+        f"RSI(14): {rsi:.1f}",
+        f"MACD: line={macd_line:.6f} | signal={macd_signal_val:.6f} | histogram={macd_hist:.6f}",
+        f"OBV: {obv_val:.0f} | SMA20={obv_sma:.0f} | {indic.get('obv_status', 'Unknown')}",
+        f"BB(20,2): Upper={bb_upper:.6f} | Mid={bb_mid:.6f} | Lower={bb_lower:.6f} | Width={bb_width_pct:.1f}% | Price at {'upper band' if price >= bb_upper * 0.998 else 'lower band' if price <= bb_lower * 1.002 else 'mid-upper' if price > bb_mid else 'mid-lower'}",
     ]
     idx = 6
     if is_1h_or_higher:
-        raw_lines.append(f"{idx}. SuperTrend: {st} @ {st_price:.6f} (price {st_dist_pct:+.1f}% from ST line)")
+        raw_lines.append(f"SuperTrend(10,3): {st} @ {st_price:.6f} | Price {st_dist_pct:+.1f}% from ST")
         idx += 1
     if is_higher_tf:
-        raw_lines.append(f"{idx}. Ichimoku: {ichi}")
+        raw_lines.append(f"Ichimoku: {ichi}")
         idx += 1
-    raw_lines.append(f"{idx}. ADX: {adx:.1f} → {adx_signal}")
+    raw_lines.append(f"ADX(14): {adx:.1f}")
 
     return (
         f"=== {tf_label} ===\n"
