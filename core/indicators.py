@@ -57,9 +57,10 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     high_close = np.abs(df['high'] - df['close'].shift())
     low_close = np.abs(df['low'] - df['close'].shift())
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df['atr'] = rma(tr, 14)
+    df['atr14'] = rma(tr, 14)  # ATR 14 for ADX
+    df['atr'] = rma(tr, 10)    # ATR 10 for SuperTrend (matches Pine Script)
 
-    # 7. SuperTrend (10, 3)
+    # 7. SuperTrend (ATR 10, Multiplier 3) — matches Pine Script
     multiplier = 3.0
     hl2 = (df['high'] + df['low']) / 2
     basic_ub = hl2 + multiplier * df['atr']
@@ -106,7 +107,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
 
-    atr_safe = df['atr'].replace(0, np.nan)
+    atr_safe = df['atr14'].replace(0, np.nan)
     plus_di = 100 * rma(pd.Series(plus_dm, index=df.index), 14) / atr_safe
     minus_di = 100 * rma(pd.Series(minus_dm, index=df.index), 14) / atr_safe
     di_sum = plus_di + minus_di
