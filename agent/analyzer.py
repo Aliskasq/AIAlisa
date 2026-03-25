@@ -513,6 +513,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.2,
+            "reasoning": {"enabled": False},  # disable reasoning to save tokens
         }
 
         # === REAL-TIME SSE STREAMING to Telegram ===
