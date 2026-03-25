@@ -253,10 +253,10 @@ CRITICAL RULES:
 5. RISK:REWARD RATIO must be at least 1:1 (ideally 1:2+). TP distance from entry MUST be >= SL distance. If you can't find a valid SL that gives at least 1:1 R:R — output VERDICT: SKIP.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
-8. OVERBOUGHT/OVERSOLD IS CRITICAL: If RSI > 75 or StochRSI K > 85 on the primary TF — DO NOT go LONG (the move is exhausted, expect pullback). If RSI < 25 or StochRSI K < 15 — DO NOT go SHORT. Treat overbought/oversold as a STRONG counter-signal, not a minor warning.
+8. OVERBOUGHT/OVERSOLD IS CRITICAL: If RSI > 75 or StochRSI K > 85 on the primary TF — you CAN still go LONG, but WARN clearly why (e.g. "LONG but cautious — RSI overbought, expect pullback to [level] before continuation"). Place SL wider and TP at the nearest resistance. Same for oversold + SHORT. Never ignore overbought/oversold — always factor it into SL/TP placement.
 9. SL MUST be placed at a STRUCTURAL level (OB, FVG, EMA99, BB band, key support/resistance), NOT just a small % away. Minimum SL distance: at least 1.5x the average candle range on the primary TF. Too-tight SL gets stopped by noise.
 10. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%. Never recommend higher.
-11. If overall confidence is below 60% (e.g. 55/45 or 50/50) — output VERDICT: SKIP. Only trade high-conviction setups.
+11. If overall confidence is below 60% (e.g. 55/45 or 50/50) — output VERDICT: SKIP. The signal still gets published but won't count in performance stats.
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -290,10 +290,10 @@ RULES:
 6. DO NOT ADD HASHTAGS.
 7. MAX 1000 CHARACTERS total.
 8. EVERY timeframe line MUST include a brief reason in parentheses. Example: ⏱ 4H: LONG 60% / SHORT 40% (Bullish EMA alignment, above cloud)
-9. OVERBOUGHT/OVERSOLD = STRONG COUNTER-SIGNAL: RSI>75 or StochRSI K>85 on primary TF → DO NOT LONG. RSI<25 or StochRSI K<15 → DO NOT SHORT. This is NOT a minor warning.
+9. OVERBOUGHT/OVERSOLD: RSI>75 or StochRSI K>85 → can still go LONG but WARN clearly (wider SL, closer TP). RSI<25 → can SHORT but cautious. Never ignore it.
 10. SL at STRUCTURAL levels only (OB/FVG/EMA99/BB/support). Min SL distance = 1.5x avg candle range. No tight stops.
 11. MAX leverage 3x. MAX deposit 2%.
-12. If confidence < 60% (e.g. 55/45) → VERDICT: SKIP.
+12. If confidence < 60% (e.g. 55/45) → VERDICT: SKIP (signal still published, excluded from stats).
 """
 
 

@@ -288,6 +288,8 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     day_pnl_dollar = 0.0
     trade_lines = []
 
+    day_skipped = 0
+
     for entry in log:
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
@@ -302,6 +304,15 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        # SKIP signals — show in list but don't count in P&L/stats
+        if ai_dir == "SKIP":
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            trade_lines.append(
+                f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+            )
+            continue
 
         # Use candle-based TP/SL check (97 x 15m candles after entry)
         key = f"{sym}_{tf}"
@@ -385,6 +396,8 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     day_closed = day_wins + day_losses
     day_total = day_closed + day_pending
     day_wr = (day_wins / day_closed * 100) if day_closed > 0 else 0
+    skip_text_ru = f" | ⏭ Пропуск: {day_skipped}" if day_skipped > 0 else ""
+    skip_text_en = f" | ⏭ Skip: {day_skipped}" if day_skipped > 0 else ""
 
     if lang == "ru":
         pending_text = f" | ⏳ Открытых: {day_pending}" if day_pending > 0 else ""
@@ -393,7 +406,7 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
             f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
             f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Сегодня ({day_total} сигналов):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text_ru}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *Всего за всё время:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
@@ -406,7 +419,7 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
             f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
             f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
             f"📅 *Today ({day_total} signals):*\n"
-            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text_en}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
             f"📈 *All-time:*\n"
             f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
@@ -453,6 +466,7 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     bank = load_virtual_bank()
     day_wins = 0
     day_losses = 0
+    day_skipped = 0
     day_pnl_dollar = 0.0
     trade_lines = []
 
@@ -470,6 +484,15 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        # SKIP signals — show in list but don't count in P&L/stats
+        if ai_dir == "SKIP":
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            trade_lines.append(
+                f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+            )
+            continue
 
         # Use candle-based TP/SL check (97 x 15m candles after entry)
         key = f"{sym}_{tf}"
@@ -545,12 +568,14 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
     day_total = day_wins + day_losses
     day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
+    skip_text_ru = f" | ⏭ Пропуск: {day_skipped}" if day_skipped > 0 else ""
+    skip_text_en = f" | ⏭ Skip: {day_skipped}" if day_skipped > 0 else ""
 
     if lang == "ru":
         header = (
             f"🔒 *Закрытие всех позиций (снимок)*\n\n"
             f"📅 *Сегодня ({day_total} сделок):*\n"
-            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%){skip_text_ru}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
@@ -558,7 +583,7 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         header = (
             f"🔒 *Close all positions (snapshot)*\n\n"
             f"📅 *Today ({day_total} trades):*\n"
-            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%)\n"
+            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%){skip_text_en}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
             f"{'─' * 30}\n"
         )
