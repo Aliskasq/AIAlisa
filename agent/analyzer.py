@@ -272,11 +272,17 @@ CRITICAL RULES:
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
 3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
 4. SL and TP: analyze ALL indicators together — EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR, SuperTrend, support/resistance. Look for CONFLUENCE: where multiple levels overlap = strongest SL/TP. Write all supporting reasons in parentheses. NO random numbers.
-5. RISK:REWARD RATIO must be at least 1:1 (ideally 1:2+). TP distance from entry MUST be >= SL distance. If R:R is bad at current price, use Safe Entry as the real entry and calculate R:R from there. NEVER SKIP just because current price has bad R:R — that's what Safe Entry is for.
+5. STOP-LOSS RULES (STRICT):
+   - SL distance: MIN 2% from entry, MAX 10% from entry. NEVER more than 10%.
+   - SL distance MUST be LESS than TP distance (R:R ≥ 1:1, ideally 1:2+).
+   - SL MUST be at a structural level (OB, FVG, EMA, BB, support/resistance) — explain WHY this level.
+   - If no structural level exists within 2-10% range → use closest structural level within range.
+   - Example: Entry $100 → SL must be between $90-$98 (LONG) or $102-$110 (SHORT).
+   - If R:R is bad at current price, use Safe Entry to improve R:R. NEVER SKIP for bad R:R.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
 8. OVERBOUGHT/OVERSOLD: you CAN still trade in the direction, but WARN clearly and factor it into SL/TP placement (wider SL, closer TP). Overbought is NOT a reason to SKIP — it means "wait for Safe Entry pullback".
-9. SL MUST be at a STRUCTURAL level (OB, FVG, EMA99, BB band, key support/resistance). Min SL distance: 1.5x avg candle range. No tight stops.
+9. TP MUST also be at a structural level (resistance/OB/FVG for LONG, support/OB/FVG for SHORT) — explain WHY.
 10. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%.
 11. VERDICT: SKIP ONLY if confidence is exactly 50/50 (truly no edge). If direction is 55/45 or higher — output LONG or SHORT, NEVER SKIP. Overbought, bad R:R at current price, divergences — these are WARNINGS, not reasons to SKIP.
 """
@@ -310,11 +316,11 @@ RULES:
 2. No Smart Money / moderate Social Hype = NEUTRAL, not bearish.
 3. Entry = current price. Safe = optimal from support/OB.
 4. SL/TP: CONFLUENCE of multiple indicators. Write reasons in (). NO random numbers.
-5. R:R ≥ 1:1. If bad R:R at current price — use Safe Entry and calculate R:R from there. NEVER SKIP for bad R:R.
+5. SL: MIN 2%, MAX 10% from entry. SL < TP distance (R:R ≥ 1:1). SL at structural level (explain why). If bad R:R — use Safe Entry.
 6. NO HASHTAGS. MAX 1000 chars.
 7. Each TF line: brief reason in (). Include which indicators are bullish/bearish.
 8. Overbought/oversold: can still trade but WARN + adjust SL/TP. NOT a reason to SKIP.
-9. SL at STRUCTURAL levels (OB/FVG/EMA99/BB). Min 1.5x avg candle range.
+9. TP at structural level (explain why).
 10. MAX leverage 3x. MAX deposit 2%.
 11. SKIP ONLY if 50/50. If 55/45 or higher — give LONG or SHORT, never SKIP.
 """
