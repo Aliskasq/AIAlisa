@@ -393,18 +393,9 @@ RULES:
         if smc_parts:
             smc_text = "\n\n[SMC INDICATORS 12-16: Structure, Order Blocks, FVG, Liquidity, Premium/Discount]\n" + "\n\n".join(smc_parts)
 
-    # Funding rate interpretation
+    # Funding rate — informational only, NOT a directional indicator
     funding = clean_indic.get("funding_rate", "Unknown")
-    funding_text = f"Funding Rate: {funding}"
-    if isinstance(funding, (int, float)):
-        if funding > 0.01:
-            funding_text += " → 🔴 HIGH POSITIVE (longs pay shorts — bearish crowding, favors SHORT)"
-        elif funding > 0:
-            funding_text += " → ⚪ SLIGHTLY POSITIVE (neutral-to-mild long crowding)"
-        elif funding < -0.01:
-            funding_text += " → 🟢 NEGATIVE (shorts pay longs — bearish crowding, favors LONG)"
-        elif funding < 0:
-            funding_text += " → ⚪ SLIGHTLY NEGATIVE (neutral-to-mild short crowding)"
+    funding_text = f"Funding Rate: {funding} (INFO ONLY — funding does NOT predict direction. Coins with -0.5% or +1% funding can move explosively in either direction. Use for context, NOT for LONG/SHORT decision.)"
 
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
