@@ -224,7 +224,7 @@ async def _batch_check_tp_sl(session: aiohttp.ClientSession, log: list, price_ma
         tf = entry.get("tf", "?")
         key = f"{sym}_{tf}"
         ai_dir = entry.get("ai_direction", "")
-        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
+        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
         ai_tp = entry.get("ai_tp")
         ai_sl = entry.get("ai_sl")
         entry_time = entry.get("time", "")
@@ -295,12 +295,12 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
 
-        # Entry = breakout price (price when signal was pushed)
+        # Entry = AI entry price (actual price at signal time), fallback to current_price, then breakout_price
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
         ai_leverage = entry.get("ai_leverage", 1) or 1
         ai_deposit_pct = entry.get("ai_deposit_pct")
-        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
+        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
@@ -311,6 +311,16 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
             now_price = price_map.get(sym, entry.get("current_price", 0))
             trade_lines.append(
                 f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+            )
+            continue
+
+        # No AI verdict — show as info only, don't count in P&L/stats
+        if not ai_dir:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            trade_lines.append(
+                f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -475,12 +485,12 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
 
-        # Entry = breakout price (price when signal was pushed)
+        # Entry = AI entry price (actual price at signal time), fallback to current_price, then breakout_price
         ai_sl = entry.get("ai_sl")
         ai_tp = entry.get("ai_tp")
         ai_leverage = entry.get("ai_leverage", 1) or 1
         ai_deposit_pct = entry.get("ai_deposit_pct")
-        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
+        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
@@ -491,6 +501,16 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
             now_price = price_map.get(sym, entry.get("current_price", 0))
             trade_lines.append(
                 f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+            )
+            continue
+
+        # No AI verdict — show as info only, don't count in P&L/stats
+        if not ai_dir:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            trade_lines.append(
+                f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -561,7 +581,8 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         elif status == "sl":
             closed_tag = " 🚫SL"
         else:
-            closed_tag = " ✅TP" if pnl_pct >= 0 else " 🚫SL"
+            # No TP/SL hit — closed at market price
+            closed_tag = " 📊MKT"
         trade_lines.append(
             f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
         )
