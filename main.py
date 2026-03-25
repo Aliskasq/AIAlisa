@@ -352,8 +352,14 @@ async def main():
                                 _ai_dir = ""
                                 _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
                                 if ai_verdict:
-                                    # Parse direction from VERDICT line specifically, not from TF lines
+                                    # Check for SKIP verdict first
                                     import re as _re
+                                    _skip_match = _re.search(r"VERDICT[:\s]*SKIP", ai_verdict, _re.IGNORECASE)
+                                    if _skip_match:
+                                        logging.info(f"🚫 {symbol} ({tf_key}): AI returned VERDICT: SKIP — not pushing signal")
+                                        alerts_to_remove.append(alert)
+                                        continue
+                                    # Parse direction from VERDICT line specifically, not from TF lines
                                     _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT)", ai_verdict, _re.IGNORECASE)
                                     if _verdict_match:
                                         _ai_dir = _verdict_match.group(1).upper()
@@ -362,15 +368,40 @@ async def main():
                                         _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
                                         if _all_dirs:
                                             _ai_dir = _all_dirs[-1]
-                                # Log breakout with AI entry/SL/TP (only if AI responded)
-                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type,
-                                                   ai_direction=_ai_dir,
-                                                   ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
-                                                   ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
-                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
-                                                   ai_leverage=_ai_params.get("ai_leverage") if _ai_params else None,
-                                                   ai_deposit_pct=_ai_params.get("ai_deposit_pct") if _ai_params else None)
-                                # REMOVE FROM QUEUE — delivered or 429 exhausted
+                                # ── HARD CAPS: leverage ≤ 3x, deposit ≤ 2% ──
+                                _raw_lev = _ai_params.get("ai_leverage") if _ai_params else None
+                                _raw_dep = _ai_params.get("ai_deposit_pct") if _ai_params else None
+                                _capped_lev = min(_raw_lev, 3) if _raw_lev else None
+                                _capped_dep = min(_raw_dep, 2.0) if _raw_dep else 2.0
+
+                                # ── R:R VALIDATION: TP distance must be ≥ SL distance (1:1 min) ──
+                                _entry = _ai_params.get("ai_entry") if _ai_params else None
+                                _sl = _ai_params.get("ai_sl") if _ai_params else None
+                                _tp = _ai_params.get("ai_tp") if _ai_params else None
+                                _skip_rr = False
+                                if _entry and _sl and _tp and _entry > 0:
+                                    _sl_dist = abs(_entry - _sl)
+                                    _tp_dist = abs(_tp - _entry)
+                                    if _sl_dist > 0 and _tp_dist < _sl_dist:
+                                        logging.warning(
+                                            f"⚠️ SKIP {symbol} ({tf_key}): bad R:R — "
+                                            f"SL dist={_sl_dist:.6f} > TP dist={_tp_dist:.6f} "
+                                            f"(ratio {_tp_dist/_sl_dist:.2f}:1, need ≥1:1)"
+                                        )
+                                        _skip_rr = True
+
+                                if _skip_rr:
+                                    logging.info(f"🚫 {symbol} ({tf_key}) NOT logged — failed R:R check")
+                                else:
+                                    # Log breakout with AI entry/SL/TP (only if AI responded)
+                                    add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type,
+                                                       ai_direction=_ai_dir,
+                                                       ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
+                                                       ai_sl=_sl,
+                                                       ai_tp=_tp,
+                                                       ai_leverage=_capped_lev,
+                                                       ai_deposit_pct=_capped_dep)
+                                # REMOVE FROM QUEUE — delivered or 429 exhausted (even if R:R failed)
                                 alerts_to_remove.append(alert)
                             else:
                                 logging.warning(f"🔄 Signal {symbol} ({tf_key}) LEFT IN QUEUE. Will retry in 5 minutes.")

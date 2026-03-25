@@ -250,9 +250,13 @@ CRITICAL RULES:
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
 3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
 4. SL and TP: analyze ALL indicators together — EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR, SuperTrend, support/resistance. Look for CONFLUENCE: where multiple levels overlap = strongest SL/TP. Example: if EMA99 and a Bullish OB are at the same zone → strong SL level. Write all supporting reasons in parentheses. NO random numbers.
-5. RISK:REWARD RATIO must be at least 1:1.5 (ideally 1:2+). TP distance from entry MUST be >= 1.5× SL distance. NEVER give TP closer than SL.
+5. RISK:REWARD RATIO must be at least 1:1 (ideally 1:2+). TP distance from entry MUST be >= SL distance. If you can't find a valid SL that gives at least 1:1 R:R — output VERDICT: SKIP.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
+8. OVERBOUGHT/OVERSOLD IS CRITICAL: If RSI > 75 or StochRSI K > 85 on the primary TF — DO NOT go LONG (the move is exhausted, expect pullback). If RSI < 25 or StochRSI K < 15 — DO NOT go SHORT. Treat overbought/oversold as a STRONG counter-signal, not a minor warning.
+9. SL MUST be placed at a STRUCTURAL level (OB, FVG, EMA99, BB band, key support/resistance), NOT just a small % away. Minimum SL distance: at least 1.5x the average candle range on the primary TF. Too-tight SL gets stopped by noise.
+10. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%. Never recommend higher.
+11. If overall confidence is below 60% (e.g. 55/45 or 50/50) — output VERDICT: SKIP. Only trade high-conviction setups.
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -282,10 +286,14 @@ RULES:
 2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a short signal. Use technicals.
 3. Entry = current price. Safe Entry = optimal from support/OB for better R:R.
 4. SL/TP: use ALL indicators. Find CONFLUENCE — where multiple levels overlap (EMA+OB, BB+FVG, Ichimoku+EQH etc.) = best SL/TP. Write reasons in (). NO random numbers.
-5. R:R minimum 1:1.5 (ideally 1:2+). TP distance ≥ 1.5× SL distance. NEVER give TP closer than SL.
+5. R:R minimum 1:1 (ideally 1:2+). TP distance ≥ SL distance. If no valid R:R — VERDICT: SKIP.
 6. DO NOT ADD HASHTAGS.
 7. MAX 1000 CHARACTERS total.
 8. EVERY timeframe line MUST include a brief reason in parentheses. Example: ⏱ 4H: LONG 60% / SHORT 40% (Bullish EMA alignment, above cloud)
+9. OVERBOUGHT/OVERSOLD = STRONG COUNTER-SIGNAL: RSI>75 or StochRSI K>85 on primary TF → DO NOT LONG. RSI<25 or StochRSI K<15 → DO NOT SHORT. This is NOT a minor warning.
+10. SL at STRUCTURAL levels only (OB/FVG/EMA99/BB/support). Min SL distance = 1.5x avg candle range. No tight stops.
+11. MAX leverage 3x. MAX deposit 2%.
+12. If confidence < 60% (e.g. 55/45) → VERDICT: SKIP.
 """
 
 
