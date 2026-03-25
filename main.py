@@ -296,8 +296,10 @@ async def main():
                                     # 3c. SMC analysis (Smart Money Concepts)
                                     try:
                                         from core.smc import analyze_smc
-                                        if tf_key == "4H" and full_raw:
-                                            smc_data["4H"] = analyze_smc(pd.DataFrame(full_raw), "4H")
+                                        # SMC on primary TF
+                                        if full_raw:
+                                            smc_data[tf_key] = analyze_smc(pd.DataFrame(full_raw), tf_key)
+                                        # SMC on additional TFs
                                         if tf_key == "1D" and raw_4h:
                                             smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
                                         if raw_1h:

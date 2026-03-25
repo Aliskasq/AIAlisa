@@ -1991,6 +1991,8 @@ async def telegram_polling_loop(app_session):
                                 from core.smc import analyze_smc
                                 smc_data = {}
                                 try:
+                                    if raw_df_1d:
+                                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D")
                                     if raw_df_4h:
                                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H")
                                     if raw_df_1h:
@@ -2167,11 +2169,14 @@ async def telegram_polling_loop(app_session):
                                     if raw_15m:
                                         mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
-                                    # SMC Indicator (Structure, Order Blocks, FVG)
+                                    # SMC Indicator (Structure, Order Blocks, FVG) — ALL timeframes
                                     smc_data = {}
                                     try:
                                         from core.smc import analyze_smc
-                                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                                        if raw_1d:
+                                            smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D")
+                                        if raw_4h:
+                                            smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
                                         if raw_1h:
                                             smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
                                         if raw_15m:
