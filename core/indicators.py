@@ -351,30 +351,77 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     # ── ICHIMOKU ──
     ichi = indic['ichimoku_status']
 
-    # ── CONFLICT COUNTER ──
+    # ── INDICATOR SCORECARD (count ALL 12 base indicators) ──
     bullish_count = 0
     bearish_count = 0
-    for sig in [ema_signal, rsi_signal, macd_signal, obv_signal, cmf_signal, st, bb_signal, ichi, mfi_signal]:
+    neutral_count = 0
+    indicator_votes = []
+
+    indicators_map = {
+        "EMA": ema_signal,
+        "RSI": rsi_signal,
+        "StochRSI": stoch_signal,
+        "MACD": macd_signal,
+        "OBV": obv_signal,
+        "CMF": cmf_signal,
+        "MFI": mfi_signal,
+        "SuperTrend": st,
+        "BB": bb_signal,
+        "Ichimoku": ichi,
+    }
+
+    for name, sig in indicators_map.items():
         if "🟢" in sig or "BULLISH" in sig or "ACCUMULATION" in sig or "BUYING" in sig:
             bullish_count += 1
+            indicator_votes.append(f"{name}=🟢")
         elif "🔴" in sig or "BEARISH" in sig or "DISTRIBUTION" in sig or "SELLING" in sig:
             bearish_count += 1
-    total_signals = bullish_count + bearish_count
-    if total_signals > 0:
-        consensus = f"📊 CONSENSUS: {bullish_count} BULLISH vs {bearish_count} BEARISH"
+            indicator_votes.append(f"{name}=🔴")
+        elif "⚠️" in sig:
+            # Overbought = bearish signal, oversold = bullish signal
+            if "OVERBOUGHT" in sig:
+                bearish_count += 1
+                indicator_votes.append(f"{name}=⚠️OB")
+            elif "OVERSOLD" in sig:
+                bullish_count += 1
+                indicator_votes.append(f"{name}=⚠️OS")
+            else:
+                neutral_count += 1
+                indicator_votes.append(f"{name}=⚪")
+        else:
+            neutral_count += 1
+            indicator_votes.append(f"{name}=⚪")
+
+    # ADX doesn't vote direction but shows trend strength
+    adx_note = f"ADX={adx:.0f}({'strong' if adx > 25 else 'weak'})"
+
+    total = bullish_count + bearish_count
+    if total > 0:
+        bull_pct = round(bullish_count / total * 100)
+        bear_pct = 100 - bull_pct
     else:
-        consensus = "📊 CONSENSUS: MIXED"
+        bull_pct = bear_pct = 50
+
+    votes_str = " ".join(indicator_votes)
+    consensus = (
+        f"📊 SCORECARD: {bullish_count}🟢 vs {bearish_count}🔴 vs {neutral_count}⚪ "
+        f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}\n"
+        f"   [{votes_str}]"
+    )
 
     return (
         f"=== {tf_label} ===\n"
         f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% | 24h: {indic.get('change_24h', 0):+.2f}%\n"
-        f"EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99\n"
-        f"RSI: {rsi_signal} | StochRSI: {stoch_signal}\n"
-        f"MACD: {macd_signal}\n"
-        f"OBV: {obv_signal} | CMF: {cmf_signal}\n"
-        f"MFI: {mfi_signal}\n"
-        f"SuperTrend: {st} @ {st_price:.6f} | {adx_signal}\n"
-        f"Bollinger: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}\n"
-        f"Ichimoku: {ichi}\n"
+        f"1. EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99\n"
+        f"2. RSI: {rsi_signal}\n"
+        f"3. StochRSI: {stoch_signal}\n"
+        f"4. MACD: {macd_signal}\n"
+        f"5. OBV: {obv_signal}\n"
+        f"6. CMF: {cmf_signal}\n"
+        f"7. MFI: {mfi_signal}\n"
+        f"8. SuperTrend: {st} @ {st_price:.6f}\n"
+        f"9. ADX: {adx_signal}\n"
+        f"10. Bollinger: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}\n"
+        f"11. Ichimoku: {ichi}\n"
         f"{consensus}"
     )

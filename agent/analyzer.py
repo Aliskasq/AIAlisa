@@ -339,27 +339,88 @@ RULES:
                     clean_mtf[k] = v
             mtf_text += "\n" + format_tf_summary(clean_mtf, mtf_label)
 
-    # Build SMC block if available
+    # Build SMC block with per-TF directional scorecard
     smc_text = ""
     if smc_data:
         smc_parts = []
         for tf_lbl, smc_result in smc_data.items():
             if isinstance(smc_result, dict) and "summary" in smc_result:
-                smc_parts.append(smc_result["summary"])
+                # Count SMC bullish/bearish signals
+                smc_bull = 0
+                smc_bear = 0
+                summary_text = smc_result["summary"]
+
+                # Swing trend
+                if smc_result.get("swing_structures"):
+                    last_swing = smc_result["swing_structures"][-1]
+                    if last_swing["bias"] == 1: smc_bull += 1  # BULLISH
+                    else: smc_bear += 1
+
+                # Internal trend
+                if smc_result.get("internal_structures"):
+                    last_int = smc_result["internal_structures"][-1]
+                    if last_int["bias"] == 1: smc_bull += 1
+                    else: smc_bear += 1
+
+                # Order blocks near price (within 3%)
+                current_p = price
+                for ob in (smc_result.get("swing_order_blocks", []) + smc_result.get("internal_order_blocks", [])):
+                    ob_mid = (ob["low"] + ob["high"]) / 2
+                    dist_pct = abs(current_p - ob_mid) / current_p * 100
+                    if dist_pct < 3:  # within 3% of price
+                        if ob["bias"] == 1: smc_bull += 1  # Bull OB = support
+                        else: smc_bear += 1  # Bear OB = resistance
+
+                # FVGs
+                for fvg in smc_result.get("fvgs", []):
+                    if fvg["bias"] == 1: smc_bull += 1
+                    else: smc_bear += 1
+
+                # Premium/Discount zone
+                zones = smc_result.get("zones", {})
+                zone_name = zones.get("current_zone", "")
+                if "Discount" in zone_name: smc_bull += 1  # cheap = buy
+                elif "Premium" in zone_name: smc_bear += 1  # expensive = sell
+
+                smc_total = smc_bull + smc_bear
+                if smc_total > 0:
+                    smc_bull_pct = round(smc_bull / smc_total * 100)
+                    smc_score = f"\n📊 SMC [{tf_lbl}] SCORECARD: {smc_bull}🟢 vs {smc_bear}🔴 → LONG {smc_bull_pct}% / SHORT {100-smc_bull_pct}%"
+                else:
+                    smc_score = ""
+
+                smc_parts.append(f"{summary_text}{smc_score}")
         if smc_parts:
-            smc_text = "\n\n[SMC INDICATOR — Structure, Order Blocks, FVG, Liquidity]\n" + "\n\n".join(smc_parts)
+            smc_text = "\n\n[SMC INDICATORS 12-16: Structure, Order Blocks, FVG, Liquidity, Premium/Discount]\n" + "\n\n".join(smc_parts)
+
+    # Funding rate interpretation
+    funding = clean_indic.get("funding_rate", "Unknown")
+    funding_text = f"Funding Rate: {funding}"
+    if isinstance(funding, (int, float)):
+        if funding > 0.01:
+            funding_text += " → 🔴 HIGH POSITIVE (longs pay shorts — bearish crowding, favors SHORT)"
+        elif funding > 0:
+            funding_text += " → ⚪ SLIGHTLY POSITIVE (neutral-to-mild long crowding)"
+        elif funding < -0.01:
+            funding_text += " → 🟢 NEGATIVE (shorts pay longs — bearish crowding, favors LONG)"
+        elif funding < 0:
+            funding_text += " → ⚪ SLIGHTLY NEGATIVE (neutral-to-mild short crowding)"
 
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
-[MULTI-TIMEFRAME DATA]
+[MULTI-TIMEFRAME DATA — indicators numbered 1-11 per TF, check SCORECARD]
 {primary_tf_text}
 {mtf_text}
-
-Funding Rate: {clean_indic.get("funding_rate", "Unknown")}
 {smc_text}
 
+[ADDITIONAL]
+{funding_text}
+
+INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
+SMC SCORECARD counts structure, order blocks, FVG, zones separately.
+Combine ALL scorecards + funding to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
-For SL/TP: cross-reference ALL data — find where indicators CONVERGE (e.g. OB + EMA at same zone, FVG + BB band, EQH + resistance). Confluence = strongest levels.
+For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels.
 """
 
     # ---------------------------------------------------------
