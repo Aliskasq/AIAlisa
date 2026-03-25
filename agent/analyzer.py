@@ -456,14 +456,15 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
 
             # Try Extract (structured Pydantic output)
             try:
-                logging.info("📊 [OpenClaw Extract] Requesting structured TradeVerdict...")
+                logging.info(f"📊 [OpenClaw Extract] Requesting structured TradeVerdict via {OPENROUTER_MODEL}...")
                 extract_result = await client.extract.run(
                     model=TradeVerdict,
                     prompt=full_prompt,
                     options=cmdop.ExtractOptions(
                         temperature=0.2,
                         timeout_seconds=120,
-                        max_tokens=4096
+                        max_tokens=4096,
+                        model=OPENROUTER_MODEL,
                     )
                 )
                 if extract_result.data:
@@ -477,7 +478,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             # Try Agent (free-text)
             if not ai_response:
                 try:
-                    result = await client.agent.run(full_prompt)
+                    result = await client.agent.run(full_prompt, model=OPENROUTER_MODEL)
                     if hasattr(result, 'success') and result.success is False:
                         logging.info("🔄 [OpenClaw] Agent routing through OpenRouter relay...")
                     elif hasattr(result, 'text') and result.text:
