@@ -352,25 +352,38 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     ichi = indic['ichimoku_status']
 
     # ── INDICATOR SCORECARD (count ALL 12 base indicators) ──
+    # ── SCORECARD: only reliable indicators vote ──
+    # Excluded from voting (shown as info only):
+    #   - StochRSI: duplicates RSI, too noisy on lower TFs
+    #   - CMF: duplicates OBV
+    #   - MFI: duplicates RSI+OBV
+    #   - Ichimoku: unreliable on 15m and 1H (designed for daily)
+    #   - SuperTrend: unreliable on 15m (whipsaw)
+    tf_upper = tf_label.upper()
+    is_higher_tf = tf_upper in ("1D", "4H")
+    is_1h_or_higher = tf_upper in ("1D", "4H", "1H")
+
     bullish_count = 0
     bearish_count = 0
     neutral_count = 0
     indicator_votes = []
 
-    indicators_map = {
+    # Core voting indicators (always vote)
+    voting_indicators = {
         "EMA": ema_signal,
         "RSI": rsi_signal,
-        "StochRSI": stoch_signal,
         "MACD": macd_signal,
         "OBV": obv_signal,
-        "CMF": cmf_signal,
-        "MFI": mfi_signal,
-        "SuperTrend": st,
         "BB": bb_signal,
-        "Ichimoku": ichi,
     }
+    # SuperTrend votes on 1H+ only
+    if is_1h_or_higher:
+        voting_indicators["SuperTrend"] = st
+    # Ichimoku votes on 4H+ only
+    if is_higher_tf:
+        voting_indicators["Ichimoku"] = ichi
 
-    for name, sig in indicators_map.items():
+    for name, sig in voting_indicators.items():
         if "🟢" in sig or "BULLISH" in sig or "ACCUMULATION" in sig or "BUYING" in sig:
             bullish_count += 1
             indicator_votes.append(f"{name}=🟢")
@@ -378,7 +391,6 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
             bearish_count += 1
             indicator_votes.append(f"{name}=🔴")
         elif "⚠️" in sig:
-            # Overbought = bearish signal, oversold = bullish signal
             if "OVERBOUGHT" in sig:
                 bearish_count += 1
                 indicator_votes.append(f"{name}=⚠️OB")
@@ -403,25 +415,45 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         bull_pct = bear_pct = 50
 
     votes_str = " ".join(indicator_votes)
+    voting_count = bullish_count + bearish_count + neutral_count
     consensus = (
-        f"📊 SCORECARD: {bullish_count}🟢 vs {bearish_count}🔴 vs {neutral_count}⚪ "
+        f"📊 SCORECARD ({voting_count} voting): {bullish_count}🟢 vs {bearish_count}🔴 vs {neutral_count}⚪ "
         f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}\n"
         f"   [{votes_str}]"
     )
 
+    # Build info-only lines for non-voting indicators
+    info_lines = []
+    if not is_1h_or_higher:
+        info_lines.append(f"ℹ️ SuperTrend: {st} @ {st_price:.6f} (info only on {tf_label})")
+    if not is_higher_tf:
+        info_lines.append(f"ℹ️ Ichimoku: {ichi} (info only on {tf_label})")
+    info_lines.append(f"ℹ️ StochRSI: {stoch_signal} (info — overlaps RSI)")
+    info_lines.append(f"ℹ️ CMF: {cmf_signal} (info — overlaps OBV)")
+    info_lines.append(f"ℹ️ MFI: {mfi_signal} (info — overlaps RSI+OBV)")
+    info_block = "\n".join(info_lines)
+
+    # Voting indicators block
+    voting_lines = [
+        f"1. EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99",
+        f"2. RSI: {rsi_signal}",
+        f"3. MACD: {macd_signal}",
+        f"4. OBV: {obv_signal}",
+        f"5. BB: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}",
+    ]
+    idx = 6
+    if is_1h_or_higher:
+        voting_lines.append(f"{idx}. SuperTrend: {st} @ {st_price:.6f}")
+        idx += 1
+    if is_higher_tf:
+        voting_lines.append(f"{idx}. Ichimoku: {ichi}")
+        idx += 1
+    voting_lines.append(f"{idx}. ADX: {adx_signal}")
+
     return (
         f"=== {tf_label} ===\n"
         f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% | 24h: {indic.get('change_24h', 0):+.2f}%\n"
-        f"1. EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99\n"
-        f"2. RSI: {rsi_signal}\n"
-        f"3. StochRSI: {stoch_signal}\n"
-        f"4. MACD: {macd_signal}\n"
-        f"5. OBV: {obv_signal}\n"
-        f"6. CMF: {cmf_signal}\n"
-        f"7. MFI: {mfi_signal}\n"
-        f"8. SuperTrend: {st} @ {st_price:.6f}\n"
-        f"9. ADX: {adx_signal}\n"
-        f"10. Bollinger: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}\n"
-        f"11. Ichimoku: {ichi}\n"
-        f"{consensus}"
+        + "\n".join(voting_lines) + "\n"
+        + info_block + "\n"
+        + consensus
     )
