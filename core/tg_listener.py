@@ -150,6 +150,92 @@ from agent.skills import (
 )
 
 
+async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
+                                      ai_dir: str, entry_price: float,
+                                      ai_tp: float, ai_sl: float,
+                                      entry_time_iso: str) -> tuple:
+    """
+    Fetch 97 x 15m candles after entry time and walk high/low to find first TP/SL hit.
+    Returns (status, close_price) where status is 'tp', 'sl', or 'open'.
+    close_price = TP/SL level if hit, or last candle close if open.
+    """
+    try:
+        # Parse entry time → ms for Binance API startTime
+        entry_dt = datetime.fromisoformat(entry_time_iso.replace("Z", "+00:00"))
+        start_ms = int(entry_dt.timestamp() * 1000)
+
+        url = (f"https://fapi.binance.com/fapi/v1/klines"
+               f"?symbol={symbol}&interval=15m&limit=97&startTime={start_ms}")
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                return ("open", 0)
+            raw = await resp.json()
+            if not raw:
+                return ("open", 0)
+
+        # Walk candles chronologically — first hit wins
+        last_close = 0
+        for c in raw:
+            high = float(c[2])
+            low = float(c[3])
+            last_close = float(c[4])
+
+            if ai_dir == "LONG":
+                # SL: price drops to or below SL
+                if ai_sl and ai_sl < entry_price and low <= ai_sl:
+                    # Check if TP also hit in same candle — SL takes priority (conservative)
+                    return ("sl", ai_sl)
+                if ai_tp and ai_tp > entry_price and high >= ai_tp:
+                    return ("tp", ai_tp)
+            elif ai_dir == "SHORT":
+                # SL: price rises to or above SL
+                if ai_sl and ai_sl > entry_price and high >= ai_sl:
+                    return ("sl", ai_sl)
+                if ai_tp and ai_tp < entry_price and low <= ai_tp:
+                    return ("tp", ai_tp)
+
+        return ("open", last_close if last_close else 0)
+    except Exception as e:
+        logging.error(f"❌ _check_tp_sl_from_candles {symbol}: {e}")
+        return ("open", 0)
+
+
+async def _batch_check_tp_sl(session: aiohttp.ClientSession, log: list, price_map: dict) -> dict:
+    """
+    For all entries in breakout log, check TP/SL via 15m candles.
+    Returns dict: symbol+tf → (status, close_price_from_candles).
+    Limits concurrency to avoid API weight spikes.
+    """
+    sem = asyncio.Semaphore(5)  # max 5 concurrent kline requests
+    results = {}
+
+    async def check_one(entry):
+        sym = entry["symbol"]
+        tf = entry.get("tf", "?")
+        key = f"{sym}_{tf}"
+        ai_dir = entry.get("ai_direction", "")
+        entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
+        ai_tp = entry.get("ai_tp")
+        ai_sl = entry.get("ai_sl")
+        entry_time = entry.get("time", "")
+
+        if not ai_dir or entry_price <= 0 or not entry_time:
+            results[key] = ("open", price_map.get(sym, entry.get("current_price", 0)))
+            return
+
+        async with sem:
+            status, close_price = await _check_tp_sl_from_candles(
+                session, sym, ai_dir, entry_price, ai_tp, ai_sl, entry_time
+            )
+        # If candle check returned open, use current market price for display
+        if status == "open":
+            close_price = price_map.get(sym, entry.get("current_price", 0))
+        results[key] = (status, close_price)
+
+    await asyncio.gather(*(check_one(e) for e in log))
+    return results
+
+
 async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
     """Build virtual bank + all trades text, returns list of message chunks."""
     log = load_breakout_log()
@@ -166,7 +252,7 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         else:
             return [f"🏦 *Virtual Bank*\n\n💰 Start: `${bank['starting_balance']:,.2f}`\n💵 Current: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Wins: {total_w} ({wr:.0f}%) | ❌ Losses: {total_l} ({100-wr:.0f}%)\n📈 Total: {bank['total_trades']} trades\n\n📭 No signals today yet."]
 
-    # Batch prices
+    # Batch current prices (for display of open trades)
     price_map = {}
     try:
         async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
@@ -176,6 +262,9 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
                     price_map[p["symbol"]] = float(p["price"])
     except Exception:
         pass
+
+    # Check TP/SL via 97 x 15m candles after entry (accurate historical check)
+    candle_results = await _batch_check_tp_sl(session, log, price_map)
 
     day_wins = 0
     day_losses = 0
@@ -187,7 +276,6 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
-        now_price = price_map.get(sym, entry.get("current_price", 0))
 
         # Entry = breakout price (price when signal was pushed)
         ai_sl = entry.get("ai_sl")
@@ -199,20 +287,18 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
 
-        # Determine trade status: TP hit, SL hit, or still open
-        # Sanity: TP/SL must make sense for direction (LONG TP > entry, SL < entry; vice versa for SHORT)
-        status = "open"  # pending
-        if ai_dir and entry_price > 0:
-            if ai_dir == "LONG":
-                if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
-                    status = "tp"
-                elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
-                    status = "sl"
-            elif ai_dir == "SHORT":
-                if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
-                    status = "tp"
-                elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
-                    status = "sl"
+        # Use candle-based TP/SL check (97 x 15m candles after entry)
+        key = f"{sym}_{tf}"
+        candle_status, candle_close = candle_results.get(key, ("open", 0))
+        status = candle_status  # 'tp', 'sl', or 'open'
+
+        # now_price = TP/SL level if hit, or current market price if open
+        if status == "tp" and ai_tp:
+            now_price = ai_tp
+        elif status == "sl" and ai_sl:
+            now_price = ai_sl
+        else:
+            now_price = price_map.get(sym, entry.get("current_price", 0))
 
         # Calculate P&L based on direction and entry
         if entry_price > 0:
@@ -335,7 +421,7 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         else:
             return ["📭 No signals today yet."]
 
-    # Batch prices
+    # Batch current prices
     price_map = {}
     try:
         async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
@@ -344,6 +430,9 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
                     price_map[p["symbol"]] = float(p["price"])
     except Exception:
         pass
+
+    # Check TP/SL via 97 x 15m candles after entry (accurate historical check)
+    candle_results = await _batch_check_tp_sl(session, log, price_map)
 
     bank = load_virtual_bank()
     day_wins = 0
@@ -355,7 +444,6 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
         ai_dir = entry.get("ai_direction", "")
-        now_price = price_map.get(sym, entry.get("current_price", 0))
 
         # Entry = breakout price (price when signal was pushed)
         ai_sl = entry.get("ai_sl")
@@ -367,19 +455,18 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
 
-        # Determine original status (TP/SL already hit or still open)
-        status = "open"
-        if ai_dir and entry_price > 0:
-            if ai_dir == "LONG":
-                if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
-                    status = "tp"
-                elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
-                    status = "sl"
-            elif ai_dir == "SHORT":
-                if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
-                    status = "tp"
-                elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
-                    status = "sl"
+        # Use candle-based TP/SL check (97 x 15m candles after entry)
+        key = f"{sym}_{tf}"
+        candle_status, candle_close = candle_results.get(key, ("open", 0))
+        status = candle_status
+
+        # now_price = TP/SL level if hit, or current market price if open
+        if status == "tp" and ai_tp:
+            now_price = ai_tp
+        elif status == "sl" and ai_sl:
+            now_price = ai_sl
+        else:
+            now_price = price_map.get(sym, entry.get("current_price", 0))
 
         # P&L — for TP/SL use their prices, for open use current (= "close now")
         if entry_price > 0:
@@ -504,30 +591,32 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 logging.error(f"❌ Daily summary price fetch: {e}")
 
             bank = load_virtual_bank()
+
+            # Check TP/SL via 97 x 15m candles after entry (accurate historical check)
+            candle_results = await _batch_check_tp_sl(session, log, price_map)
+
             trades_pnl = []
             for entry in log:
                 sym = entry["symbol"]
+                tf = entry.get("tf", "?")
                 ai_dir = entry.get("ai_direction", "")
                 ai_sl = entry.get("ai_sl")
                 ai_tp = entry.get("ai_tp")
                 ai_leverage = entry.get("ai_leverage", 1) or 1
                 ai_deposit_pct = entry.get("ai_deposit_pct")
                 entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
-                now_price = price_map.get(sym, entry.get("current_price", 0))
 
-                # Determine TP/SL hit (sanity: TP/SL must make sense for direction)
-                status = "open"
-                if ai_dir and entry_price > 0:
-                    if ai_dir == "LONG":
-                        if ai_tp and ai_tp > entry_price and now_price >= ai_tp:
-                            status = "tp"
-                        elif ai_sl and ai_sl < entry_price and now_price <= ai_sl:
-                            status = "sl"
-                    elif ai_dir == "SHORT":
-                        if ai_tp and ai_tp < entry_price and now_price <= ai_tp:
-                            status = "tp"
-                        elif ai_sl and ai_sl > entry_price and now_price >= ai_sl:
-                            status = "sl"
+                # Use candle-based TP/SL check
+                key = f"{sym}_{tf}"
+                candle_status, candle_close = candle_results.get(key, ("open", 0))
+                status = candle_status
+
+                if status == "tp" and ai_tp:
+                    now_price = ai_tp
+                elif status == "sl" and ai_sl:
+                    now_price = ai_sl
+                else:
+                    now_price = price_map.get(sym, entry.get("current_price", 0))
 
                 # Calculate P&L based on direction
                 if entry_price > 0:
