@@ -206,7 +206,7 @@ async def _batch_check_tp_sl(session: aiohttp.ClientSession, log: list, price_ma
     Returns dict: symbol+tf → (status, close_price_from_candles).
     Limits concurrency to avoid API weight spikes.
     """
-    sem = asyncio.Semaphore(5)  # max 5 concurrent kline requests
+    sem = asyncio.Semaphore(35)  # max 35 concurrent kline requests (~35 weight/sec, limit 2400/min)
     results = {}
 
     async def check_one(entry):
