@@ -168,10 +168,14 @@ async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
                f"?symbol={symbol}&interval=15m&limit=97&startTime={start_ms}")
         async with session.get(url, timeout=10) as resp:
             if resp.status != 200:
+                logging.warning(f"⚠️ Candle check {symbol}: HTTP {resp.status}")
                 return ("open", 0)
             raw = await resp.json()
             if not raw:
+                logging.warning(f"⚠️ Candle check {symbol}: empty response")
                 return ("open", 0)
+
+        logging.info(f"🕯️ {symbol}: loaded {len(raw)} candles (15m) from {entry_time_iso}, dir={ai_dir} entry={entry_price} TP={ai_tp} SL={ai_sl}")
 
         # Walk candles chronologically — first hit wins
         last_close = 0
@@ -183,20 +187,26 @@ async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
             if ai_dir == "LONG":
                 # SL: price drops to or below SL
                 if ai_sl and ai_sl < entry_price and low <= ai_sl:
-                    # Check if TP also hit in same candle — SL takes priority (conservative)
+                    logging.info(f"🕯️ {symbol}: SL HIT (LONG) — candle low {low} <= SL {ai_sl}")
                     return ("sl", ai_sl)
                 if ai_tp and ai_tp > entry_price and high >= ai_tp:
+                    logging.info(f"🕯️ {symbol}: TP HIT (LONG) — candle high {high} >= TP {ai_tp}")
                     return ("tp", ai_tp)
             elif ai_dir == "SHORT":
                 # SL: price rises to or above SL
                 if ai_sl and ai_sl > entry_price and high >= ai_sl:
+                    logging.info(f"🕯️ {symbol}: SL HIT (SHORT) — candle high {high} >= SL {ai_sl}")
                     return ("sl", ai_sl)
                 if ai_tp and ai_tp < entry_price and low <= ai_tp:
+                    logging.info(f"🕯️ {symbol}: TP HIT (SHORT) — candle low {low} <= TP {ai_tp}")
                     return ("tp", ai_tp)
 
+        logging.info(f"🕯️ {symbol}: OPEN (no TP/SL hit in {len(raw)} candles)")
         return ("open", last_close if last_close else 0)
     except Exception as e:
         logging.error(f"❌ _check_tp_sl_from_candles {symbol}: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         return ("open", 0)
 
 
@@ -220,6 +230,7 @@ async def _batch_check_tp_sl(session: aiohttp.ClientSession, log: list, price_ma
         entry_time = entry.get("time", "")
 
         if not ai_dir or entry_price <= 0 or not entry_time:
+            logging.warning(f"⚠️ Candle check SKIP {sym}: ai_dir={ai_dir} entry_price={entry_price} time={entry_time}")
             results[key] = ("open", price_map.get(sym, entry.get("current_price", 0)))
             return
 
@@ -232,7 +243,12 @@ async def _batch_check_tp_sl(session: aiohttp.ClientSession, log: list, price_ma
             close_price = price_map.get(sym, entry.get("current_price", 0))
         results[key] = (status, close_price)
 
+    logging.info(f"🕯️ Batch candle check: {len(log)} coins to verify TP/SL...")
     await asyncio.gather(*(check_one(e) for e in log))
+    tp_count = sum(1 for v in results.values() if v[0] == "tp")
+    sl_count = sum(1 for v in results.values() if v[0] == "sl")
+    open_count = sum(1 for v in results.values() if v[0] == "open")
+    logging.info(f"🕯️ Batch candle check done: TP={tp_count} SL={sl_count} OPEN={open_count}")
     return results
 
 
