@@ -244,21 +244,21 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         pnl_dollar = (pnl_pct_leveraged / 100) * position_size
 
-        # AI prediction match: ✅ if direction matches P&L, ❌ if not
+        # Icon: 🟢 price went UP, 🔴 price went DOWN (raw price direction)
+        price_up = now_price >= entry_price
+        # AI prediction match: ✅ if AI direction matches actual price movement, ❌ if not
         ai_match = ""
         if ai_dir:
-            if (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0):
-                ai_match = "✅"
-            else:
-                ai_match = "❌"
+            ai_correct = (ai_dir == "LONG" and price_up) or (ai_dir == "SHORT" and not price_up)
+            ai_match = "✅" if ai_correct else "❌"
 
         if status == "tp":
             day_wins += 1
-            icon = "🟢" if pnl_pct >= 0 else "🔴"
+            icon = "🟢" if price_up else "🔴"
             status_tag = " ✅TP"
         elif status == "sl":
             day_losses += 1
-            icon = "🔴" if pnl_pct < 0 else "🟢"
+            icon = "🟢" if price_up else "🔴"
             status_tag = " 🚫SL"
         else:
             day_pending += 1
@@ -411,21 +411,21 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         pnl_dollar = (pnl_pct_leveraged / 100) * position_size
 
-        # AI prediction match
+        # Icon: 🟢 price went UP, 🔴 price went DOWN (raw price direction)
+        price_up = now_price >= entry_price
+        # AI prediction match: ✅ if AI direction matches actual price movement, ❌ if not
         ai_match = ""
         if ai_dir:
-            if (ai_dir == "LONG" and pnl_pct >= 0) or (ai_dir == "SHORT" and pnl_pct < 0):
-                ai_match = "✅"
-            else:
-                ai_match = "❌"
+            ai_correct = (ai_dir == "LONG" and price_up) or (ai_dir == "SHORT" and not price_up)
+            ai_match = "✅" if ai_correct else "❌"
 
         # Everything counts as closed — plus = TP, minus = SL
         if pnl_pct >= 0:
             day_wins += 1
-            icon = "🟢"
+            icon = "🟢" if price_up else "🔴"
         else:
             day_losses += 1
-            icon = "🔴"
+            icon = "🟢" if price_up else "🔴"
 
         day_pnl_dollar += pnl_dollar
 
