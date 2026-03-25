@@ -1151,6 +1151,8 @@ async def telegram_polling_loop(app_session):
                                     "🔒 `/signals close` — snapshot: close all open now\n"
                                     "🔄 `/signals clear` — reset bank to $10k\n"
                                     "🧠 `/models` — AI engine\n"
+                                    "🧠 `/models all` — all OpenRouter models\n"
+                                    "🧠 `/models <id>` — switch to any model\n"
                                     "⏰ `/time 18:30` — scan schedule\n"
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
