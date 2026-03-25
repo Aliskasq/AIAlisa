@@ -213,9 +213,6 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     elif last['close'] < cloud_bottom: ichi_status = "BELOW CLOUD (Bearish)"
     else: ichi_status = "INSIDE CLOUD (Neutral/Chop)"
     
-    # Assess OBV Trend Status
-    obv_status = "Bullish (Accumulation)" if last['obv'] > last['obv_sma20'] else "Bearish (Distribution)"
-
     last_indic_row = {
         "close": last['close'],
         "change_recent": round(change_recent, 2),
@@ -226,13 +223,20 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "macd_line": last['macd_line'],
         "macd_signal": last['macd_signal'],
         "macd_hist": last['macd_hist'],
-        "obv_status": obv_status,
-        "supertrend": "🟢 BULLISH" if last['supertrend_dir'] == 1 else "🔴 BEARISH",
+        "obv": last['obv'],
+        "obv_sma20": last['obv_sma20'],
+        "supertrend_dir": int(last['supertrend_dir']),  # 1=bullish, -1=bearish
         "supertrend_price": last['supertrend'],
         "adx": last['adx'],
         "stoch_k": last['stoch_k'], "stoch_d": last['stoch_d'],
         "mfi": last['mfi'],
         "ichimoku_status": ichi_status,
+        "ichi_tenkan": last.get('tenkan_sen', 0),
+        "ichi_kijun": last.get('kijun_sen', 0),
+        "ichi_senkou_a": last.get('senkou_span_a', 0),
+        "ichi_senkou_b": last.get('senkou_span_b', 0),
+        "ichi_cloud_top": cloud_top,
+        "ichi_cloud_bottom": cloud_bottom,
         "funding_rate": df.get("funding_rate", "Unknown"),
         "bb_upper": last['bb_upper'],
         "bb_lower": last['bb_lower'],
@@ -250,107 +254,29 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     ema25 = indic['ema25']
     ema99 = indic['ema99']
 
-    # ── EMA ANALYSIS ──
-    if ema7 > ema25 > ema99:
-        ema_signal = f"🟢 BULLISH ALIGNMENT (EMA7={ema7:.6f} > EMA25={ema25:.6f} > EMA99={ema99:.6f})"
-    elif ema7 < ema25 < ema99:
-        ema_signal = f"🔴 BEARISH ALIGNMENT (EMA7={ema7:.6f} < EMA25={ema25:.6f} < EMA99={ema99:.6f})"
-    else:
-        ema_signal = f"⚪ MIXED (EMA7={ema7:.6f}, EMA25={ema25:.6f}, EMA99={ema99:.6f})"
-
-    # Distance from key EMAs (for SL/TP placement)
+    # ── RAW VALUES ──
     ema99_dist_pct = ((price - ema99) / ema99) * 100 if ema99 > 0 else 0
     ema25_dist_pct = ((price - ema25) / ema25) * 100 if ema25 > 0 else 0
-
-    # ── RSI ANALYSIS ──
     rsi = indic['rsi14']
-    if rsi > 80: rsi_signal = f"⛔ EXTREMELY OVERBOUGHT ({rsi:.1f}) — reversal likely"
-    elif rsi > 70: rsi_signal = f"⚠️ OVERBOUGHT ({rsi:.1f}) — caution for longs"
-    elif rsi < 20: rsi_signal = f"⛔ EXTREMELY OVERSOLD ({rsi:.1f}) — reversal likely"
-    elif rsi < 30: rsi_signal = f"⚠️ OVERSOLD ({rsi:.1f}) — caution for shorts"
-    elif rsi > 55: rsi_signal = f"🟢 BULLISH ({rsi:.1f})"
-    elif rsi < 45: rsi_signal = f"🔴 BEARISH ({rsi:.1f})"
-    else: rsi_signal = f"⚪ NEUTRAL ({rsi:.1f})"
-
-    # ── STOCHASTIC RSI ──
-    stoch_k = indic['stoch_k']
-    stoch_d = indic['stoch_d']
-    if stoch_k > 80:
-        stoch_signal = f"⚠️ OVERBOUGHT K={stoch_k:.0f}"
-        if stoch_k < stoch_d: stoch_signal += " + BEARISH CROSS (K<D)"
-    elif stoch_k < 20:
-        stoch_signal = f"⚠️ OVERSOLD K={stoch_k:.0f}"
-        if stoch_k > stoch_d: stoch_signal += " + BULLISH CROSS (K>D)"
-    elif stoch_k > stoch_d:
-        stoch_signal = f"🟢 BULLISH CROSS K={stoch_k:.0f}>D={stoch_d:.0f}"
-    else:
-        stoch_signal = f"🔴 BEARISH CROSS K={stoch_k:.0f}<D={stoch_d:.0f}"
-
-    # ── MACD ANALYSIS ──
     macd_line = indic['macd_line']
     macd_signal_val = indic['macd_signal']
     macd_hist = indic['macd_hist']
-    if macd_line > macd_signal_val:
-        if macd_hist > 0:
-            macd_signal = f"🟢 BULLISH (line={macd_line:.6f} > signal={macd_signal_val:.6f}, hist={macd_hist:.6f}"
-            macd_signal += ", GROWING)" if macd_hist > abs(macd_line - macd_signal_val) * 0.5 else ", weakening)"
-        else:
-            macd_signal = f"🟡 BULLISH CROSS but hist negative (line={macd_line:.6f}, signal={macd_signal_val:.6f}, hist={macd_hist:.6f})"
-    else:
-        if macd_hist < 0:
-            macd_signal = f"🔴 BEARISH (line={macd_line:.6f} < signal={macd_signal_val:.6f}, hist={macd_hist:.6f}"
-            macd_signal += ", GROWING)" if abs(macd_hist) > abs(macd_signal_val - macd_line) * 0.5 else ", weakening)"
-        else:
-            macd_signal = f"🟡 BEARISH CROSS but hist positive (line={macd_line:.6f}, signal={macd_signal_val:.6f}, hist={macd_hist:.6f})"
-
-    # ── OBV ANALYSIS ──
-    obv_status = indic['obv_status']
-    if "Accumulation" in obv_status:
-        obv_signal = "🟢 ACCUMULATION (OBV > SMA20 — buyers dominating)"
-    else:
-        obv_signal = "🔴 DISTRIBUTION (OBV < SMA20 — sellers dominating)"
-
-    # ── CMF ANALYSIS ──
-    cmf = indic['cmf']
-    if cmf > 0.1: cmf_signal = f"🟢 STRONG BUYING PRESSURE (CMF={cmf:.3f})"
-    elif cmf > 0.0: cmf_signal = f"🟢 MILD BUYING (CMF={cmf:.3f})"
-    elif cmf < -0.1: cmf_signal = f"🔴 STRONG SELLING PRESSURE (CMF={cmf:.3f})"
-    elif cmf < 0.0: cmf_signal = f"🔴 MILD SELLING (CMF={cmf:.3f})"
-    else: cmf_signal = f"⚪ NEUTRAL (CMF={cmf:.3f})"
-
-    # ── MFI ANALYSIS ──
-    mfi = indic['mfi']
-    if mfi > 80: mfi_signal = f"⚠️ MFI OVERBOUGHT ({mfi:.0f}) — money flow exhausted"
-    elif mfi < 20: mfi_signal = f"⚠️ MFI OVERSOLD ({mfi:.0f}) — money flow depleted"
-    elif mfi > 50: mfi_signal = f"🟢 MFI BULLISH ({mfi:.0f})"
-    else: mfi_signal = f"🔴 MFI BEARISH ({mfi:.0f})"
-
-    # ── SUPERTREND ──
-    st = indic['supertrend']
+    obv_val = indic.get('obv', 0)
+    obv_sma = indic.get('obv_sma20', 0)
+    obv_diff_pct = ((obv_val - obv_sma) / abs(obv_sma) * 100) if obv_sma != 0 else 0
+    st_dir = indic.get('supertrend_dir', 1)
+    st = "BULLISH" if st_dir == 1 else "BEARISH"
     st_price = indic['supertrend_price']
-
-    # ── ADX (trend strength) ──
     adx = indic['adx']
-    if adx > 40: adx_signal = f"💪 STRONG TREND (ADX={adx:.0f})"
-    elif adx > 25: adx_signal = f"📈 MODERATE TREND (ADX={adx:.0f})"
-    else: adx_signal = f"😴 WEAK/NO TREND (ADX={adx:.0f})"
-
-    # ── BOLLINGER BANDS ──
     bb_upper = indic['bb_upper']
     bb_lower = indic['bb_lower']
     bb_mid = indic['bb_mid']
     bb_width_pct = ((bb_upper - bb_lower) / bb_mid) * 100 if bb_mid > 0 else 0
-    if price >= bb_upper * 0.998:
-        bb_signal = f"⚠️ AT UPPER BAND — potential reversal/resistance"
-    elif price <= bb_lower * 1.002:
-        bb_signal = f"⚠️ AT LOWER BAND — potential support/bounce"
-    elif price > bb_mid:
-        bb_signal = f"🟢 ABOVE MID (bullish side)"
-    else:
-        bb_signal = f"🔴 BELOW MID (bearish side)"
-
-    # ── ICHIMOKU ──
     ichi = indic['ichimoku_status']
+    ichi_tenkan = indic.get('ichi_tenkan', 0)
+    ichi_kijun = indic.get('ichi_kijun', 0)
+    ichi_cloud_top = indic.get('ichi_cloud_top', 0)
+    ichi_cloud_bottom = indic.get('ichi_cloud_bottom', 0)
 
     # ── INDICATOR SCORECARD (count ALL 12 base indicators) ──
     # ── SCORECARD: only reliable indicators vote ──
@@ -369,41 +295,44 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     neutral_count = 0
     indicator_votes = []
 
-    # Core voting indicators (always vote)
-    voting_indicators = {
-        "EMA": ema_signal,
-        "RSI": rsi_signal,
-        "MACD": macd_signal,
-        "OBV": obv_signal,
-        "BB": bb_signal,
-    }
-    # SuperTrend votes on 1H+ only
-    if is_1h_or_higher:
-        voting_indicators["SuperTrend"] = st
-    # Ichimoku votes on 4H+ only
-    if is_higher_tf:
-        voting_indicators["Ichimoku"] = ichi
-
-    for name, sig in voting_indicators.items():
-        if "🟢" in sig or "BULLISH" in sig or "ACCUMULATION" in sig or "BUYING" in sig:
+    # Vote from RAW values — no pre-interpreted signals
+    def vote(name, is_bull, is_bear):
+        nonlocal bullish_count, bearish_count, neutral_count
+        if is_bull:
             bullish_count += 1
             indicator_votes.append(f"{name}=🟢")
-        elif "🔴" in sig or "BEARISH" in sig or "DISTRIBUTION" in sig or "SELLING" in sig:
+        elif is_bear:
             bearish_count += 1
             indicator_votes.append(f"{name}=🔴")
-        elif "⚠️" in sig:
-            if "OVERBOUGHT" in sig:
-                bearish_count += 1
-                indicator_votes.append(f"{name}=⚠️OB")
-            elif "OVERSOLD" in sig:
-                bullish_count += 1
-                indicator_votes.append(f"{name}=⚠️OS")
-            else:
-                neutral_count += 1
-                indicator_votes.append(f"{name}=⚪")
         else:
             neutral_count += 1
             indicator_votes.append(f"{name}=⚪")
+
+    # EMA: bullish if aligned up, bearish if aligned down
+    vote("EMA", ema7 > ema25 > ema99, ema7 < ema25 < ema99)
+    # RSI: >55 bull, <45 bear, overbought(>70)=bear, oversold(<30)=bull
+    vote("RSI", rsi > 55 and rsi <= 70, rsi < 45 and rsi >= 30)
+    if rsi > 70:
+        bearish_count += 1
+        indicator_votes.append("RSI=⚠️OB")
+        # undo the neutral if was added
+        if "RSI=⚪" in indicator_votes: indicator_votes.remove("RSI=⚪"); neutral_count -= 1
+    elif rsi < 30:
+        bullish_count += 1
+        indicator_votes.append("RSI=⚠️OS")
+        if "RSI=⚪" in indicator_votes: indicator_votes.remove("RSI=⚪"); neutral_count -= 1
+    # MACD: line > signal = bull
+    vote("MACD", macd_line > macd_signal_val, macd_line < macd_signal_val)
+    # OBV: above SMA20 = bull
+    vote("OBV", obv_val > obv_sma, obv_val < obv_sma)
+    # BB: above mid = bull, below mid = bear
+    vote("BB", price > bb_mid, price < bb_mid)
+    # SuperTrend: 1H+ only
+    if is_1h_or_higher:
+        vote("SuperTrend", st_dir == 1, st_dir == -1)
+    # Ichimoku: 4H+ only
+    if is_higher_tf:
+        vote("Ichimoku", price > ichi_cloud_top and ichi_cloud_top > 0, price < ichi_cloud_bottom and ichi_cloud_bottom > 0)
 
     # ADX doesn't vote direction but shows trend strength
     adx_note = f"ADX={adx:.0f}({'strong' if adx > 25 else 'weak'})"
@@ -432,7 +361,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"EMA: EMA7={ema7:.6f} | EMA25={ema25:.6f} | EMA99={ema99:.6f} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99",
         f"RSI(14): {rsi:.1f}",
         f"MACD: line={macd_line:.6f} | signal={macd_signal_val:.6f} | histogram={macd_hist:.6f}",
-        f"OBV: {obv_val:.0f} | SMA20={obv_sma:.0f} | {indic.get('obv_status', 'Unknown')}",
+        f"OBV: {obv_val:.0f} | SMA20={obv_sma:.0f} | OBV {obv_diff_pct:+.1f}% vs SMA",
         f"BB(20,2): Upper={bb_upper:.6f} | Mid={bb_mid:.6f} | Lower={bb_lower:.6f} | Width={bb_width_pct:.1f}% | Price at {'upper band' if price >= bb_upper * 0.998 else 'lower band' if price <= bb_lower * 1.002 else 'mid-upper' if price > bb_mid else 'mid-lower'}",
     ]
     idx = 6
@@ -440,7 +369,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         raw_lines.append(f"SuperTrend(10,3): {st} @ {st_price:.6f} | Price {st_dist_pct:+.1f}% from ST")
         idx += 1
     if is_higher_tf:
-        raw_lines.append(f"Ichimoku: {ichi}")
+        raw_lines.append(f"Ichimoku: Tenkan={ichi_tenkan:.6f} | Kijun={ichi_kijun:.6f} | Cloud={ichi_cloud_bottom:.6f}-{ichi_cloud_top:.6f} | Price vs cloud: {ichi}")
         idx += 1
     raw_lines.append(f"ADX(14): {adx:.1f}")
 
