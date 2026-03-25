@@ -423,26 +423,28 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         f"   [{votes_str}]"
     )
 
-    # Build indicator lines (only voting indicators — no noise)
-    voting_lines = [
-        f"1. EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99",
-        f"2. RSI: {rsi_signal}",
-        f"3. MACD: {macd_signal}",
+    # Build indicator lines: RAW VALUES + interpretation + scorecard
+    st_dist_pct = ((price - st_price) / st_price) * 100 if st_price > 0 else 0
+
+    raw_lines = [
+        f"1. EMA: EMA7={ema7:.6f} | EMA25={ema25:.6f} | EMA99={ema99:.6f} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99 → {ema_signal}",
+        f"2. RSI: {rsi:.1f} → {rsi_signal}",
+        f"3. MACD: line={macd_line:.6f} signal={macd_signal_val:.6f} hist={macd_hist:.6f} → {macd_signal}",
         f"4. OBV: {obv_signal}",
-        f"5. BB: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}",
+        f"5. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} Width={bb_width_pct:.1f}% → {bb_signal}",
     ]
     idx = 6
     if is_1h_or_higher:
-        voting_lines.append(f"{idx}. SuperTrend: {st} @ {st_price:.6f}")
+        raw_lines.append(f"{idx}. SuperTrend: {st} @ {st_price:.6f} (price {st_dist_pct:+.1f}% from ST line)")
         idx += 1
     if is_higher_tf:
-        voting_lines.append(f"{idx}. Ichimoku: {ichi}")
+        raw_lines.append(f"{idx}. Ichimoku: {ichi}")
         idx += 1
-    voting_lines.append(f"{idx}. ADX: {adx_signal}")
+    raw_lines.append(f"{idx}. ADX: {adx:.1f} → {adx_signal}")
 
     return (
         f"=== {tf_label} ===\n"
         f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% | 24h: {indic.get('change_24h', 0):+.2f}%\n"
-        + "\n".join(voting_lines) + "\n"
+        + "\n".join(raw_lines) + "\n"
         + consensus
     )
