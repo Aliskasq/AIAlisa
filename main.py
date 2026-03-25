@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
 from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params
-from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight
+from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
 import aiohttp
@@ -271,6 +271,10 @@ async def main():
                                     # 3. Fetch Funding History and add to AI data
                                     funding_history = await fetch_funding_history(session, symbol)
                                     last_indic_row["funding_rate"] = funding_history
+
+                                    # 3a. Market Positioning (OI, L/S ratio, Taker volume)
+                                    positioning = await fetch_market_positioning(session, symbol)
+                                    last_indic_row["positioning"] = positioning
 
                                     # 3b. Multi-timeframe data for better AI accuracy (250 candles for SMC)
                                     mtf_data = {}

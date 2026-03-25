@@ -58,7 +58,7 @@ def set_chat_lang(chat_id, lang):
     langs[str(chat_id)] = lang
     _save_langs(langs)
 
-from core.binance_api import fetch_klines, fetch_funding_rate
+from core.binance_api import fetch_klines, fetch_funding_rate, fetch_market_positioning, format_positioning_text
 from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 import agent.analyzer  
@@ -2037,6 +2037,8 @@ async def telegram_polling_loop(app_session):
                                 last_row, full_df = calculate_binance_indicators(df, "4H")
                                 funding = await fetch_funding_rate(app_session, symbol)
                                 last_row["funding_rate"] = funding
+                                positioning = await fetch_market_positioning(app_session, symbol)
+                                last_row["positioning"] = positioning
 
                                 # Build multi-TF data
                                 mtf_data = {}
@@ -2221,6 +2223,8 @@ async def telegram_polling_loop(app_session):
                                     last_row, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
                                     funding = await fetch_funding_rate(app_session, coin_to_analyze)
                                     last_row["funding_rate"] = funding
+                                    positioning = await fetch_market_positioning(app_session, coin_to_analyze)
+                                    last_row["positioning"] = positioning
                                     mtf_data = {}
                                     if raw_1d:
                                         mtf_data["1D"] = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")[0]

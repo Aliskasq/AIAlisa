@@ -244,7 +244,7 @@ For each TF, go through ALL indicators one by one:
 Count bullish vs bearish indicators → that's your % split.
 The CONSENSUS line in the data already pre-counts this — USE IT as a starting point.
 
-MANDATORY OUTPUT FORMAT (max 1000 chars, split into 2 messages if needed):
+MANDATORY OUTPUT FORMAT (PART 1: max 1000 chars for Telegram, PART 2: up to 1050 chars for Binance Square autopost — total max 2050 chars, min 1500 chars including spaces):
 
 ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 
@@ -262,7 +262,7 @@ ${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
 💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
 
 ---
-PART 2 — EXTENDED (up to 1500 chars):
+PART 2 — EXTENDED (up to 1050 chars, total with Part 1 MUST be 1500-2050 chars including spaces):
 For EACH timeframe, list every indicator and its signal (bullish/bearish/neutral).
 Show the count: "4H: 8 bullish, 3 bearish, 1 neutral → LONG 73%"
 Include SMC zones, divergences between TFs.{f'{chr(10)}Include Smart Money and Social Hype analysis with direction impact.' if skills_block else ''}
@@ -397,21 +397,29 @@ RULES:
     funding = clean_indic.get("funding_rate", "Unknown")
     funding_text = f"Funding Rate: {funding} (INFO ONLY — funding does NOT predict direction. Coins with -0.5% or +1% funding can move explosively in either direction. Use for context, NOT for LONG/SHORT decision.)"
 
+    # Market Positioning (OI, L/S Ratio, Taker Volume)
+    from core.binance_api import format_positioning_text
+    positioning = clean_indic.get("positioning", {})
+    positioning_text = format_positioning_text(positioning, price) if positioning else ""
+
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
-[MULTI-TIMEFRAME DATA — indicators numbered 1-11 per TF, check SCORECARD]
+[MULTI-TIMEFRAME DATA — check SCORECARD per TF]
 {primary_tf_text}
 {mtf_text}
 {smc_text}
+
+{positioning_text}
 
 [ADDITIONAL]
 {funding_text}
 
 INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
 SMC SCORECARD counts structure, order blocks, FVG, zones separately.
-Combine ALL scorecards + funding to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
+MARKET POSITIONING shows crowd behavior (OI, L/S ratio, taker volume) — use to confirm or question your direction.
+Combine ALL scorecards to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
-For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels.
+For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels. Use liquidation zones to identify potential price magnets.
 """
 
     # ---------------------------------------------------------

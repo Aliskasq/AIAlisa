@@ -103,3 +103,159 @@ async def fetch_funding_rate(session, symbol):
             return "Unknown"
     except Exception as e:
         return "Unknown"
+
+
+# --- MARKET POSITIONING (OI, L/S Ratio, Taker Volume) ---
+async def fetch_market_positioning(session, symbol):
+    """
+    Fetch Open Interest, Long/Short ratios, and Taker buy/sell volume.
+    Returns pre-interpreted dict for AI prompt.
+    API weight: ~5 total (1 per endpoint).
+    """
+    result = {}
+
+    # 1. Open Interest (current + 24h change)
+    try:
+        # Current OI
+        async with session.get(
+            "https://fapi.binance.com/fapi/v1/openInterest",
+            params={"symbol": symbol}, timeout=5
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result["oi_current"] = float(data.get("openInterest", 0))
+
+        # OI history (last 4 periods of 4h = ~16h for trend)
+        async with session.get(
+            "https://fapi.binance.com/futures/data/openInterestHist",
+            params={"symbol": symbol, "period": "4h", "limit": 4}, timeout=5
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if len(data) >= 2:
+                    oi_old = float(data[0].get("sumOpenInterest", 0))
+                    oi_new = float(data[-1].get("sumOpenInterest", 0))
+                    if oi_old > 0:
+                        result["oi_change_pct"] = ((oi_new - oi_old) / oi_old) * 100
+    except Exception as e:
+        logging.debug(f"OI fetch error {symbol}: {e}")
+
+    # 2. Global Long/Short Account Ratio
+    try:
+        async with session.get(
+            "https://fapi.binance.com/futures/data/globalLongShortAccountRatio",
+            params={"symbol": symbol, "period": "4h", "limit": 1}, timeout=5
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data:
+                    result["ls_account_long"] = float(data[-1].get("longAccount", 0.5))
+                    result["ls_account_short"] = float(data[-1].get("shortAccount", 0.5))
+    except Exception as e:
+        logging.debug(f"L/S account ratio error {symbol}: {e}")
+
+    # 3. Top Trader Long/Short Position Ratio
+    try:
+        async with session.get(
+            "https://fapi.binance.com/futures/data/topLongShortPositionRatio",
+            params={"symbol": symbol, "period": "4h", "limit": 1}, timeout=5
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data:
+                    result["top_long"] = float(data[-1].get("longAccount", 0.5))
+                    result["top_short"] = float(data[-1].get("shortAccount", 0.5))
+    except Exception as e:
+        logging.debug(f"Top trader ratio error {symbol}: {e}")
+
+    # 4. Taker Buy/Sell Volume
+    try:
+        async with session.get(
+            "https://fapi.binance.com/futures/data/takerlongshortRatio",
+            params={"symbol": symbol, "period": "4h", "limit": 1}, timeout=5
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data:
+                    result["taker_buy_vol"] = float(data[-1].get("buyVol", 0))
+                    result["taker_sell_vol"] = float(data[-1].get("sellVol", 0))
+    except Exception as e:
+        logging.debug(f"Taker volume error {symbol}: {e}")
+
+    return result
+
+
+def format_positioning_text(pos: dict, current_price: float = 0) -> str:
+    """Format positioning data into pre-interpreted text for AI prompt."""
+    if not pos:
+        return ""
+
+    lines = ["[MARKET POSITIONING — OI, Long/Short Ratio, Taker Volume]"]
+
+    # OI
+    oi = pos.get("oi_current", 0)
+    oi_change = pos.get("oi_change_pct")
+    if oi > 0:
+        oi_text = f"Open Interest: {oi:,.0f} contracts"
+        if oi_change is not None:
+            if oi_change > 5:
+                oi_text += f" | 📈 OI RISING {oi_change:+.1f}% (new positions opening — volatile move coming)"
+            elif oi_change < -5:
+                oi_text += f" | 📉 OI FALLING {oi_change:+.1f}% (positions closing — trend weakening)"
+            else:
+                oi_text += f" | ⚪ OI stable ({oi_change:+.1f}%)"
+        lines.append(oi_text)
+
+    # L/S Account Ratio
+    long_acct = pos.get("ls_account_long", 0)
+    short_acct = pos.get("ls_account_short", 0)
+    if long_acct > 0 or short_acct > 0:
+        long_pct = long_acct * 100
+        short_pct = short_acct * 100
+        if long_pct > 60:
+            crowd = f"⚠️ CROWD IS LONG ({long_pct:.0f}%) — squeeze risk DOWN"
+        elif short_pct > 60:
+            crowd = f"⚠️ CROWD IS SHORT ({short_pct:.0f}%) — squeeze risk UP"
+        else:
+            crowd = f"⚪ Balanced ({long_pct:.0f}%L / {short_pct:.0f}%S)"
+        lines.append(f"Accounts L/S: {crowd}")
+
+    # Top Trader Ratio
+    top_long = pos.get("top_long", 0)
+    top_short = pos.get("top_short", 0)
+    if top_long > 0 or top_short > 0:
+        tl_pct = top_long * 100
+        ts_pct = top_short * 100
+        if tl_pct > 60:
+            top_text = f"🟢 TOP TRADERS LONG ({tl_pct:.0f}%) — smart money bullish"
+        elif ts_pct > 60:
+            top_text = f"🔴 TOP TRADERS SHORT ({ts_pct:.0f}%) — smart money bearish"
+        else:
+            top_text = f"⚪ Top traders balanced ({tl_pct:.0f}%L / {ts_pct:.0f}%S)"
+        lines.append(f"Top Traders: {top_text}")
+
+    # Taker Volume
+    buy_vol = pos.get("taker_buy_vol", 0)
+    sell_vol = pos.get("taker_sell_vol", 0)
+    total_vol = buy_vol + sell_vol
+    if total_vol > 0:
+        buy_pct = (buy_vol / total_vol) * 100
+        sell_pct = (sell_vol / total_vol) * 100
+        if buy_pct > 55:
+            taker = f"🟢 BUYERS AGGRESSIVE ({buy_pct:.0f}% buy volume)"
+        elif sell_pct > 55:
+            taker = f"🔴 SELLERS AGGRESSIVE ({sell_pct:.0f}% sell volume)"
+        else:
+            taker = f"⚪ Balanced ({buy_pct:.0f}% buy / {sell_pct:.0f}% sell)"
+        lines.append(f"Taker Volume: {taker}")
+
+    # Liquidation Zones (estimated based on common leverages)
+    if current_price > 0:
+        liq_lines = ["Estimated Liquidation Zones:"]
+        for lev in [3, 5, 10, 25]:
+            long_liq = current_price * (1 - 1/lev)  # long liquidation = price drops
+            short_liq = current_price * (1 + 1/lev)  # short liquidation = price rises
+            liq_lines.append(f"  {lev}x: Long liq ≈{long_liq:.6f} | Short liq ≈{short_liq:.6f}")
+        lines.extend(liq_lines)
+
+    return "\n".join(lines)
