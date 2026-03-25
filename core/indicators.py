@@ -252,11 +252,11 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
 
     # ── EMA ANALYSIS ──
     if ema7 > ema25 > ema99:
-        ema_signal = "🟢 BULLISH ALIGNMENT (EMA7>25>99)"
+        ema_signal = f"🟢 BULLISH ALIGNMENT (EMA7={ema7:.6f} > EMA25={ema25:.6f} > EMA99={ema99:.6f})"
     elif ema7 < ema25 < ema99:
-        ema_signal = "🔴 BEARISH ALIGNMENT (EMA7<25<99)"
+        ema_signal = f"🔴 BEARISH ALIGNMENT (EMA7={ema7:.6f} < EMA25={ema25:.6f} < EMA99={ema99:.6f})"
     else:
-        ema_signal = "⚪ MIXED"
+        ema_signal = f"⚪ MIXED (EMA7={ema7:.6f}, EMA25={ema25:.6f}, EMA99={ema99:.6f})"
 
     # Distance from key EMAs (for SL/TP placement)
     ema99_dist_pct = ((price - ema99) / ema99) * 100 if ema99 > 0 else 0
@@ -292,16 +292,16 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     macd_hist = indic['macd_hist']
     if macd_line > macd_signal_val:
         if macd_hist > 0:
-            macd_signal = "🟢 BULLISH (line > signal, histogram positive"
+            macd_signal = f"🟢 BULLISH (line={macd_line:.6f} > signal={macd_signal_val:.6f}, hist={macd_hist:.6f}"
             macd_signal += ", GROWING)" if macd_hist > abs(macd_line - macd_signal_val) * 0.5 else ", weakening)"
         else:
-            macd_signal = "🟡 BULLISH CROSS but histogram negative — early reversal?"
+            macd_signal = f"🟡 BULLISH CROSS but hist negative (line={macd_line:.6f}, signal={macd_signal_val:.6f}, hist={macd_hist:.6f})"
     else:
         if macd_hist < 0:
-            macd_signal = "🔴 BEARISH (line < signal, histogram negative"
+            macd_signal = f"🔴 BEARISH (line={macd_line:.6f} < signal={macd_signal_val:.6f}, hist={macd_hist:.6f}"
             macd_signal += ", GROWING)" if abs(macd_hist) > abs(macd_signal_val - macd_line) * 0.5 else ", weakening)"
         else:
-            macd_signal = "🟡 BEARISH CROSS but histogram positive — early reversal?"
+            macd_signal = f"🟡 BEARISH CROSS but hist positive (line={macd_line:.6f}, signal={macd_signal_val:.6f}, hist={macd_hist:.6f})"
 
     # ── OBV ANALYSIS ──
     obv_status = indic['obv_status']
