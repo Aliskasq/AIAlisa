@@ -243,45 +243,138 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
 
 
 def format_tf_summary(indic: dict, tf_label: str) -> str:
-    """Format one timeframe's indicators into a compact text block for AI prompt."""
+    """Format one timeframe's indicators into pre-interpreted signals for AI prompt."""
     price = indic['close']
     ema7 = indic['ema7']
     ema25 = indic['ema25']
     ema99 = indic['ema99']
 
-    # EMA position analysis
-    ema_positions = []
-    if price > ema7: ema_positions.append("Price>EMA7")
-    else: ema_positions.append("Price<EMA7")
-    if price > ema25: ema_positions.append("Price>EMA25")
-    else: ema_positions.append("Price<EMA25")
-    if price > ema99: ema_positions.append("Price>EMA99")
-    else: ema_positions.append("Price<EMA99")
-
-    # EMA crosses
-    ema_crosses = []
-    if ema7 > ema25: ema_crosses.append("EMA7>EMA25 (bullish)")
-    else: ema_crosses.append("EMA7<EMA25 (bearish)")
-    if ema25 > ema99: ema_crosses.append("EMA25>EMA99 (bullish)")
-    else: ema_crosses.append("EMA25<EMA99 (bearish)")
-
-    # Golden/Death cross
+    # ── EMA ANALYSIS ──
     if ema7 > ema25 > ema99:
-        alignment = "🟢 BULLISH ALIGNMENT (EMA7>25>99)"
+        ema_signal = "🟢 BULLISH ALIGNMENT (EMA7>25>99)"
     elif ema7 < ema25 < ema99:
-        alignment = "🔴 BEARISH ALIGNMENT (EMA7<25<99)"
+        ema_signal = "🔴 BEARISH ALIGNMENT (EMA7<25<99)"
     else:
-        alignment = "⚪ MIXED (no full alignment)"
+        ema_signal = "⚪ MIXED"
+
+    # Distance from key EMAs (for SL/TP placement)
+    ema99_dist_pct = ((price - ema99) / ema99) * 100 if ema99 > 0 else 0
+    ema25_dist_pct = ((price - ema25) / ema25) * 100 if ema25 > 0 else 0
+
+    # ── RSI ANALYSIS ──
+    rsi = indic['rsi14']
+    if rsi > 80: rsi_signal = f"⛔ EXTREMELY OVERBOUGHT ({rsi:.1f}) — reversal likely"
+    elif rsi > 70: rsi_signal = f"⚠️ OVERBOUGHT ({rsi:.1f}) — caution for longs"
+    elif rsi < 20: rsi_signal = f"⛔ EXTREMELY OVERSOLD ({rsi:.1f}) — reversal likely"
+    elif rsi < 30: rsi_signal = f"⚠️ OVERSOLD ({rsi:.1f}) — caution for shorts"
+    elif rsi > 55: rsi_signal = f"🟢 BULLISH ({rsi:.1f})"
+    elif rsi < 45: rsi_signal = f"🔴 BEARISH ({rsi:.1f})"
+    else: rsi_signal = f"⚪ NEUTRAL ({rsi:.1f})"
+
+    # ── STOCHASTIC RSI ──
+    stoch_k = indic['stoch_k']
+    stoch_d = indic['stoch_d']
+    if stoch_k > 80:
+        stoch_signal = f"⚠️ OVERBOUGHT K={stoch_k:.0f}"
+        if stoch_k < stoch_d: stoch_signal += " + BEARISH CROSS (K<D)"
+    elif stoch_k < 20:
+        stoch_signal = f"⚠️ OVERSOLD K={stoch_k:.0f}"
+        if stoch_k > stoch_d: stoch_signal += " + BULLISH CROSS (K>D)"
+    elif stoch_k > stoch_d:
+        stoch_signal = f"🟢 BULLISH CROSS K={stoch_k:.0f}>D={stoch_d:.0f}"
+    else:
+        stoch_signal = f"🔴 BEARISH CROSS K={stoch_k:.0f}<D={stoch_d:.0f}"
+
+    # ── MACD ANALYSIS ──
+    macd_line = indic['macd_line']
+    macd_signal_val = indic['macd_signal']
+    macd_hist = indic['macd_hist']
+    if macd_line > macd_signal_val:
+        if macd_hist > 0:
+            macd_signal = "🟢 BULLISH (line > signal, histogram positive"
+            macd_signal += ", GROWING)" if macd_hist > abs(macd_line - macd_signal_val) * 0.5 else ", weakening)"
+        else:
+            macd_signal = "🟡 BULLISH CROSS but histogram negative — early reversal?"
+    else:
+        if macd_hist < 0:
+            macd_signal = "🔴 BEARISH (line < signal, histogram negative"
+            macd_signal += ", GROWING)" if abs(macd_hist) > abs(macd_signal_val - macd_line) * 0.5 else ", weakening)"
+        else:
+            macd_signal = "🟡 BEARISH CROSS but histogram positive — early reversal?"
+
+    # ── OBV ANALYSIS ──
+    obv_status = indic['obv_status']
+    if "Accumulation" in obv_status:
+        obv_signal = "🟢 ACCUMULATION (OBV > SMA20 — buyers dominating)"
+    else:
+        obv_signal = "🔴 DISTRIBUTION (OBV < SMA20 — sellers dominating)"
+
+    # ── CMF ANALYSIS ──
+    cmf = indic['cmf']
+    if cmf > 0.1: cmf_signal = f"🟢 STRONG BUYING PRESSURE (CMF={cmf:.3f})"
+    elif cmf > 0.0: cmf_signal = f"🟢 MILD BUYING (CMF={cmf:.3f})"
+    elif cmf < -0.1: cmf_signal = f"🔴 STRONG SELLING PRESSURE (CMF={cmf:.3f})"
+    elif cmf < 0.0: cmf_signal = f"🔴 MILD SELLING (CMF={cmf:.3f})"
+    else: cmf_signal = f"⚪ NEUTRAL (CMF={cmf:.3f})"
+
+    # ── MFI ANALYSIS ──
+    mfi = indic['mfi']
+    if mfi > 80: mfi_signal = f"⚠️ MFI OVERBOUGHT ({mfi:.0f}) — money flow exhausted"
+    elif mfi < 20: mfi_signal = f"⚠️ MFI OVERSOLD ({mfi:.0f}) — money flow depleted"
+    elif mfi > 50: mfi_signal = f"🟢 MFI BULLISH ({mfi:.0f})"
+    else: mfi_signal = f"🔴 MFI BEARISH ({mfi:.0f})"
+
+    # ── SUPERTREND ──
+    st = indic['supertrend']
+    st_price = indic['supertrend_price']
+
+    # ── ADX (trend strength) ──
+    adx = indic['adx']
+    if adx > 40: adx_signal = f"💪 STRONG TREND (ADX={adx:.0f})"
+    elif adx > 25: adx_signal = f"📈 MODERATE TREND (ADX={adx:.0f})"
+    else: adx_signal = f"😴 WEAK/NO TREND (ADX={adx:.0f})"
+
+    # ── BOLLINGER BANDS ──
+    bb_upper = indic['bb_upper']
+    bb_lower = indic['bb_lower']
+    bb_mid = indic['bb_mid']
+    bb_width_pct = ((bb_upper - bb_lower) / bb_mid) * 100 if bb_mid > 0 else 0
+    if price >= bb_upper * 0.998:
+        bb_signal = f"⚠️ AT UPPER BAND — potential reversal/resistance"
+    elif price <= bb_lower * 1.002:
+        bb_signal = f"⚠️ AT LOWER BAND — potential support/bounce"
+    elif price > bb_mid:
+        bb_signal = f"🟢 ABOVE MID (bullish side)"
+    else:
+        bb_signal = f"🔴 BELOW MID (bearish side)"
+
+    # ── ICHIMOKU ──
+    ichi = indic['ichimoku_status']
+
+    # ── CONFLICT COUNTER ──
+    bullish_count = 0
+    bearish_count = 0
+    for sig in [ema_signal, rsi_signal, macd_signal, obv_signal, cmf_signal, st, bb_signal, ichi, mfi_signal]:
+        if "🟢" in sig or "BULLISH" in sig or "ACCUMULATION" in sig or "BUYING" in sig:
+            bullish_count += 1
+        elif "🔴" in sig or "BEARISH" in sig or "DISTRIBUTION" in sig or "SELLING" in sig:
+            bearish_count += 1
+    total_signals = bullish_count + bearish_count
+    if total_signals > 0:
+        consensus = f"📊 CONSENSUS: {bullish_count} BULLISH vs {bearish_count} BEARISH"
+    else:
+        consensus = "📊 CONSENSUS: MIXED"
 
     return (
         f"=== {tf_label} ===\n"
-        f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% ({indic.get('recent_label', tf_label)}) | 24h: {indic.get('change_24h', 0):+.2f}%\n"
-        f"EMA7: {ema7:.6f} | EMA25: {ema25:.6f} | EMA99: {ema99:.6f}\n"
-        f"EMA Position: {', '.join(ema_positions)} | {alignment}\n"
-        f"EMA Crosses: {', '.join(ema_crosses)}\n"
-        f"RSI(14): {indic['rsi14']:.1f} | StochRSI K/D: {indic['stoch_k']:.1f}/{indic['stoch_d']:.1f} | MFI: {indic['mfi']:.1f}\n"
-        f"MACD: {indic['macd_line']:.6f} / Signal: {indic['macd_signal']:.6f} / Hist: {indic['macd_hist']:.6f}\n"
-        f"SuperTrend: {indic['supertrend']} @ {indic['supertrend_price']:.6f} | ADX: {indic['adx']:.1f}\n"
-        f"Bollinger: {indic['bb_lower']:.6f} / {indic['bb_mid']:.6f} / {indic['bb_upper']:.6f}\n"
-        f"Ichimoku: {indic['ichimoku_status']} | OBV: {indic['obv_status']} | CMF: {indic['cmf']:.4f}"
+        f"Price: {price:.6f} | Change: {indic.get('change_recent', 0):+.2f}% | 24h: {indic.get('change_24h', 0):+.2f}%\n"
+        f"EMA: {ema_signal} | Price {ema25_dist_pct:+.1f}% from EMA25, {ema99_dist_pct:+.1f}% from EMA99\n"
+        f"RSI: {rsi_signal} | StochRSI: {stoch_signal}\n"
+        f"MACD: {macd_signal}\n"
+        f"OBV: {obv_signal} | CMF: {cmf_signal}\n"
+        f"MFI: {mfi_signal}\n"
+        f"SuperTrend: {st} @ {st_price:.6f} | {adx_signal}\n"
+        f"Bollinger: {bb_signal} (width {bb_width_pct:.1f}%) | L={bb_lower:.6f} M={bb_mid:.6f} U={bb_upper:.6f}\n"
+        f"Ichimoku: {ichi}\n"
+        f"{consensus}"
     )
