@@ -997,8 +997,66 @@ async def telegram_polling_loop(app_session):
                             if not is_admin(msg):
                                 await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
                                 continue
+
+                            parts = text.split(maxsplit=1)
+                            sub_cmd = parts[1].strip() if len(parts) > 1 else ""
+
+                            # /models all — fetch full list from OpenRouter
+                            if sub_cmd.lower() == "all":
+                                await send_response(app_session, chat_id, "⏳ Fetching all models from OpenRouter...", msg_id)
+                                try:
+                                    async with app_session.get("https://openrouter.ai/api/v1/models", timeout=15) as resp:
+                                        if resp.status == 200:
+                                            data = await resp.json()
+                                            models = data.get("data", [])
+                                            # Sort by id
+                                            models.sort(key=lambda m: m.get("id", ""))
+                                            # Build chunks
+                                            lines = [f"🧠 *All OpenRouter Models ({len(models)}):*\n"]
+                                            lines.append(f"Current: `{agent.analyzer.OPENROUTER_MODEL}`\n")
+                                            for m in models:
+                                                mid = m.get("id", "?")
+                                                pricing = m.get("pricing", {})
+                                                prompt_price = pricing.get("prompt", "?")
+                                                ctx = m.get("context_length", "?")
+                                                # Mark free models
+                                                is_free = str(prompt_price) == "0"
+                                                free_tag = " 🆓" if is_free else ""
+                                                lines.append(f"`{mid}`{free_tag}")
+                                            # Split into chunks of ~3900 chars
+                                            chunks = []
+                                            current_chunk = ""
+                                            for line in lines:
+                                                if len(current_chunk) + len(line) + 2 > 3900:
+                                                    chunks.append(current_chunk)
+                                                    current_chunk = line
+                                                else:
+                                                    current_chunk += "\n" + line
+                                            if current_chunk:
+                                                chunks.append(current_chunk)
+                                            for chunk in chunks:
+                                                await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+                                            await send_response(app_session, chat_id,
+                                                f"💡 To switch: `/models <full-model-id>`\nExample: `/models google/gemini-2.5-flash-preview-05-20`")
+                                        else:
+                                            await send_response(app_session, chat_id, f"❌ OpenRouter API error: {resp.status}", msg_id)
+                                except Exception as e:
+                                    await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
+                                continue
+
+                            # /models <model-name> — switch to specific model
+                            if sub_cmd and sub_cmd.lower() != "all" and "/" in sub_cmd:
+                                new_model = sub_cmd.strip()
+                                import config as _cfg
+                                _cfg.OPENROUTER_MODEL = new_model
+                                agent.analyzer.OPENROUTER_MODEL = new_model
+                                await send_response(app_session, chat_id,
+                                    f"✅ Model switched to:\n`{new_model}`", msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /models — show quick selection menu (existing)
                             current_m = agent.analyzer.OPENROUTER_MODEL
-                            model_text = f"🧠 *AI Engine Selection*\nCurrent: `{current_m}`"
+                            model_text = f"🧠 *AI Engine Selection*\nCurrent: `{current_m}`\n\n💡 `/models all` — full list"
                             model_markup = {
                                 "inline_keyboard": [
                                     [{"text": "── FREE MODELS ──", "callback_data": "md_noop"}],
