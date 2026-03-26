@@ -227,7 +227,7 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. You MUST analyze EVERY indicato
 HOW TO CALCULATE LONG/SHORT PERCENTAGE PER TIMEFRAME:
 For each TF, go through ALL indicators one by one:
 - EMA alignment → LONG or SHORT?
-- RSI → LONG or SHORT or NEUTRAL?
+- RSI → LONG or SHORT or NEUTRAL? (IMPORTANT: RSI > 75 = BEARISH/overbought vote even if price is rising! RSI > 80 = STRONG BEARISH. RSI < 25 = BULLISH/oversold even if price falling)
 - StochRSI → LONG or SHORT?
 - MACD (line vs signal, histogram direction) → LONG or SHORT?
 - OBV (accumulation vs distribution) → LONG or SHORT?
@@ -297,10 +297,17 @@ CRITICAL RULES:
    - If R:R is bad at current price, use Safe Entry to improve R:R. NEVER SKIP for bad R:R.
 6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
 7. DO NOT ADD HASHTAGS.
-8. OVERBOUGHT/OVERSOLD: you CAN still trade in the direction, but WARN clearly and factor it into SL/TP placement (wider SL, closer TP). Overbought is NOT a reason to SKIP — it means "wait for Safe Entry pullback".
+8. OVERBOUGHT/OVERSOLD RULES (CRITICAL):
+   - RSI overbought on 1 TF: WARN but can trade. Reduce confidence by 10%.
+   - RSI overbought on 2+ TFs: SERIOUS DANGER. Reduce confidence by 25%+. NEVER show 100% LONG.
+   - RSI overbought on 3+ TFs (especially if 1H+4H+1D all >75): HIGH REVERSAL RISK. Consider SKIP or SHORT.
+   - Each overbought TF MUST count as a BEARISH vote in the scorecard, not neutral.
+   - Overbought + top traders shorting = EXTREME caution. Prefer SKIP or very conservative entry.
+   - NEVER output "LONG 100%" when ANY timeframe has RSI > 75. That's mathematically impossible if you're counting bearish signals honestly.
+   - Same rules apply for oversold (RSI < 25) in reverse.
 9. TP MUST also be at a structural level (resistance/OB/FVG for LONG, support/OB/FVG for SHORT) — explain WHY.
 10. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%.
-11. VERDICT: SKIP ONLY if confidence is exactly 50/50 (truly no edge). If direction is 55/45 or higher — output LONG or SHORT, NEVER SKIP. Overbought, bad R:R at current price, divergences — these are WARNINGS, not reasons to SKIP.
+11. VERDICT: SKIP ONLY if confidence is exactly 50/50 (truly no edge). If direction is 55/45 or higher — output LONG or SHORT, NEVER SKIP. Bad R:R at current price — use Safe Entry, not SKIP. But MULTI-TF OVERBOUGHT/OVERSOLD (3+ TFs) IS a valid reason to SKIP.
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -349,10 +356,10 @@ RULES:
 5. SL: MIN 2%, MAX 10% from entry. SL < TP distance (R:R ≥ 1:1). SL at structural level (explain why). If bad R:R — use Safe Entry.
 6. NO HASHTAGS. MAX 1000 chars.
 7. Each TF line: brief reason in (). Include which indicators are bullish/bearish.
-8. Overbought/oversold: can still trade but WARN + adjust SL/TP. NOT a reason to SKIP.
+8. OVERBOUGHT/OVERSOLD: RSI >75 on 1 TF = warn, reduce confidence 10%. RSI >75 on 2+ TFs = DANGER, reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = SKIP or SHORT. Each overbought TF = BEARISH vote. Same for oversold (<25) in reverse.
 9. TP at structural level (explain why).
 10. MAX leverage 3x. MAX deposit 2%.
-11. SKIP ONLY if 50/50. If 55/45 or higher — give LONG or SHORT, never SKIP.
+11. SKIP if 50/50 OR if 3+ TFs overbought/oversold. Otherwise give direction.
 """
 
 
