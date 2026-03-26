@@ -445,22 +445,42 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         idx += 1
     raw_lines.append(f"{idx}. ADX: {adx:.1f} → {adx_signal}")
 
-    # Trend Filter Consensus
+    # Trend Filter Consensus — GRADIENT (not absolute)
     st_dir_raw = indic.get('supertrend_dir_raw', 1)  # 1 bullish, -1 bearish
     ichi_cloud_top = indic.get('ichi_cloud_top', 0)
     ichi_cloud_bottom = indic.get('ichi_cloud_bottom', 0)
     
-    trend_bull = sum([ema7 > ema25 > ema99, st_dir_raw == 1, price > ichi_cloud_top]) >= 2
-    trend_bear = sum([ema7 < ema25 < ema99, st_dir_raw == -1, price < ichi_cloud_bottom]) >= 2
+    # Score components (0-1 each)
+    ema_bull_score = 1.0 if ema7 > ema25 > ema99 else 0.5 if ema7 > ema25 else 0.0
+    ema_bear_score = 1.0 if ema7 < ema25 < ema99 else 0.5 if ema7 < ema25 else 0.0
+    st_bull_score = 1.0 if st_dir_raw == 1 else 0.0
+    st_bear_score = 1.0 if st_dir_raw == -1 else 0.0
+    cloud_bull_score = 1.0 if price > ichi_cloud_top else 0.5 if price > ichi_cloud_bottom else 0.0
+    cloud_bear_score = 1.0 if price < ichi_cloud_bottom else 0.5 if price < ichi_cloud_top else 0.0
     
-    if trend_bull and adx > 25:
-        trend_filter = "STRONG BULLISH TREND — ONLY LONG"
-    elif trend_bear and adx > 25:
-        trend_filter = "STRONG BEARISH TREND — ONLY SHORT"
-    elif adx < 25:
-        trend_filter = "WEAK TREND (ADX < 25) — BOTH DIRECTIONS POSSIBLE"
+    total_bull = ema_bull_score + st_bull_score + cloud_bull_score
+    total_bear = ema_bear_score + st_bear_score + cloud_bear_score
+    
+    if adx > 25:
+        # Strong trend market
+        if total_bull >= 2.5:
+            trend_filter = "STRONG BULLISH TREND (ADX>25, EMA aligned, ST bullish) — PREFER LONG"
+        elif total_bull >= 1.5:
+            trend_filter = "EARLY BULLISH (ADX>25, ST bullish but EMA mixed) — PREFER LONG, could be reversal"
+        elif total_bear >= 2.5:
+            trend_filter = "STRONG BEARISH TREND (ADX>25, EMA aligned, ST bearish) — PREFER SHORT"
+        elif total_bear >= 1.5:
+            trend_filter = "EARLY BEARISH (ADX>25, ST bearish but EMA mixed) — PREFER SHORT, could be reversal"
+        else:
+            trend_filter = "CONSOLIDATION WITH TREND (ADX>25 but conflicting signals) — check other indicators"
     else:
-        trend_filter = "TREND NEUTRAL — BOTH DIRECTIONS POSSIBLE"
+        # Weak trend (range market)
+        if total_bull > total_bear:
+            trend_filter = "WEAK BULLISH BIAS (ADX<25) — both directions possible, slight LONG edge"
+        elif total_bear > total_bull:
+            trend_filter = "WEAK BEARISH BIAS (ADX<25) — both directions possible, slight SHORT edge"
+        else:
+            trend_filter = "TRUE RANGE (ADX<25, no bias) — both directions equal"
     
     # MACD dynamic analysis
     macd_dynamic = ""

@@ -244,20 +244,21 @@ For each TF, go through ALL indicators one by one:
 Count bullish vs bearish indicators → that's your % split.
 The CONSENSUS line in the data already pre-counts this — USE IT as a starting point.
 
-TREND FILTER RULES (NEW):
-- Check TREND FILTER line in data: STRONG BULLISH TREND — ONLY LONG, STRONG BEARISH TREND — ONLY SHORT, WEAK TREND — both directions possible.
-- If strong trend direction conflicts with your indicator count, ADJUST your direction to match the trend (strong trend overrides minor indicators).
-- For STRONG BULLISH TREND: only LONG entries, ignore bearish signals unless overwhelming (e.g., RSI >80, multiple divergences).
-- For STRONG BEARISH TREND: only SHORT entries, ignore bullish signals unless overwhelming.
-- For WEAK TREND (ADX<25): both directions allowed, rely more on indicator counts.
-
-DYNAMIC INDICATOR ANALYSIS:
-- MACD: check histogram direction (growing/weakening) and line vs signal crossover.
-- RSI: consider overbought/oversold levels and divergence vs price.
-- EMA: look at alignment (EMA7>EMA25>EMA99) and price distance from EMAs.
-- OBV: accumulation vs distribution over time.
-- SuperTrend: direction changes indicate trend reversals.
-- Ichimoku: cloud position and TK cross.
+TREND CONTEXT & DYNAMIC ANALYSIS:
+- Check TREND FILTER line in data — it shows TREND STRENGTH and BIAS, NOT absolute prohibition.
+- GRADIENT RULES:
+  * STRONG BULLISH TREND (ADX>25, EMA aligned, ST bullish) — PREFER LONG but watch for overbought/divergence.
+  * EARLY BULLISH (ADX>25, ST bullish but EMA mixed) — PREFER LONG, could be early reversal.
+  * STRONG BEARISH TREND (ADX>25, EMA aligned, ST bearish) — PREFER SHORT but watch for oversold/divergence.
+  * EARLY BEARISH (ADX>25, ST bearish but EMA mixed) — PREFER SHORT, could be early reversal.
+  * WEAK TREND (ADX<25) — both directions possible, rely on other indicators.
+- Trend bias is a CONTEXT, not a command. If indicators strongly contradict trend bias, mention why (divergence, exhaustion).
+- MACD dynamics: histogram direction (growing/weakening) shows momentum acceleration/deceleration.
+- RSI dynamics: overbought/oversold levels AND divergence vs price (higher high price + lower high RSI = bearish divergence).
+- EMA dynamics: alignment (7>25>99) vs price position (above/below EMAs).
+- OBV: accumulation vs distribution trend over last 5-10 candles.
+- SuperTrend: direction changes indicate potential trend reversals.
+- Ichimoku: cloud position (above/below) and TK cross (Tenkan > Kijun = bullish).
 
 MANDATORY OUTPUT FORMAT (PART 1: max 1000 chars for Telegram, PART 2: up to 1050 chars for Binance Square autopost — total max 2050 chars, min 1500 chars including spaces):
 
@@ -309,17 +310,19 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVER
 
 HOW TO CALCULATE %: For each TF, check ALL indicators (EMA, RSI, StochRSI, MACD, OBV, CMF, MFI, SuperTrend, BB, Ichimoku, SMC{', Smart Money, Social Hype' if skills_block else ''}, Funding). Count bullish vs bearish → that gives you %. Use the CONSENSUS line in data as starting point.
 
-TREND FILTER RULES:
-- Check TREND FILTER line in data: STRONG BULLISH TREND — ONLY LONG, STRONG BEARISH TREND — ONLY SHORT, WEAK TREND — both directions possible.
-- Strong trend overrides minor indicators. If strong bullish trend, only LONG entries.
-- For WEAK TREND (ADX<25): both directions allowed, rely more on indicator counts.
+TREND CONTEXT:
+- TREND FILTER shows trend strength/bias, NOT absolute prohibition.
+- STRONG BULLISH/BEARISH (ADX>25, EMA+ST aligned) — PREFER direction but watch divergences.
+- EARLY BULLISH/BEARISH (ADX>25, ST aligned but EMA mixed) — PREFER direction, could be reversal.
+- WEAK TREND (ADX<25) — both directions possible.
+- Trend bias = context, not command. If indicators contradict, explain why.
 
 DYNAMIC ANALYSIS:
-- MACD: histogram direction (growing/weakening) matters.
-- RSI: overbought/oversold levels and divergence.
-- EMA: alignment and price distance.
-- OBV: accumulation vs distribution.
-- SuperTrend: direction changes indicate trend reversals.
+- MACD: histogram direction shows momentum.
+- RSI: overbought/oversold + divergence.
+- EMA: alignment + price distance.
+- OBV: accumulation vs distribution trend.
+- SuperTrend: direction changes signal reversals.
 
 MANDATORY OUTPUT FORMAT (STRICT MAX 1000 CHARACTERS):
 
