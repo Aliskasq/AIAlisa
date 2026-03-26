@@ -133,6 +133,12 @@ SCAN_SCHEDULE = _load_scan_schedule()
 
 # --- ADMIN ACCESS CONTROL ---
 ADMIN_ID = int(CHAT_ID) if CHAT_ID else 0
+GROUP_ID = int(GROUP_CHAT_ID) if GROUP_CHAT_ID else 0
+ALLOWED_CHATS = {ADMIN_ID, GROUP_ID} - {0}
+
+def is_allowed_chat(chat_id: int) -> bool:
+    """Check if the chat is allowed (admin DM or configured group)."""
+    return chat_id in ALLOWED_CHATS
 
 def is_admin(msg: dict) -> bool:
     """Check if the message sender is the bot admin."""
@@ -909,6 +915,8 @@ async def telegram_polling_loop(app_session):
                             cb_data = cq.get("data", "")
                             cq_id = cq.get("id")
                             chat_id = cq.get("message", {}).get("chat", {}).get("id")
+                            if not is_allowed_chat(chat_id):
+                                continue
                             cb_lang = _load_langs().get(str(chat_id), "ru") if chat_id else "ru"
                             
                             # 1. Square Integration (Admin check)
@@ -1009,6 +1017,8 @@ async def telegram_polling_loop(app_session):
                         new_members = msg.get("new_chat_members", [])
                         if new_members:
                             chat_id = msg.get("chat", {}).get("id")
+                            if not is_allowed_chat(chat_id):
+                                continue
                             for member in new_members:
                                 name = member.get("first_name", "User")
                                 welcome = (
@@ -1035,6 +1045,10 @@ async def telegram_polling_loop(app_session):
                         msg_id = msg.get("message_id")
 
                         if not text:
+                            continue
+
+                        # --- CHAT FILTER: ignore messages from unknown chats ---
+                        if not is_allowed_chat(chat_id):
                             continue
                             
                         # LANGUAGE: saved preference OR auto-detect from text
