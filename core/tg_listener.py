@@ -450,11 +450,23 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
     return all_msgs
 
 
-async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
-    """Snapshot view: close all pending trades at current price, show day P&L summary. Read-only — changes nothing."""
+async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "ru", show_bank: bool = True, bank_already_updated: bool = False) -> list:
+    """Snapshot view: close all pending trades at current price, show day P&L summary.
+    bank_already_updated=True means bank balance already includes today's P&L (used in daily report after update_bank_with_trades)."""
     log = load_breakout_log()
+    bank = load_virtual_bank()
 
     if not log:
+        if show_bank:
+            total_w = bank["total_wins"]
+            total_l = bank["total_losses"]
+            wr = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+            pnl_dollar = bank["balance"] - bank["starting_balance"]
+            pnl_pct = (pnl_dollar / bank["starting_balance"]) * 100
+            if lang == "ru":
+                return [f"🏦 *Виртуальный банк*\n\n💰 Старт: `${bank['starting_balance']:,.2f}`\n💵 Текущий: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Плюс: {total_w} ({wr:.0f}%) | ❌ Минус: {total_l} ({100-wr:.0f}%)\n📈 Всего: {bank['total_trades']} сделок\n\n📭 Сегодня пока нет сигналов."]
+            else:
+                return [f"🏦 *Virtual Bank*\n\n💰 Start: `${bank['starting_balance']:,.2f}`\n💵 Current: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Wins: {total_w} ({wr:.0f}%) | ❌ Losses: {total_l} ({100-wr:.0f}%)\n📈 Total: {bank['total_trades']} trades\n\n📭 No signals today yet."]
         if lang == "ru":
             return ["📭 Сегодня пока нет сигналов."]
         else:
@@ -473,7 +485,6 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     # Check TP/SL via 97 x 15m candles after entry (accurate historical check)
     candle_results = await _batch_check_tp_sl(session, log, price_map)
 
-    bank = load_virtual_bank()
     day_wins = 0
     day_losses = 0
     day_skipped = 0
@@ -592,9 +603,43 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     skip_text_ru = f" | ⏭ Пропуск: {day_skipped}" if day_skipped > 0 else ""
     skip_text_en = f" | ⏭ Skip: {day_skipped}" if day_skipped > 0 else ""
 
+    # Virtual bank info for close view
+    if bank_already_updated:
+        projected_balance = bank["balance"]  # Bank already includes today's P&L
+        total_w = bank["total_wins"]
+        total_l = bank["total_losses"]
+        total_t = bank["total_trades"]
+    else:
+        projected_balance = bank["balance"] + day_pnl_dollar  # Preview: add today's P&L
+        total_w = bank["total_wins"] + day_wins
+        total_l = bank["total_losses"] + day_losses
+        total_t = bank["total_trades"] + day_wins + day_losses
+    wr_all = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+    total_pnl_dollar = projected_balance - bank["starting_balance"]
+    total_pnl_pct = (total_pnl_dollar / bank["starting_balance"]) * 100
+
+    if show_bank:
+        if lang == "ru":
+            bank_block = (
+                f"🏦 *Виртуальный банк*\n"
+                f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
+                f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n"
+                f"📈 Всего: ✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n\n"
+            )
+        else:
+            bank_block = (
+                f"🏦 *Virtual Bank*\n"
+                f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
+                f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n"
+                f"📈 All-time: ✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n\n"
+            )
+    else:
+        bank_block = ""
+
     if lang == "ru":
         header = (
             f"🔒 *Закрытие всех позиций (снимок)*\n\n"
+            f"{bank_block}"
             f"📅 *Сегодня ({day_total} сделок):*\n"
             f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%){skip_text_ru}\n"
             f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
@@ -603,6 +648,7 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     else:
         header = (
             f"🔒 *Close all positions (snapshot)*\n\n"
+            f"{bank_block}"
             f"📅 *Today ({day_total} trades):*\n"
             f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%){skip_text_en}\n"
             f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
@@ -711,12 +757,12 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             # Update bank with today's results
             update_bank_with_trades(trades_pnl)
 
-            # 2. Build signals text (now shows updated bank)
-            chunks = await build_signals_text(session, lang="ru")
+            # 2. Build signals close text (all positions closed at market/TP/SL)
+            chunks = await build_signals_close_text(session, lang="ru", show_bank=True, bank_already_updated=True)
 
             # Prepend daily header to first chunk
             if chunks:
-                chunks[0] = f"🕐 *Ежедневный итог (23:57 UTC)*\n\n{chunks[0]}"
+                chunks[0] = f"🕐 *Ежедневный итог (23:59 UTC)*\n\n{chunks[0]}"
 
             # 3. Send to admin DM (not group)
             tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
