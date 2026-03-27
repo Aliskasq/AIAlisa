@@ -411,6 +411,15 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         # ── BUILD TEXT SUMMARY ──
         lines = [f"📐 SMC Indicator [{tf_label}]:"]
 
+        # Bars since last structure
+        all_structures = swing_structures + internal_structures
+        bars_since_last_structure = 0
+        if all_structures:
+            all_structures.sort(key=lambda x: x["break_index"])
+            last_structure = all_structures[-1]
+            bars_since_last_structure = len(df) - 1 - last_structure["break_index"]
+            lines.append(f"Last Structure: {bars_since_last_structure} bars ago")
+
         # Current trend from last swing structure
         if swing_structures:
             last_swing = swing_structures[-1]
@@ -430,15 +439,23 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             bias = "Bull" if s["bias"] == BULLISH else "Bear"
             lines.append(f"  {s['type']} {bias} @ {s['price']:.6f}")
 
-        # Active Order Blocks
-        if swing_obs or internal_obs:
-            lines.append("Order Blocks:")
-            for ob in swing_obs:
+        # Active Order Blocks (ranked by distance from current price)
+        current_price = df['close'].iloc[-1]
+        all_obs = swing_obs + internal_obs
+        if all_obs:
+            # Calculate distance from current price
+            for ob in all_obs:
+                ob_mid = (ob['high'] + ob['low']) / 2
+                ob['distance_pct'] = abs((current_price - ob_mid) / current_price) * 100
+            
+            # Sort by distance (closest first)
+            all_obs.sort(key=lambda x: x['distance_pct'])
+            
+            lines.append("Order Blocks (by distance):")
+            for ob in all_obs[:5]:  # Show top 5 closest
                 tag = "Bull OB" if ob["bias"] == BULLISH else "Bear OB"
-                lines.append(f"  Swing {tag}: {ob['low']:.6f}-{ob['high']:.6f}")
-            for ob in internal_obs[-3:]:
-                tag = "Bull OB" if ob["bias"] == BULLISH else "Bear OB"
-                lines.append(f"  Int {tag}: {ob['low']:.6f}-{ob['high']:.6f}")
+                source = "Swing" if ob in swing_obs else "Int"
+                lines.append(f"  {source} {tag}: {ob['low']:.6f}-{ob['high']:.6f} ({ob['distance_pct']:.1f}% away)")
 
         # Active FVGs (last 3)
         if active_fvgs:
@@ -453,9 +470,11 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         if recent_eqh or recent_eql:
             lines.append("Liquidity:")
             for e in recent_eqh:
-                lines.append(f"  EQH @ {e['price']:.6f} (sell-side liq)")
+                dist_pct = abs((current_price - e['price']) / current_price) * 100
+                lines.append(f"  EQH @ {e['price']:.6f} ({dist_pct:.1f}% away)")
             for e in recent_eql:
-                lines.append(f"  EQL @ {e['price']:.6f} (buy-side liq)")
+                dist_pct = abs((current_price - e['price']) / current_price) * 100
+                lines.append(f"  EQL @ {e['price']:.6f} ({dist_pct:.1f}% away)")
 
         # Zones
         lines.append(f"Zone: {zones['current_zone']} (H:{zones['swing_high']:.6f} L:{zones['swing_low']:.6f} EQ:{zones['equilibrium']:.6f})")

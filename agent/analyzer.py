@@ -225,113 +225,18 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
 You receive MULTI-TIMEFRAME data: {tf_list_str}. You MUST analyze EVERY indicator on EVERY timeframe.
 
 HOW TO CALCULATE LONG/SHORT PERCENTAGE PER TIMEFRAME:
-For each TF, go through ALL indicators one by one:
-- EMA alignment → LONG or SHORT?
-- RSI → LONG or SHORT or NEUTRAL? (IMPORTANT: RSI > 75 = BEARISH/overbought vote even if price is rising! RSI > 80 = STRONG BEARISH. RSI < 25 = BULLISH/oversold even if price falling)
-- StochRSI → LONG or SHORT?
-- MACD (line vs signal, histogram direction) → LONG or SHORT?
-- OBV (accumulation vs distribution) → LONG or SHORT?
-- CMF (buying vs selling pressure) → LONG or SHORT?
-- MFI → LONG or SHORT?
-- SuperTrend → LONG or SHORT?
-- ADX (trend strength) → strong or weak?
-- Bollinger Bands (position, squeeze) → LONG or SHORT?
-- Ichimoku (cloud position, TK cross) → LONG or SHORT?
-- SMC (Order Blocks, FVG, BOS/CHoCH, EQH/EQL) → LONG or SHORT?
-{f'- Smart Money signals → LONG or SHORT?' if skills_block else ''}
-{f'- Social Hype → LONG or SHORT?' if skills_block else ''}
-- Funding Rate → favors LONG or SHORT?
-Count bullish vs bearish indicators → that's your % split.
-The CONSENSUS line in the data already pre-counts this — USE IT as a starting point.
+The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
+Use these scorecards as your starting point and combine across timeframes.
 
-TREND CONTEXT & DYNAMIC ANALYSIS:
-- Check TREND FILTER line in data — it shows TREND STRENGTH and BIAS, NOT absolute prohibition.
-- GRADIENT RULES:
-  * STRONG BULLISH TREND (ADX>25, EMA aligned, ST bullish) — PREFER LONG but watch for overbought/divergence.
-  * EARLY BULLISH (ADX>25, ST bullish but EMA mixed) — PREFER LONG, could be early reversal.
-  * STRONG BEARISH TREND (ADX>25, EMA aligned, ST bearish) — PREFER SHORT but watch for oversold/divergence.
-  * EARLY BEARISH (ADX>25, ST bearish but EMA mixed) — PREFER SHORT, could be early reversal.
-  * WEAK TREND (ADX<25) — both directions possible, rely on other indicators.
-- Trend bias is a CONTEXT, not a command. If indicators strongly contradict trend bias, mention why (divergence, exhaustion).
-- MACD dynamics: histogram direction (growing/weakening) shows momentum acceleration/deceleration.
-- RSI dynamics: overbought/oversold levels AND divergence vs price (higher high price + lower high RSI = bearish divergence).
-- EMA dynamics: alignment (7>25>99) vs price position (above/below EMAs).
-- OBV: accumulation vs distribution trend over last 5-10 candles.
-- SuperTrend: direction changes indicate potential trend reversals.
-- Ichimoku: cloud position (above/below) and TK cross (Tenkan > Kijun = bullish).
+IMPORTANT DIRECTIONAL RULES:
+- Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
+- Open Interest change IS a directional indicator — OI rising = new money = trend continuation, OI falling = positions closing = trend weakening
+- RSI overbought penalties are already calculated in the scorecards
+- Each indicator has historical context showing dynamics over multiple candles
 
-MANDATORY OUTPUT FORMAT (PART 1: max 1000 chars for Telegram, PART 2: up to 1050 chars for Binance Square autopost — total max 2050 chars, min 1500 chars including spaces):
+YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE:
 
-${base_coin} 📊 Price: ${price:.6f} | {dynamics_text}
-
-{tf_format_lines}
-
-🏆 VERDICT: LONG or SHORT
-📊 Overall: LONG X% / SHORT Y%
-💰 Funding: [rate + interpretation]
-⚠️ Note: [pullback risk / divergence between TFs / key level nearby]
-
-💰 Entry: [CURRENT PRICE at breakout — this is auto-filled, write current price]
-🔰 Safe Entry: [better entry from support/OB/BB — for patient traders]
-🚫 SL: [price] ([reason: EMA/OB/FVG/support/ATR level])
-🎯 TP: [price] ([reason: resistance/OB/EMA/FVG/EQH level])
-💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
-
----
-PART 2 — EXTENDED (up to 1050 chars, total with Part 1 MUST be 1500-2050 chars including spaces):
-For EACH timeframe, list every indicator and its signal (bullish/bearish/neutral).
-Show the count: "4H: 8 bullish, 3 bearish, 1 neutral → LONG 73%"
-Include SMC zones, divergences between TFs.{f'{chr(10)}Include Smart Money and Social Hype analysis with direction impact.' if skills_block else ''}
-
-CRITICAL RULES:
-1. Pick ONE direction. Percentage split shows confidence, NOT both directions.
-2. No Smart Money activity or moderate Social Hype is NEUTRAL — NOT a bearish signal. Base direction on technicals.
-3. Entry = CURRENT PRICE (breakout price). Safe Entry = optimal entry from support/OB for a better R:R.
-4. SL and TP: analyze ALL indicators together — EMA, BB, OB, FVG, EQH/EQL, Ichimoku, ATR, SuperTrend, support/resistance. Look for CONFLUENCE: where multiple levels overlap = strongest SL/TP. Write all supporting reasons in parentheses. NO random numbers.
-5. STOP-LOSS RULES (STRICT):
-   - SL distance: MIN 2% from entry, MAX 10% from entry. NEVER more than 10%.
-   - SL distance MUST be LESS than TP distance (R:R ≥ 1:1, ideally 1:2+).
-   - SL MUST be at a structural level (OB, FVG, EMA, BB, support/resistance) — explain WHY this level.
-   - If no structural level exists within 2-10% range → use closest structural level within range.
-   - Example: Entry $100 → SL must be between $90-$98 (LONG) or $102-$110 (SHORT).
-   - If R:R is bad at current price, use Safe Entry to improve R:R. NEVER SKIP for bad R:R.
-6. If lower TFs contradict higher TFs — mention pullback/reversal risk.
-7. DO NOT ADD HASHTAGS.
-8. OVERBOUGHT/OVERSOLD RULES (CRITICAL):
-   - RSI overbought on 1 TF: WARN but can trade. Reduce confidence by 10%.
-   - RSI overbought on 2+ TFs: SERIOUS DANGER. Reduce confidence by 25%+. NEVER show 100% LONG.
-   - RSI overbought on 3+ TFs (especially if 1H+4H+1D all >75): HIGH REVERSAL RISK. Consider SKIP or SHORT.
-   - Each overbought TF MUST count as a BEARISH vote in the scorecard, not neutral.
-   - Overbought + top traders shorting = EXTREME caution. Prefer SKIP or very conservative entry.
-   - NEVER output "LONG 100%" when ANY timeframe has RSI > 75. That's mathematically impossible if you're counting bearish signals honestly.
-   - Same rules apply for oversold (RSI < 25) in reverse.
-9. TP MUST also be at a structural level (resistance/OB/FVG for LONG, support/OB/FVG for SHORT) — explain WHY.
-10. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%.
-11. VERDICT: SKIP ONLY if confidence is exactly 50/50 (truly no edge). If direction is 55/45 or higher — output LONG or SHORT, NEVER SKIP. Bad R:R at current price — use Safe Entry, not SKIP. But MULTI-TF OVERBOUGHT/OVERSOLD (3+ TFs) IS a valid reason to SKIP.
-"""
-    else:
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
-{lang_directive}
-{skills_note}
-You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
-
-HOW TO CALCULATE %: For each TF, check ALL indicators (EMA, RSI, StochRSI, MACD, OBV, CMF, MFI, SuperTrend, BB, Ichimoku, SMC{', Smart Money, Social Hype' if skills_block else ''}, Funding). Count bullish vs bearish → that gives you %. Use the CONSENSUS line in data as starting point.
-
-TREND CONTEXT:
-- TREND FILTER shows trend strength/bias, NOT absolute prohibition.
-- STRONG BULLISH/BEARISH (ADX>25, EMA+ST aligned) — PREFER direction but watch divergences.
-- EARLY BULLISH/BEARISH (ADX>25, ST aligned but EMA mixed) — PREFER direction, could be reversal.
-- WEAK TREND (ADX<25) — both directions possible.
-- Trend bias = context, not command. If indicators contradict, explain why.
-
-DYNAMIC ANALYSIS:
-- MACD: histogram direction shows momentum.
-- RSI: overbought/oversold + divergence.
-- EMA: alignment + price distance.
-- OBV: accumulation vs distribution trend.
-- SuperTrend: direction changes signal reversals.
-
-MANDATORY OUTPUT FORMAT (STRICT MAX 1000 CHARACTERS):
+=== PART 1 (BRIEF VERDICT — STRICT 500-830 characters, this goes as chart caption) ===
 
 ${base_coin} 📊 Price: ${price:.6f}
 
@@ -340,26 +245,81 @@ ${base_coin} 📊 Price: ${price:.6f}
 🏆 VERDICT: LONG or SHORT
 📊 Overall: LONG X% / SHORT Y%
 💰 Funding: [rate]
-⚠️ [short note on risk/pullback]
+📊 L/S: [ratio]
+⚠️ [short risk note referencing lower TF]
 
-💰 Entry: [CURRENT PRICE at breakout]
-🔰 Safe: [better entry from support/OB/BB]
-🚫 SL: [price] ([reason: EMA/OB/support/ATR])
-🎯 TP: [price] ([reason: resistance/OB/EMA/FVG/EQH])
-💼 REC: [Leverage]x | [Deposit]%{risk_prompt_rule}
+💰 Entry: ${price:.6f}
+🔰 Safe: $X.XXXX
+🚫 SL: $X.XXXX ([reason])
+🎯 TP: $X.XXXX ([reason])
+💼 REC: Xx | X%
+
+---
+
+=== PART 2 (EXTENDED ANALYSIS — up to 3500 characters) ===
+
+🔬 ${base_coin} Extended Analysis
+
+{tf_format_lines}
+
+Detailed per-indicator per-TF breakdown:
+- For EACH timeframe show which indicators are bullish/bearish with specific values
+- Show historical dynamics (EMA slopes, MACD histogram direction, RSI trend, OBV divergences)
+- Show SMC levels (OB, FVG, BOS/CHoCH) with distances from price
+- Show confluence zones for SL/TP (where multiple indicators overlap)
+- Show cross-TF divergences and what they mean
+- Reference lower TF signals that confirm or contradict higher TF direction{risk_prompt_rule}
+
+CRITICAL RULES:
+1. Part 1 MUST be 500-830 characters. Count carefully!
+2. Part 2 MUST be up to 3500 characters. Write detailed analysis freely
+3. Separate Part 1 and Part 2 with exactly --- on its own line
+4. DO NOT write "Part 1" or "Part 2" labels in the output
+5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
+6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
+7. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%
+8. DO NOT ADD HASHTAGS
+9. OVERBOUGHT/OVERSOLD RULES: RSI >75 on 1 TF = warn, reduce 10%. RSI >75 on 2+ TFs = reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = consider SKIP or SHORT.
+10. SKIP only if truly 50/50 or 3+ TFs overbought/oversold. Otherwise give direction.
+"""
+    else:
+        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
+{lang_directive}
+{skills_note}
+You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
+
+The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
+Use these scorecards as your starting point and combine across timeframes.
+
+IMPORTANT DIRECTIONAL RULES:
+- Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
+- Open Interest change IS a directional indicator — OI rising = new money, OI falling = positions closing
+- RSI overbought penalties are already calculated in the scorecards
+
+MANDATORY OUTPUT FORMAT (Your response MUST be between 500 and 830 characters. Count carefully. Do NOT go under 500 or over 830.):
+
+${base_coin} 📊 Price: ${price:.6f}
+
+{tf_format_lines_short}
+
+🏆 VERDICT: LONG or SHORT
+📊 Overall: LONG X% / SHORT Y%
+💰 Funding: [rate]
+📊 L/S: [ratio]
+⚠️ [short risk note]
+
+💰 Entry: ${price:.6f}
+🔰 Safe: $X.XXXX
+🚫 SL: $X.XXXX ([reason])
+🎯 TP: $X.XXXX ([reason])
+💼 REC: Xx | X%{risk_prompt_rule}
 
 RULES:
-1. Pick ONE direction. % = confidence from indicator count.
-2. No Smart Money / moderate Social Hype = NEUTRAL, not bearish.
-3. Entry = current price. Safe = optimal from support/OB.
-4. SL/TP: CONFLUENCE of multiple indicators. Write reasons in (). NO random numbers.
-5. SL: MIN 2%, MAX 10% from entry. SL < TP distance (R:R ≥ 1:1). SL at structural level (explain why). If bad R:R — use Safe Entry.
-6. NO HASHTAGS. MAX 1000 chars.
-7. Each TF line: brief reason in (). Include which indicators are bullish/bearish.
-8. OVERBOUGHT/OVERSOLD: RSI >75 on 1 TF = warn, reduce confidence 10%. RSI >75 on 2+ TFs = DANGER, reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = SKIP or SHORT. Each overbought TF = BEARISH vote. Same for oversold (<25) in reverse.
-9. TP at structural level (explain why).
-10. MAX leverage 3x. MAX deposit 2%.
-11. SKIP if 50/50 OR if 3+ TFs overbought/oversold. Otherwise give direction.
+1. Entry = current price. Safe = better entry from support/OB
+2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
+3. MAX leverage 3x. MAX deposit 2%
+4. Each TF line: brief reason in parentheses
+5. Response MUST be 500-830 characters exactly
 """
 
 

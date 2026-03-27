@@ -2183,18 +2183,12 @@ async def telegram_polling_loop(app_session):
                                         chart_path = await draw_simple_chart(symbol, df_full, "4H")
 
                                 # --- PREPARE BINANCE SQUARE PUBLICATION & BUTTONS ---
-                                # Use Part 2 (extended analysis) for Square, fall back to full text
                                 import uuid
                                 post_id = str(uuid.uuid4())[:8]
-                                square_ai = ai_msg
-                                if "---" in ai_msg:
-                                    sq_parts = ai_msg.split("---", 1)
-                                    if len(sq_parts) > 1 and sq_parts[1].strip():
-                                        square_ai = sq_parts[1].strip()
                                 short_sym = symbol.replace("USDT", "")
-                                square_text = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{square_ai}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
-                                if len(square_text) > 1950:
-                                    square_text = square_text[:1947] + "..."
+                                square_text = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{ai_msg}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
+                                if len(square_text) > 2100:
+                                    square_text = square_text[:2097] + "..."
                                 square_cache_put(post_id, square_text)
 
                                 app_link = f"https://app.binance.com/en/futures/{symbol.upper()}"
@@ -2208,19 +2202,19 @@ async def telegram_polling_loop(app_session):
                                     ]
                                 }
 
-                                # --- SPLIT AI RESPONSE: Part 1 (caption) + Part 2 (extended) ---
-                                ai_part1 = ai_msg
-                                ai_part2 = None
+                                # --- SPLIT AI RESPONSE: Brief (caption) + Extended (second message) ---
+                                ai_brief = ai_msg
+                                ai_extended = None
                                 if "---" in ai_msg:
                                     parts = ai_msg.split("---", 1)
-                                    ai_part1 = parts[0].strip()
-                                    ai_part2 = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+                                    ai_brief = parts[0].strip()
+                                    ai_extended = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
-                                # --- SEND: chart + AI text, or just text if no line found ---
+                                # --- SEND: chart + brief caption, then extended as second message ---
                                 if chart_path:
                                     import os as _os
-                                    safe_ai = ai_part1 if len(ai_part1) < 800 else ai_part1[:800] + "..."
-                                    caption = f"📊 *{symbol} — 4H Trend Analysis*\n\n{safe_ai}"
+                                    safe_brief = ai_brief if len(ai_brief) < 830 else ai_brief[:827] + "..."
+                                    caption = f"📊 *{symbol} — 4H Trend Analysis*\n\n{safe_brief}"
                                     photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                                     try:
                                         with open(chart_path, 'rb') as f:
@@ -2235,38 +2229,40 @@ async def telegram_polling_loop(app_session):
                                                 if resp.status != 200:
                                                     resp_text = await resp.text()
                                                     logging.error(f"❌ Scan photo send error: {resp.status} - {resp_text}")
-                                                    # Fallback to text-only
-                                                    await send_response(app_session, chat_id, ai_msg, msg_id, reply_markup=scan_markup)
+                                                    await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
                                     except Exception as e:
                                         logging.error(f"❌ Error sending scan chart: {e}")
-                                        await send_response(app_session, chat_id, ai_msg, msg_id, reply_markup=scan_markup)
+                                        await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
                                     finally:
                                         try:
                                             _os.remove(chart_path)
                                         except: pass
+
+                                    # Send extended analysis as second message (always, if available)
+                                    if ai_extended:
+                                        ext_text = f"🔬 *{symbol} — Extended Analysis*\n\n{ai_extended}"
+                                        if len(ext_text) > 4000:
+                                            ext_text = ext_text[:3997] + "..."
+                                        # Prepare separate Square cache for extended part
+                                        post_id2 = str(uuid.uuid4())[:8]
+                                        sq_text2 = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{ai_extended}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
+                                        if len(sq_text2) > 2100:
+                                            sq_text2 = sq_text2[:2097] + "..."
+                                        square_cache_put(post_id2, sq_text2)
+                                        ext_markup = {
+                                            "inline_keyboard": [
+                                                [{"text": "📢 Post to Binance Square", "callback_data": f"sq_{post_id2}"}]
+                                            ]
+                                        }
+                                        await send_response(app_session, chat_id, ext_text, parse_mode="Markdown", reply_markup=ext_markup)
                                 else:
-                                    # No trend line found — send text only
-                                    await send_response(app_session, chat_id, ai_part1, msg_id, reply_markup=scan_markup)
-
-                                # Send extended analysis as second message with Square button
-                                if ai_part2:
-                                    # Prepare separate Square cache for extended part
-                                    post_id2 = str(uuid.uuid4())[:8]
-                                    short_sym2 = symbol.replace("USDT", "")
-                                    sq_text2 = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym2}\n\n{ai_part2}\n\n#AIBinance #BinanceSquare #{short_sym2} #Write2Earn"
-                                    if len(sq_text2) > 1950:
-                                        sq_text2 = sq_text2[:1947] + "..."
-                                    square_cache_put(post_id2, sq_text2)
-
-                                    ext_markup = {
-                                        "inline_keyboard": [
-                                            [{"text": "📢 Post to Binance Square", "callback_data": f"sq_{post_id2}"}]
-                                        ]
-                                    }
-                                    extended_text = f"🔬 *{symbol} — Extended Analysis*\n\n{ai_part2}"
-                                    if len(extended_text) > 4000:
-                                        extended_text = extended_text[:4000] + "..."
-                                    await send_response(app_session, chat_id, extended_text, parse_mode="Markdown", reply_markup=ext_markup)
+                                    # No chart — send brief as text, then extended
+                                    await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
+                                    if ai_extended:
+                                        ext_text = f"🔬 *{symbol} — Extended Analysis*\n\n{ai_extended}"
+                                        if len(ext_text) > 4000:
+                                            ext_text = ext_text[:3997] + "..."
+                                        await send_response(app_session, chat_id, ext_text, parse_mode="Markdown")
 
                                 # Delete streaming message 15s after chart/text sent
                                 if stream_msg_id:
