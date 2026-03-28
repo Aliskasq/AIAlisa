@@ -714,11 +714,17 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 sym = entry["symbol"]
                 tf = entry.get("tf", "?")
                 ai_dir = entry.get("ai_direction", "")
+
+                # Skip signals without AI direction or SKIP — they don't affect the bank
+                if not ai_dir or ai_dir == "SKIP":
+                    continue
+
                 ai_sl = entry.get("ai_sl")
                 ai_tp = entry.get("ai_tp")
                 ai_leverage = entry.get("ai_leverage", 1) or 1
                 ai_deposit_pct = entry.get("ai_deposit_pct")
-                entry_price = entry.get("breakout_price", 0) or entry.get("ai_entry", 0)
+                # Use same priority as build_signals_close_text: ai_entry → current_price → breakout_price
+                entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
 
                 # Use candle-based TP/SL check
                 key = f"{sym}_{tf}"
