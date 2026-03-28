@@ -285,17 +285,25 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     if len(df) >= 5:
         macd_hist_trend_5 = df['macd_hist'].tail(5).tolist()
         
-        # Determine histogram direction
+        # Determine histogram direction (critical for momentum analysis)
         if len(macd_hist_trend_5) >= 3:
             recent_trend = macd_hist_trend_5[-3:]
-            if all(h > 0 for h in recent_trend[-2:]) and recent_trend[-1] > recent_trend[-3]:
-                macd_hist_direction = "growing"
-            elif all(h < 0 for h in recent_trend[-2:]) and recent_trend[-1] < recent_trend[-3]:
-                macd_hist_direction = "shrinking"
-            elif recent_trend[-2] <= 0 < recent_trend[-1]:
+            last_h = recent_trend[-1]
+            prev_h = recent_trend[-2]
+            first_h = recent_trend[0]
+            
+            if prev_h <= 0 < last_h:
                 macd_hist_direction = "turned_positive"
-            elif recent_trend[-2] >= 0 > recent_trend[-1]:
+            elif prev_h >= 0 > last_h:
                 macd_hist_direction = "turned_negative"
+            elif last_h > 0 and last_h > first_h:
+                macd_hist_direction = "growing"        # Positive and increasing = strong bullish momentum
+            elif last_h > 0 and last_h < first_h:
+                macd_hist_direction = "fading_bullish"  # Positive but decreasing = bullish momentum FADING
+            elif last_h < 0 and last_h < first_h:
+                macd_hist_direction = "shrinking"       # Negative and decreasing = strong bearish momentum
+            elif last_h < 0 and last_h > first_h:
+                macd_hist_direction = "fading_bearish"  # Negative but increasing toward 0 = bearish momentum FADING
             else:
                 macd_hist_direction = "stable"
         
@@ -594,7 +602,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     else:
         ema_signal = f"⚪ MIXED (EMA7={slope7_ind}, EMA25={slope25_ind}, EMA99={slope99_ind})"
     
-    ema_analysis = (f"1. EMA: 7={ema7:.6f}({slope7_ind}{ema7_slope:+.1f}%/10bars) {'>' if ema7 > ema25 else '<'} "
+    idx = 1
+    ema_analysis = (f"{idx}. EMA: 7={ema7:.6f}({slope7_ind}{ema7_slope:+.1f}%/10bars) {'>' if ema7 > ema25 else '<'} "
                    f"25={ema25:.6f}({slope25_ind}{ema25_slope:+.1f}%) {'>' if ema25 > ema99 else '<'} "
                    f"99={ema99:.6f}({slope99_ind}{'flat' if abs(ema99_slope) < 0.5 else f'{ema99_slope:+.1f}%'})\n"
                    f"   Price>EMA7: {price_above_7}/10 candles | Price>EMA25: {price_above_25}/10 | Price>EMA99: {price_above_99}/10{cross_text}\n"
@@ -616,18 +625,25 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         if hist_direction in ["growing", "turned_positive"]:
             macd_signal = f"🟢 BULLISH (momentum growing)"
             macd_vote_weight = 1.0
+        elif hist_direction == "fading_bullish":
+            macd_signal = f"🟡 WEAK BULLISH (hist positive but FALLING — momentum exhausting)"
+            macd_vote_weight = 0.5
         else:
-            macd_signal = f"🟡 WEAK BULLISH (momentum fading, hist declining)"
+            macd_signal = f"🟡 WEAK BULLISH (momentum fading)"
             macd_vote_weight = 0.5
     else:
         if hist_direction in ["shrinking", "turned_negative"]:
             macd_signal = f"🔴 BEARISH (momentum growing)"
             macd_vote_weight = 1.0
+        elif hist_direction == "fading_bearish":
+            macd_signal = f"🟡 WEAK BEARISH (hist negative but RISING toward 0 — bearish exhausting)"
+            macd_vote_weight = 0.5
         else:
-            macd_signal = f"🟡 WEAK BEARISH (momentum fading, hist declining)"
+            macd_signal = f"🟡 WEAK BEARISH (momentum fading)"
             macd_vote_weight = 0.5
     
-    macd_analysis = (f"2. MACD: DIF={macd_line:.6f} {'>' if macd_line > macd_signal_val else '<'} "
+    idx += 1
+    macd_analysis = (f"{idx}. MACD: DIF={macd_line:.6f} {'>' if macd_line > macd_signal_val else '<'} "
                     f"DEA={macd_signal_val:.6f} | Hist={macd_hist:.6f} {hist_direction.upper()}\n"
                     f"   {cross_text}, hist peaked at {hist_peak:.6f}, accel={hist_accel:.6f}\n"
                     f"   → {macd_signal}")
@@ -648,7 +664,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         obv_signal = f"🔴 BEARISH{'but spike=caution' if obv_spike else ''}"
         obv_vote_weight = 0.5 if obv_spike else 1.0
     
-    obv_analysis = (f"3. OBV: {obv_status.split('(')[1].replace(')', '')} (>SMA20) | ROC(5)={obv_roc:+.1f}%{spike_text}\n"
+    idx += 1
+    obv_analysis = (f"{idx}. OBV: {obv_status.split('(')[1].replace(')', '')} (>SMA20) | ROC(5)={obv_roc:+.1f}%{spike_text}\n"
                    f"   {divergence_text}\n"
                    f"   → {obv_signal}")
 
@@ -684,7 +701,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     penalty_text = f"\n   PENALTY: {rsi_penalty:+d}% from LONG score" if rsi_penalty != 0 else ""
     
-    rsi_analysis = (f"4. RSI: {rsi:.1f} {'OVERBOUGHT' if rsi > 70 else ('OVERSOLD' if rsi < 30 else 'NORMAL')} | "
+    idx += 1
+    rsi_analysis = (f"{idx}. RSI: {rsi:.1f} {'OVERBOUGHT' if rsi > 70 else ('OVERSOLD' if rsi < 30 else 'NORMAL')} | "
                    f"Trend: {rsi_trend} 5 bars ({values_str}){penalty_text}\n"
                    f"   → {rsi_signal}")
 
@@ -705,9 +723,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         st_vote_weight = 1.0   # Normal signal
         flip_note = "(established trend, not fresh signal)"
     
-    st_analysis = (f"5. SuperTrend: {st_status} @ {st_price:.6f} | Flipped {st_flip_bars} bars ago | "
-                  f"Price {st_distance:+.1f}% from ST line\n"
-                  f"   → {st_status.split()[1]} {flip_note}")
+    # SuperTrend analysis text (idx assigned later when added to list)
+    st_analysis_text = (f"SuperTrend: {st_status} @ {st_price:.6f} | Flipped {st_flip_bars} bars ago | "
+                       f"Price {st_distance:+.1f}% from ST line\n"
+                       f"   → {st_status.split()[1]} {flip_note}")
 
     # ── BOLLINGER BANDS WITH SQUEEZE/EXPANSION ──
     bb_upper = indic['bb_upper']
@@ -730,7 +749,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     else:
         bb_signal = f"🔴 BEARISH (below mid)"
     
-    bb_analysis = (f"6. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} | %B={bb_pctb:.3f} | Width={bb_width_pct:.1f}%\n"
+    idx += 1
+    bb_analysis = (f"{idx}. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} | %B={bb_pctb:.3f} | Width={bb_width_pct:.1f}%\n"
                   f"   Squeeze: {'YES' if bb_squeeze else 'NO'} | Expanding: {'YES' if bb_expanding else 'NO'} | "
                   f"Walking upper band: {bb_walk_upper}/10 candles\n"
                   f"   → {bb_signal}")
@@ -744,6 +764,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     # SuperTrend votes on 1H+ only
     if is_1h_or_higher:
+        idx += 1
+        st_analysis = f"{idx}. {st_analysis_text}"
         raw_lines.append(st_analysis)
     
     # Ichimoku votes on 4H+ only
@@ -763,7 +785,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         else:
             ichi_signal = f"⚪ NEUTRAL (inside cloud, choppy)"
         
-        ichi_analysis = (f"7. Ichimoku: {ichi_status.split('(')[0].strip()} | {tk_text} | Cloud thickness: {cloud_thickness:.1f}%\n"
+        idx += 1
+        ichi_analysis = (f"{idx}. Ichimoku: {ichi_status.split('(')[0].strip()} | {tk_text} | Cloud thickness: {cloud_thickness:.1f}%\n"
                         f"   Future cloud: {future_cloud} (Senkou A {'>' if future_cloud == 'bullish' else '<'} B)\n"
                         f"   → {ichi_signal}")
         raw_lines.append(ichi_analysis)
@@ -786,7 +809,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     else:
         adx_signal = f"🔴 BEARISH (DI- dominant, trend {'strengthening' if adx_trend == 'rising' else 'stable'})"
     
-    idx = 8 if is_higher_tf else (7 if is_1h_or_higher else 6)
+    idx += 1
     adx_analysis = (f"{idx}. ADX: {adx:.0f} {trend_strength} | DI+: {di_plus:.1f} {'>' if di_plus > di_minus else '<'} "
                    f"DI-: {di_minus:.1f} | ADX {adx_trend}\n"
                    f"   → {adx_signal}")
@@ -926,8 +949,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     # Check for Open Interest impact (if positioning data available)
     oi_impact = ""
     positioning = indic.get("positioning", {})
-    if positioning and "oi_change_24h" in positioning:
-        oi_change = positioning.get("oi_change_24h", 0)
+    if positioning and "oi_change_pct" in positioning:
+        oi_change = positioning.get("oi_change_pct", 0)
         if oi_change > 5:
             bullish_weight += 0.5  # OI rising = bullish vote
             oi_impact = " +OI📈"
