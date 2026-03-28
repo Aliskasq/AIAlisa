@@ -762,11 +762,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
 
     raw_lines = [ema_analysis, macd_analysis, obv_analysis, rsi_analysis, bb_analysis]
     
-    # SuperTrend votes on 1H+ only
-    if is_1h_or_higher:
-        idx += 1
-        st_analysis = f"{idx}. {st_analysis_text}"
-        raw_lines.append(st_analysis)
+    # SuperTrend — all timeframes (early reversal signal on 15m)
+    idx += 1
+    st_analysis = f"{idx}. {st_analysis_text}"
+    raw_lines.append(st_analysis)
     
     # Ichimoku votes on 4H+ only
     if is_higher_tf:
@@ -892,8 +891,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         ("BB", bb_signal, 1.0),
     ]
     
-    if is_1h_or_higher:
-        voting_indicators.append(("SuperTrend", st_status.split()[1], st_vote_weight))
+    # SuperTrend votes on all TFs; reduced weight on 15m (noisy but catches early reversals)
+    _st_weight = st_vote_weight * (0.5 if tf_upper == "15M" else 1.0)
+    voting_indicators.append(("SuperTrend", st_status.split()[1], _st_weight))
     
     if is_higher_tf:
         ichi_vote = "🟢" if "🟢" in ichi_signal else ("🔴" if "🔴" in ichi_signal else "⚪")
