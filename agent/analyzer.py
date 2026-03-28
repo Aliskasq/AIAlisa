@@ -59,6 +59,26 @@ def _is_valid_analysis(text: str) -> bool:
     return True
 
 
+def _validate_sl_tp_in_text(text: str) -> str:
+    """Post-validate SL/TP consistency in free-text AI response.
+    If LONG verdict has SL > Entry or SHORT has SL < Entry, add a warning."""
+    import re
+    direction_m = re.search(r'VERDICT[:\s]*(LONG|SHORT)', text, re.IGNORECASE)
+    entry_m = re.search(r'(?:Entry|Вход)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
+    sl_m = re.search(r'(?:SL|Стоп)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
+    if direction_m and entry_m and sl_m:
+        direction = direction_m.group(1).upper()
+        entry = float(entry_m.group(1))
+        sl = float(sl_m.group(1))
+        if direction == "LONG" and sl > entry:
+            logging.warning(f"⚠️ [SL WARN] LONG but SL({sl}) > Entry({entry}) in text response!")
+            text += "\n\n⚠️ ВНИМАНИЕ: SL выше входа для LONG — проверьте уровни вручную!"
+        elif direction == "SHORT" and sl < entry:
+            logging.warning(f"⚠️ [SL WARN] SHORT but SL({sl}) < Entry({entry}) in text response!")
+            text += "\n\n⚠️ ВНИМАНИЕ: SL ниже входа для SHORT — проверьте уровни вручную!"
+    return text
+
+
 def _format_verdict(v: TradeVerdict, base_coin: str, price: float, dynamics_text: str) -> str:
     """Convert structured TradeVerdict back to display text for Telegram."""
     lines = []
@@ -305,7 +325,7 @@ CRITICAL RULES:
 3. Separate Part 1 and Part 2 with exactly --- on its own line
 4. DO NOT write "Part 1" or "Part 2" labels in the output
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
-6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
+6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 7. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%
 8. DO NOT ADD HASHTAGS
 9. OVERBOUGHT/OVERSOLD RULES: RSI >75 on 1 TF = warn, reduce 10%. RSI >75 on 2+ TFs = reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = consider SKIP or SHORT.
@@ -360,7 +380,7 @@ ${base_coin} Analysis
 RULES:
 1. PLAIN TEXT ONLY — no bold, no markdown, no * or ** symbols. Binance Square does not render formatting.
 2. Entry = current price. Safe = better entry from support/OB
-3. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
+3. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 4. MAX leverage 3x. MAX deposit 2%
 5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
@@ -402,7 +422,7 @@ ${base_coin} Analysis🤔
 
 RULES:
 1. Entry = current price. Safe = better entry from support/OB
-2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
+2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 3. MAX leverage 3x. MAX deposit 2%
 4. Each TF line: brief reason in parentheses
 5. Response MUST be 600-855 characters exactly
@@ -555,10 +575,18 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     timeout=SDK_TIMEOUT
                 )
                 if extract_result.data:
-                    candidate = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
+                    v = extract_result.data
+                    # Validate SL/TP direction consistency
+                    if v.direction.upper() == "LONG" and v.stop_loss > v.entry_price:
+                        logging.warning(f"⚠️ [SL FIX] LONG but SL({v.stop_loss}) > Entry({v.entry_price}), swapping SL↔TP")
+                        v.stop_loss, v.take_profit = v.take_profit, v.stop_loss
+                    elif v.direction.upper() == "SHORT" and v.stop_loss < v.entry_price:
+                        logging.warning(f"⚠️ [SL FIX] SHORT but SL({v.stop_loss}) < Entry({v.entry_price}), swapping SL↔TP")
+                        v.stop_loss, v.take_profit = v.take_profit, v.stop_loss
+                    candidate = _format_verdict(v, base_coin, price, dynamics_text)
                     if _is_valid_analysis(candidate):
                         ai_response = candidate
-                        logging.info(f"✅ OpenClaw Extract: Structured verdict → {extract_result.data.direction}")
+                        logging.info(f"✅ OpenClaw Extract: Structured verdict → {v.direction}")
                     else:
                         logging.warning(f"⚠️ [OpenClaw Extract] Response failed validation, skipping. Preview: {candidate[:120]}")
                 else:
@@ -720,5 +748,9 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
         # Only do progressive display if we didn't already stream live
         # (Check: if streaming happened, the message already shows "AI Complete")
         pass  # Live streaming already handled above
+
+    # Post-validate SL/TP direction in free-text responses
+    if ai_response:
+        ai_response = _validate_sl_tp_in_text(ai_response)
 
     return ai_response
