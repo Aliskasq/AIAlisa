@@ -20,10 +20,11 @@ AUTO_SQUARE_ENABLED = False
 AUTOPOST_SETTINGS_FILE = "data/autopost_settings.json"
 
 def _load_settings():
-    """Load saved autopost settings (coins + times) from disk."""
+    """Load saved autopost settings (coins + times + hashtags) from disk."""
     defaults = {
         "coins": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
-        "times": [{"hour": 9, "minute": 9}, {"hour": 21, "minute": 9}]
+        "times": [{"hour": 9, "minute": 9}, {"hour": 21, "minute": 9}],
+        "hashtags": "#AIBinance #BinanceSquare #Write2Earn"
     }
     if os.path.exists(AUTOPOST_SETTINGS_FILE):
         try:
@@ -31,7 +32,8 @@ def _load_settings():
                 saved = json.load(f)
                 return {
                     "coins": saved.get("coins", defaults["coins"]),
-                    "times": saved.get("times", defaults["times"])
+                    "times": saved.get("times", defaults["times"]),
+                    "hashtags": saved.get("hashtags", defaults["hashtags"])
                 }
         except Exception:
             pass
@@ -70,15 +72,25 @@ def get_coins():
 def get_times():
     return AUTOPOST_SETTINGS["times"]
 
+def set_hashtags(hashtags_str: str):
+    """Update hashtags for auto-posting. Called from tg_listener."""
+    AUTOPOST_SETTINGS["hashtags"] = hashtags_str.strip()
+    _save_settings(AUTOPOST_SETTINGS)
+
+def get_hashtags():
+    return AUTOPOST_SETTINGS.get("hashtags", "#AIBinance #BinanceSquare #Write2Earn")
+
 def get_status_text():
     """Human-readable status string for Telegram."""
     coins_str = ", ".join(AUTOPOST_SETTINGS["coins"])
     times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d} UTC" for t in AUTOPOST_SETTINGS["times"])
+    hashtags_str = AUTOPOST_SETTINGS.get("hashtags", "#AIBinance #BinanceSquare #Write2Earn")
     state = "ON ✅" if AUTO_SQUARE_ENABLED else "OFF ⏸"
     return (
         f"📢 *Auto-Post Status:* {state}\n"
         f"🪙 *Coins:* `{coins_str}`\n"
-        f"⏰ *Schedule:* `{times_str}`"
+        f"⏰ *Schedule:* `{times_str}`\n"
+        f"🏷 *Hashtags:* `{hashtags_str}`"
     )
 
 
@@ -165,7 +177,7 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", square=True, mtf_data=mtf_data, smc_data=smc_data)
 
                 # Build Square post — POST format (not article), 1500-2100 chars total
-                tags = "#AIBinance #BinanceSquare #Write2Earn"
+                tags = get_hashtags()
                 header = f"🤖 AI-ALISA-COPILOTCLAW | Automated Analysis\n\n"
                 footer = f"\n\n{tags}"
                 max_ai_len = 2100 - len(header) - len(footer)

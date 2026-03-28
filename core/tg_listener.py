@@ -63,7 +63,7 @@ from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 import agent.analyzer  
 import agent.square_publisher
-from agent.square_publisher import set_coins, set_times, get_coins, get_times, get_status_text
+from agent.square_publisher import set_coins, set_times, get_coins, get_times, get_status_text, set_hashtags, get_hashtags
 from agent.skills import post_to_binance_square
 # --- SQUARE CACHE (file-based, no shared dict issues) ---
 SQUARE_CACHE_FILE = "data/square_cache.json"
@@ -1238,6 +1238,7 @@ async def telegram_polling_loop(app_session):
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
                                     "⏰ `/autopost time 09:00 15:00 21:00` — post times\n"
+                                    "🏷 `/autopost hashtags #tag1 #tag2` — hashtags\n"
                                     "✏️ `/post text` — post to Square\n"
                                     "✏️ reply `/post text` — AI + your opinion\n"
                                     "💼 `/paper BTC 74000 long 5x sl 73000 tp 75000`\n"
@@ -1384,6 +1385,17 @@ async def telegram_polling_loop(app_session):
                                         msg_text = f"✅ Schedule updated!\n⏰ New times: `{times_str}`"
                                     else:
                                         msg_text = "⚠️ Wrong format. Example:\n`/autopost time 09:00 21:30`"
+
+                            elif arg_lower.startswith("hashtags") or arg_lower.startswith("tags"):
+                                # /autopost hashtags #ai #binance #trading
+                                tag_parts = arg.split(maxsplit=1)
+                                if len(tag_parts) > 1 and tag_parts[1].strip():
+                                    new_tags = tag_parts[1].strip()
+                                    set_hashtags(new_tags)
+                                    msg_text = f"✅ Hashtags updated!\n🏷 `{new_tags}`"
+                                else:
+                                    current = get_hashtags()
+                                    msg_text = f"🏷 Current hashtags: `{current}`\n\nTo change: `/autopost hashtags #tag1 #tag2 #tag3`"
 
                             elif arg_lower in ("", "status"):
                                 # No args — show full status
