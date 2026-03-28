@@ -158,6 +158,15 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     else:
         dynamics_text = f"Over the last {recent_label} changed by {change_recent}%, and over 24H by {change_24h}%."
 
+    # Extract 1H price change for header display
+    change_1h = 0.0
+    if mtf_data and "1H" in mtf_data:
+        change_1h = mtf_data["1H"].get("change_recent", 0.0)
+        if isinstance(change_1h, float) and (math.isnan(change_1h) or math.isinf(change_1h)):
+            change_1h = 0.0
+    elif tf_key.upper() == "1H":
+        change_1h = change_recent
+
     # User Risk and Breakout context
     user_risk_text = ""
     risk_prompt_rule = ""
@@ -236,9 +245,10 @@ IMPORTANT DIRECTIONAL RULES:
 
 YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE:
 
-=== PART 1 (BRIEF VERDICT — STRICT 500-830 characters, this goes as chart caption) ===
+=== PART 1 (BRIEF VERDICT — STRICT 600-855 characters, this goes as chart caption) ===
 
-${base_coin} 📊 Price: ${price:.6f}
+${base_coin} Analysis🤔
+📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
 
 {tf_format_lines_short}
 
@@ -256,9 +266,9 @@ ${base_coin} 📊 Price: ${price:.6f}
 
 ---
 
-=== PART 2 (EXTENDED ANALYSIS — up to 3500 characters) ===
+=== PART 2 (EXTENDED ANALYSIS — 2000-3800 characters) ===
 
-🔬 ${base_coin} Extended Analysis
+*🔬 ${base_coin} Extended Analysis*
 
 {tf_format_lines}
 
@@ -271,8 +281,8 @@ Detailed per-indicator per-TF breakdown:
 - Reference lower TF signals that confirm or contradict higher TF direction{risk_prompt_rule}
 
 CRITICAL RULES:
-1. Part 1 MUST be 500-830 characters. Count carefully!
-2. Part 2 MUST be up to 3500 characters. Write detailed analysis freely
+1. Part 1 MUST be 600-855 characters. Count carefully!
+2. Part 2 MUST be 2000-3800 characters. Write detailed analysis freely
 3. Separate Part 1 and Part 2 with exactly --- on its own line
 4. DO NOT write "Part 1" or "Part 2" labels in the output
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
@@ -296,9 +306,10 @@ IMPORTANT DIRECTIONAL RULES:
 - Open Interest change IS a directional indicator — OI rising = new money, OI falling = positions closing
 - RSI overbought penalties are already calculated in the scorecards
 
-MANDATORY OUTPUT FORMAT (Your response MUST be between 500 and 830 characters. Count carefully. Do NOT go under 500 or over 830.):
+MANDATORY OUTPUT FORMAT (Your response MUST be between 600 and 855 characters. Count carefully. Do NOT go under 600 or over 855.):
 
-${base_coin} 📊 Price: ${price:.6f}
+${base_coin} Analysis🤔
+📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
 
 {tf_format_lines_short}
 
@@ -319,7 +330,7 @@ RULES:
 2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance
 3. MAX leverage 3x. MAX deposit 2%
 4. Each TF line: brief reason in parentheses
-5. Response MUST be 500-830 characters exactly
+5. Response MUST be 600-855 characters exactly
 """
 
 

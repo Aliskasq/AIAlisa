@@ -2213,8 +2213,8 @@ async def telegram_polling_loop(app_session):
                                 # --- SEND: chart + brief caption, then extended as second message ---
                                 if chart_path:
                                     import os as _os
-                                    safe_brief = ai_brief if len(ai_brief) < 830 else ai_brief[:827] + "..."
-                                    caption = f"📊 *{symbol} — 4H Trend Analysis*\n\n{safe_brief}"
+                                    safe_brief = ai_brief if len(ai_brief) <= 855 else ai_brief[:852] + "..."
+                                    caption = safe_brief
                                     photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                                     try:
                                         with open(chart_path, 'rb') as f:
@@ -2240,9 +2240,9 @@ async def telegram_polling_loop(app_session):
 
                                     # Send extended analysis as second message (always, if available)
                                     if ai_extended:
-                                        ext_text = f"🔬 *{symbol} — Extended Analysis*\n\n{ai_extended}"
-                                        if len(ext_text) > 4000:
-                                            ext_text = ext_text[:3997] + "..."
+                                        ext_text = ai_extended
+                                        if len(ext_text) > 3800:
+                                            ext_text = ext_text[:3797] + "..."
                                         # Prepare separate Square cache for extended part
                                         post_id2 = str(uuid.uuid4())[:8]
                                         sq_text2 = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{ai_extended}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
@@ -2259,9 +2259,9 @@ async def telegram_polling_loop(app_session):
                                     # No chart — send brief as text, then extended
                                     await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
                                     if ai_extended:
-                                        ext_text = f"🔬 *{symbol} — Extended Analysis*\n\n{ai_extended}"
-                                        if len(ext_text) > 4000:
-                                            ext_text = ext_text[:3997] + "..."
+                                        ext_text = ai_extended
+                                        if len(ext_text) > 3800:
+                                            ext_text = ext_text[:3797] + "..."
                                         await send_response(app_session, chat_id, ext_text, parse_mode="Markdown")
 
                                 # Delete streaming message 15s after chart/text sent
