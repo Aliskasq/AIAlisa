@@ -2228,10 +2228,17 @@ async def telegram_polling_loop(app_session):
                                     ai_brief = parts[0].strip()
                                     ai_extended = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
+                                # Clean up PART headers that model sometimes copies from prompt
+                                import re as _re
+                                _part_hdr = _re.compile(r'^={2,}\s*PART\s*\d*.*?={2,}\s*\n?', _re.IGNORECASE | _re.MULTILINE)
+                                ai_brief = _part_hdr.sub('', ai_brief).strip()
+                                if ai_extended:
+                                    ai_extended = _part_hdr.sub('', ai_extended).strip()
+
                                 # --- SEND: chart + brief caption, then extended as second message ---
                                 if chart_path:
                                     import os as _os
-                                    safe_brief = ai_brief if len(ai_brief) <= 855 else ai_brief[:852] + "..."
+                                    safe_brief = ai_brief if len(ai_brief) <= 828 else ai_brief[:825] + "..."
                                     caption = safe_brief
                                     photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                                     try:

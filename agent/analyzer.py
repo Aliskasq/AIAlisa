@@ -290,9 +290,10 @@ IMPORTANT DIRECTIONAL RULES:
 - RSI overbought penalties are already calculated in the scorecards
 - Each indicator has historical context showing dynamics over multiple candles
 
-YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE:
+YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE.
+Do NOT write any headers like "PART 1", "PART 2", "=== PART ===", "Brief", "Extended" etc. Just the content.
 
-=== PART 1 (BRIEF VERDICT — STRICT 600-855 characters, this goes as chart caption) ===
+FIRST PART (chart caption, STRICT 600-828 characters including spaces):
 
 ${base_coin} Analysis🤔
 📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
@@ -313,7 +314,7 @@ ${base_coin} Analysis🤔
 
 ---
 
-=== PART 2 (EXTENDED ANALYSIS — 2000-3800 characters) ===
+SECOND PART (extended analysis, STRICT 2000-3800 characters):
 
 *🔬 ${base_coin} Extended Analysis*
 
@@ -328,16 +329,17 @@ Detailed per-indicator per-TF breakdown:
 - Reference lower TF signals that confirm or contradict higher TF direction{risk_prompt_rule}
 
 CRITICAL RULES:
-1. Part 1 MUST be 600-855 characters. Count carefully!
-2. Part 2 MUST be 2000-3800 characters. Write detailed analysis freely
-3. Separate Part 1 and Part 2 with exactly --- on its own line
-4. DO NOT write "Part 1" or "Part 2" labels in the output
+1. First part MUST be 600-828 characters (including spaces). Count carefully!
+2. Second part MUST be 2000-3800 characters. No more, no less.
+3. Separate parts with exactly --- on its own line
+4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
 6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 7. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%
 8. DO NOT ADD HASHTAGS
 9. OVERBOUGHT/OVERSOLD RULES: RSI >75 on 1 TF = warn, reduce 10%. RSI >75 on 2+ TFs = reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = consider SKIP or SHORT.
 10. SKIP only if truly 50/50 or 3+ TFs overbought/oversold. Otherwise give direction.
+11. You MUST always output BOTH parts. Never skip the second part.
 """
     elif square:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -423,7 +425,7 @@ IMPORTANT DIRECTIONAL RULES:
 - Open Interest change IS a directional indicator — OI rising = new money, OI falling = positions closing
 - RSI overbought penalties are already calculated in the scorecards
 
-MANDATORY OUTPUT FORMAT (Your response MUST be between 600 and 855 characters. Count carefully. Do NOT go under 600 or over 855.):
+MANDATORY OUTPUT FORMAT (Your response MUST be between 600 and 828 characters including spaces. Count carefully. Do NOT go under 600 or over 828.):
 
 ${base_coin} Analysis🤔
 📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
@@ -447,7 +449,7 @@ RULES:
 2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 3. MAX leverage 3x. MAX deposit 2%
 4. Each TF line: brief reason in parentheses
-5. Response MUST be 600-855 characters exactly
+5. Response MUST be 600-828 characters exactly
 """
 
 
