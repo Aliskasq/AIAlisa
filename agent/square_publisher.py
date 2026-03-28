@@ -161,18 +161,18 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 except Exception as e:
                     logging.error(f"❌ SMC autopost error: {e}")
 
-                # Short AI analysis for Square post (not extended — fits post limit)
-                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", extended=False, mtf_data=mtf_data, smc_data=smc_data)
+                # Square-optimized AI analysis (1300-1900 chars, plain text, no markdown)
+                ai_text = await ask_ai_analysis(symbol, "4H", last_row, lang="en", square=True, mtf_data=mtf_data, smc_data=smc_data)
 
-                # Build Square post — POST format (not article), ~2100 chars max
+                # Build Square post — POST format (not article), 1500-2100 chars total
                 tags = "#AIBinance #BinanceSquare #Write2Earn"
                 header = f"🤖 AI-ALISA-COPILOTCLAW\n\n"
-                footer = f"\n\n🦞 OpenClaw AI | Binance Futures\n{tags}"
+                footer = f"\n\n{tags}"
                 max_ai_len = 2100 - len(header) - len(footer)
                 if len(ai_text) > max_ai_len:
                     ai_text = ai_text[:max_ai_len - 3] + "..."
                 square_text = f"{header}{ai_text}{footer}"
-                
+
                 if len(square_text) > 2100:
                     square_text = square_text[:2097] + "..."
 
