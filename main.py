@@ -316,21 +316,32 @@ async def main():
                                     # 4. Request AI verdict with 429 retry logic
                                     ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
 
-                                    # Check for 429 error — send chart with error, then retry AI
-                                    ai_got_429 = False
+                                    # Check for AI errors (429, network error, API error) — retry before sending chart
+                                    ai_has_error = False
                                     error_msg_id = None
-                                    if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
-                                        logging.warning(f"⚠️ AI 429 for {symbol}, sending chart with error, will retry...")
-                                        # Send chart immediately with 429 error text
+
+                                    def _is_ai_error(text):
+                                        """Check if AI response is an error, not real analysis."""
+                                        if not text:
+                                            return True
+                                        if text.startswith("❌"):
+                                            return True
+                                        error_markers = ["429", "rate limit", "network error", "api error", "timeout"]
+                                        return any(m in text.lower() for m in error_markers)
+
+                                    if ai_verdict and _is_ai_error(ai_verdict):
+                                        error_type = "429/rate limit" if ("429" in ai_verdict or "rate limit" in ai_verdict.lower()) else "network/API error"
+                                        logging.warning(f"⚠️ AI {error_type} for {symbol}, sending chart with placeholder, will retry...")
+                                        # Send chart immediately with error placeholder
                                         _sent_err, error_msg_id = await send_breakout_notification(
                                             symbol, full_df, line_data, tf_key, alert_type, session,
-                                            dynamic_trigger, "⏳ AI rate limit (429) — retrying..."
+                                            dynamic_trigger, f"⏳ AI {error_type} — retrying..."
                                         )
-                                        await asyncio.sleep(30)
+                                        await asyncio.sleep(15)
                                         ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
-                                        if ai_verdict and ("429" in ai_verdict or "rate limit" in ai_verdict.lower()):
-                                            ai_got_429 = True
-                                            logging.error(f"❌ AI 429 retry failed for {symbol}, keeping error chart")
+                                        if ai_verdict and _is_ai_error(ai_verdict):
+                                            ai_has_error = True
+                                            logging.error(f"❌ AI retry failed for {symbol} ({error_type}), keeping error chart")
                                             ai_verdict = ""
                                         else:
                                             # AI responded! Delete old error message from TG
@@ -338,8 +349,8 @@ async def main():
                                             await delete_telegram_message(session, error_msg_id)
                                             error_msg_id = None
 
-                                    # 5. Send chart (with AI text if available; skip if 429 error chart already sent and retry failed)
-                                    if ai_got_429:
+                                    # 5. Send chart (with AI text if available; skip if error chart already sent and retry failed)
+                                    if ai_has_error:
                                         # Error chart already in TG, just mark as sent
                                         is_sent = True
                                     else:
