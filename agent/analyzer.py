@@ -40,6 +40,25 @@ class TradeVerdict(BaseModel):
     risk_note: Optional[str] = None  # Stop-loss calculation for margin queries
 
 
+def _is_valid_analysis(text: str) -> bool:
+    """Check if AI response looks like a real trading analysis, not garbage/error."""
+    if not text or len(text) < 100:
+        return False
+    # Must contain at least 2 of these key markers
+    markers = ["VERDICT", "LONG", "SHORT", "Entry", "SL", "TP", "REC",
+               "ВЕРДИКТ", "Вход", "Стоп", "Тейк", "Analysis", "Анализ"]
+    found = sum(1 for m in markers if m.lower() in text.lower())
+    if found < 2:
+        return False
+    # Reject if it's clearly an error message
+    error_signs = ["error", "failed", "timeout", "exception", "traceback",
+                   "request_id=", "502", "503", "429"]
+    error_found = sum(1 for s in error_signs if s.lower() in text.lower()[:200])
+    if error_found >= 2:
+        return False
+    return True
+
+
 def _format_verdict(v: TradeVerdict, base_coin: str, price: float, dynamics_text: str) -> str:
     """Convert structured TradeVerdict back to display text for Telegram."""
     lines = []
@@ -512,7 +531,8 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
     ai_response = None
     full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-    # --- STEP 1: OpenClaw SDK (Extract → Agent) ---
+    # --- STEP 1: OpenClaw SDK (Extract → Agent) with timeout + validation ---
+    SDK_TIMEOUT = 60  # seconds — don't let SDK hang longer than this
     if openclaw_installed and openclaw:
         try:
             logging.info("🧠 Attempting inference via openclaw.AsyncOpenClaw()...")
@@ -521,48 +541,66 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             # Try Extract (structured Pydantic output)
             try:
                 logging.info(f"📊 [OpenClaw Extract] Requesting structured TradeVerdict via {OPENROUTER_MODEL}...")
-                extract_result = await client.extract.run(
-                    model=TradeVerdict,
-                    prompt=full_prompt,
-                    options=cmdop.ExtractOptions(
-                        temperature=0.2,
-                        timeout_seconds=120,
-                        max_tokens=4096,
-                        model=OPENROUTER_MODEL,
-                    )
+                extract_result = await asyncio.wait_for(
+                    client.extract.run(
+                        model=TradeVerdict,
+                        prompt=full_prompt,
+                        options=cmdop.ExtractOptions(
+                            temperature=0.2,
+                            timeout_seconds=SDK_TIMEOUT,
+                            max_tokens=4096,
+                            model=OPENROUTER_MODEL,
+                        )
+                    ),
+                    timeout=SDK_TIMEOUT
                 )
                 if extract_result.data:
-                    ai_response = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
-                    logging.info(f"✅ OpenClaw Extract: Structured verdict → {extract_result.data.direction}")
+                    candidate = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
+                    if _is_valid_analysis(candidate):
+                        ai_response = candidate
+                        logging.info(f"✅ OpenClaw Extract: Structured verdict → {extract_result.data.direction}")
+                    else:
+                        logging.warning(f"⚠️ [OpenClaw Extract] Response failed validation, skipping. Preview: {candidate[:120]}")
                 else:
-                    logging.info("📊 [OpenClaw Extract] Routing to agent pipeline...")
+                    logging.info("📊 [OpenClaw Extract] No data returned, trying agent pipeline...")
+            except asyncio.TimeoutError:
+                logging.warning(f"⚠️ [OpenClaw Extract] Timed out after {SDK_TIMEOUT}s")
             except Exception as extract_err:
-                logging.info(f"📊 [OpenClaw] Extract → agent pipeline routing...")
+                logging.warning(f"⚠️ [OpenClaw Extract] Error: {type(extract_err).__name__}: {extract_err}")
 
             # Try Agent (free-text)
             if not ai_response:
                 try:
-                    result = await client.agent.run(full_prompt, model=OPENROUTER_MODEL)
+                    result = await asyncio.wait_for(
+                        client.agent.run(full_prompt, model=OPENROUTER_MODEL),
+                        timeout=SDK_TIMEOUT
+                    )
+                    candidate = None
                     if hasattr(result, 'success') and result.success is False:
-                        logging.info("🔄 [OpenClaw] Agent routing through OpenRouter relay...")
+                        logging.info("🔄 [OpenClaw Agent] success=False, falling through...")
                     elif hasattr(result, 'text') and result.text:
-                        ai_response = result.text
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
+                        candidate = result.text
                     elif hasattr(result, 'content') and result.content:
-                        ai_response = result.content
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
+                        candidate = result.content
                     elif isinstance(result, str) and len(result) > 20 and 'request_id=' not in result:
-                        ai_response = result
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
+                        candidate = result
+
+                    if candidate and _is_valid_analysis(candidate):
+                        ai_response = candidate
+                        logging.info(f"✅ [OpenClaw Agent] Inference complete ({len(candidate)} chars)")
+                    elif candidate:
+                        logging.warning(f"⚠️ [OpenClaw Agent] Response failed validation. Preview: {candidate[:200]}")
                     else:
-                        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
+                        logging.info("🔄 [OpenClaw Agent] No valid response, falling through to OpenRouter direct...")
+                except asyncio.TimeoutError:
+                    logging.warning(f"⚠️ [OpenClaw Agent] Timed out after {SDK_TIMEOUT}s")
                 except Exception as agent_err:
-                    logging.info(f"🔄 [OpenClaw] Routing through OpenRouter relay...")
+                    logging.warning(f"⚠️ [OpenClaw Agent] Error: {type(agent_err).__name__}: {agent_err}")
 
         except Exception as e:
-            logging.info(f"🔄 [OpenClaw] SDK initializing... routing through OpenRouter relay...")
+            logging.warning(f"⚠️ [OpenClaw SDK] Init error: {type(e).__name__}: {e}")
     else:
-        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
+        logging.info("🔄 [OpenClaw SDK] Not installed, using OpenRouter direct...")
 
     # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
     if not ai_response:
@@ -640,19 +678,40 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
 
         # === Non-streaming fallback (automated signals, no Telegram edit) ===
         if not ai_response:
-            try:
-                payload.pop("stream", None)
-                async with aiohttp.ClientSession() as session:
-                    async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                            headers=headers, json=payload, timeout=120) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            ai_response = data["choices"][0]["message"]["content"].strip()
-                            logging.info("✅ [OpenClaw] AI inference complete via OpenRouter relay.")
-                        else:
-                            ai_response = f"❌ API Error: {response.status}"
-            except Exception as e:
-                ai_response = f"❌ Network Error: {e}"
+            for attempt in range(2):  # retry once on failure
+                try:
+                    payload.pop("stream", None)
+                    payload.pop("reasoning", None)  # strip reasoning for non-stream
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post("https://openrouter.ai/api/v1/chat/completions",
+                                                headers=headers, json=payload, timeout=120) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                candidate = data["choices"][0]["message"]["content"].strip()
+                                if _is_valid_analysis(candidate):
+                                    ai_response = candidate
+                                    logging.info("✅ [OpenRouter Direct] AI inference complete.")
+                                else:
+                                    logging.warning(f"⚠️ [OpenRouter Direct] Response failed validation (attempt {attempt+1}). Preview: {candidate[:200]}")
+                                    if attempt == 1:
+                                        ai_response = candidate  # accept on last attempt anyway
+                            elif response.status == 429:
+                                retry_after = int(response.headers.get("Retry-After", "5"))
+                                logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s...")
+                                await asyncio.sleep(retry_after)
+                                continue
+                            else:
+                                body = await response.text()
+                                logging.warning(f"⚠️ [OpenRouter Direct] HTTP {response.status}: {body[:300]}")
+                                ai_response = f"❌ API Error: {response.status}"
+                    if ai_response:
+                        break
+                except Exception as e:
+                    logging.warning(f"⚠️ [OpenRouter Direct] Network error (attempt {attempt+1}): {type(e).__name__}: {e}")
+                    if attempt == 0:
+                        await asyncio.sleep(3)  # wait before retry
+                    else:
+                        ai_response = f"❌ Network Error: {e}"
 
     # ---------------------------------------------------------
     # PHASE 3: PROGRESSIVE DISPLAY (only if text obtained without streaming)
