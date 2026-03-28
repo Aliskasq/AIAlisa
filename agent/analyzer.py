@@ -294,7 +294,7 @@ CRITICAL RULES:
 """
     elif square:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
-{lang_directive}
+Respond strictly in ENGLISH. This is for Binance Square — international audience.
 {skills_note}
 You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
 

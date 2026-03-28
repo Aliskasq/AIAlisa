@@ -166,7 +166,7 @@ async def auto_square_poster(session: aiohttp.ClientSession):
 
                 # Build Square post — POST format (not article), 1500-2100 chars total
                 tags = "#AIBinance #BinanceSquare #Write2Earn"
-                header = f"🤖 AI-ALISA-COPILOTCLAW\n\n"
+                header = f"🤖 AI-ALISA-COPILOTCLAW | Automated Analysis\n\n"
                 footer = f"\n\n{tags}"
                 max_ai_len = 2100 - len(header) - len(footer)
                 if len(ai_text) > max_ai_len:
