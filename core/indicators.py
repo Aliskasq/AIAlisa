@@ -193,15 +193,23 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     else:
         change_recent = 0.0
 
-    # Calculate 24h change dynamically
-    if tf_key.lower() == '4h' and len(df) >= 7:
-        price_24h_ago = df['close'].iloc[-7] # 6 candles of 4H = 24H
-        change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
-        recent_label = "4H"
-    elif tf_key.lower() == '1d' and len(df) >= 2:
-        price_24h_ago = df['close'].iloc[-2] # 1 candle of 1D = 24H
+    # Calculate 24h change dynamically based on timeframe
+    if tf_key.lower() == '1d' and len(df) >= 2:
+        price_24h_ago = df['close'].iloc[-2]  # 1 candle of 1D = 24H
         change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
         recent_label = "1D"
+    elif tf_key.lower() == '4h' and len(df) >= 7:
+        price_24h_ago = df['close'].iloc[-7]  # 6 candles of 4H = 24H
+        change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+        recent_label = "4H"
+    elif tf_key.lower() == '1h' and len(df) >= 25:
+        price_24h_ago = df['close'].iloc[-25]  # 24 candles of 1H = 24H
+        change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+        recent_label = "1H"
+    elif tf_key.lower() == '15m' and len(df) >= 97:
+        price_24h_ago = df['close'].iloc[-97]  # 96 candles of 15m = 24H
+        change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
+        recent_label = "15m"
     else:
         change_24h = 0.0
         recent_label = "Period"
