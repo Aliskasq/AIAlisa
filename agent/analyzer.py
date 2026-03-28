@@ -276,6 +276,14 @@ HOW TO CALCULATE LONG/SHORT PERCENTAGE PER TIMEFRAME:
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
 
+TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
+- 15m = 35% weight (most important — immediate momentum and entry timing)
+- 1H = 30% weight (short-term trend confirmation)
+- 4H = 20% weight (medium-term context)
+- 1D = 15% weight (background trend, least weight for entry direction)
+If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
+Example: 1D LONG 100% + 4H LONG 100% but 1H SHORT 80% + 15m SHORT 90% = VERDICT should be SHORT (short-term bearish momentum dominates for current-price entry).
+
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
 - Open Interest change IS a directional indicator — OI rising = new money = trend continuation, OI falling = positions closing = trend weakening
@@ -340,6 +348,13 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVER
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
 
+TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
+- 15m = 35% weight (most important — immediate momentum and entry timing)
+- 1H = 30% weight (short-term trend confirmation)
+- 4H = 20% weight (medium-term context)
+- 1D = 15% weight (background trend, least weight for entry direction)
+If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
+
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
 - Open Interest change IS a directional indicator — OI rising = new money = trend continuation, OI falling = positions closing
@@ -395,6 +410,13 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVER
 
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
+
+TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
+- 15m = 35% weight (most important — immediate momentum and entry timing)
+- 1H = 30% weight (short-term trend confirmation)
+- 4H = 20% weight (medium-term context)
+- 1D = 15% weight (background trend, least weight for entry direction)
+If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
 
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
