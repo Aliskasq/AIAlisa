@@ -622,7 +622,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             if not ai_response:
                 try:
                     result = await asyncio.wait_for(
-                        client.agent.run(full_prompt, model=OPENROUTER_MODEL),
+                        client.agent.run(full_prompt),
                         timeout=SDK_TIMEOUT
                     )
                     candidate = None
@@ -667,6 +667,10 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             ],
             "temperature": 0.2,
         }
+        # Limit output tokens for automated signals (500-830 chars ≈ 400 tokens)
+        # Manual analysis (telegram_stream) gets more room for extended block
+        if not telegram_stream:
+            payload["max_tokens"] = 1024
         # Enable reasoning only for manual analysis (not all models/providers support it)
         if telegram_stream:
             payload["reasoning"] = {"enabled": True}
@@ -734,7 +738,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     payload.pop("reasoning", None)  # strip reasoning for non-stream
                     async with aiohttp.ClientSession() as session:
                         async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                                headers=headers, json=payload, timeout=120) as response:
+                                                headers=headers, json=payload, timeout=180) as response:
                             if response.status == 200:
                                 data = await response.json()
                                 candidate = data["choices"][0]["message"]["content"].strip()
