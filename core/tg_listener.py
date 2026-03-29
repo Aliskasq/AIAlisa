@@ -2266,8 +2266,10 @@ async def telegram_polling_loop(app_session):
                                     # Send extended analysis as second message (always, if available)
                                     if ai_extended:
                                         ext_text = ai_extended
-                                        if len(ext_text) > 3800:
-                                            ext_text = ext_text[:3797] + "..."
+                                        if len(ext_text) > 4000:
+                                            # Emergency trim — cut at last newline to avoid mid-sentence break
+                                            cut = ext_text[:4000].rfind('\n')
+                                            ext_text = ext_text[:cut] if cut > 2000 else ext_text[:4000]
                                         # Prepare separate Square cache for extended part
                                         post_id2 = str(uuid.uuid4())[:8]
                                         sq_text2 = f"🤖 AI-ALISA-COPILOTCLAW Analysis: ${short_sym}\n\n{ai_extended}\n\n#AIBinance #BinanceSquare #{short_sym} #Write2Earn"
@@ -2285,8 +2287,9 @@ async def telegram_polling_loop(app_session):
                                     await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
                                     if ai_extended:
                                         ext_text = ai_extended
-                                        if len(ext_text) > 3800:
-                                            ext_text = ext_text[:3797] + "..."
+                                        if len(ext_text) > 4000:
+                                            cut = ext_text[:4000].rfind('\n')
+                                            ext_text = ext_text[:cut] if cut > 2000 else ext_text[:4000]
                                         await send_response(app_session, chat_id, ext_text, parse_mode="Markdown")
 
                                 # Delete streaming message 15s after chart/text sent

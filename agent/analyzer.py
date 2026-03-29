@@ -314,19 +314,35 @@ ${base_coin} Analysis🤔
 
 ---
 
-SECOND PART (extended analysis, STRICT 2000-3800 characters):
+SECOND PART (extended analysis, STRICT 2000-3800 characters — DO NOT EXCEED 3800):
 
 *🔬 ${base_coin} Extended Analysis*
 
-{tf_format_lines}
+FOR EACH TIMEFRAME (⏱ 1D, 4H, 1H, 15m) write ONE compact block:
+⏱ [TF]: LONG X% / SHORT Y% (key reasons)
+- EMA: [cluster, death/golden cross, slope]
+- MACD: [direction, histogram trend]
+- OBV: [accumulation/distribution, ROC]
+- RSI: [value, trend, overbought/oversold]
+- BB: [%B, squeeze/expanding]
+- SuperTrend: [direction, freshness, distance]
+- Ichimoku: [cloud position, TK cross]
+- ADX: [strength, DI+/DI- dominant]
+- StochRSI/MFI/CMF: [brief combined]
+- Score: X bullish vs Y bearish
 
-Detailed per-indicator per-TF breakdown:
-- For EACH timeframe show which indicators are bullish/bearish with specific values
-- Show historical dynamics (EMA slopes, MACD histogram direction, RSI trend, OBV divergences)
-- Show SMC levels (OB, FVG, BOS/CHoCH) with distances from price
-- Show confluence zones for SL/TP (where multiple indicators overlap)
-- Show cross-TF divergences and what they mean
-- Reference lower TF signals that confirm or contradict higher TF direction{risk_prompt_rule}
+📐 SMC (key levels only, 2-3 lines total):
+- Key support: [nearest bull OB/EQL with price and distance %]
+- Key resistance: [nearest bear OB/EQH with price and distance %]
+- Structure: [BOS/CHoCH direction across TFs]
+
+📊 Weighted verdict: LONG X% / SHORT Y% (1-2 sentences why)
+
+⚠️ Risks (2-3 bullet points max)
+
+💰 Entry/SL/TP reasoning: [which indicators converge at these levels]{risk_prompt_rule}
+
+COMPACT FORMAT IS CRITICAL — use abbreviations, skip redundant details, keep each indicator to ONE short line. Total MUST be 2000-3800 characters.
 
 CRITICAL RULES:
 1. First part MUST be 600-828 characters (including spaces). Count carefully!
