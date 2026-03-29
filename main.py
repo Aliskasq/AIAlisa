@@ -361,12 +361,6 @@ async def main():
                                             await delete_telegram_message(session, error_msg_id)
                                             error_msg_id = None
 
-                                    # 4b. Rate limit cooldown — StepFun free tier needs ~15s between requests
-                                    # Without this, multiple breakouts in one cycle cause 429 cascades
-                                    if ai_verdict and not _is_ai_error(ai_verdict):
-                                        logging.info(f"⏳ Rate limit cooldown (15s) before next signal...")
-                                        await asyncio.sleep(15)
-
                                     # 5. Send chart (with AI text if available; skip if error chart already sent and retry failed)
                                     if ai_has_error:
                                         # Error chart already in TG, just mark as sent

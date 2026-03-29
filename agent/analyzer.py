@@ -19,6 +19,11 @@ except ImportError:
     cmdop = None
     openclaw_installed = False
 
+# Global lock — serializes ALL AI requests (auto-push + manual scan).
+# Whoever acquires first goes first; 15s cooldown between releases prevents 429.
+_ai_request_lock = asyncio.Lock()
+_ai_last_request_time = 0  # timestamp of last completed AI request
+
 
 # ---------------------------------------------------------
 # OPENCLAW STRUCTURED OUTPUT: AI TRADING VERDICT MODEL
@@ -600,117 +605,127 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
         logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
 
     # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
+    global _ai_last_request_time
     if not ai_response:
-        logging.info("⚡ [OpenClaw] Executing AI inference via OpenRouter relay...")
-        headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": OPENROUTER_MODEL,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.2,
-        }
-        # Step 3.5 Flash is a reasoning model — always "thinks" internally.
-        # reasoning: {enabled: true} forces thinking tokens into a SEPARATE field,
-        # so they don't count as completion tokens (~2-3k instead of 15-27k).
-        # Without this flag, thinking tokens are hidden but still billed as completion.
-        payload["reasoning"] = {"enabled": True}
+        # Serialize AI requests: wait for lock + rate limit cooldown
+        await _ai_request_lock.acquire()
+        try:
+            elapsed = _time.monotonic() - _ai_last_request_time
+            if elapsed < 10 and _ai_last_request_time > 0:
+                wait = 10 - elapsed
+                logging.info(f"⏳ AI queue: waiting {wait:.1f}s for rate limit cooldown...")
+                await asyncio.sleep(wait)
+            logging.info("⚡ [OpenClaw] Executing AI inference via OpenRouter relay...")
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.2,
+            }
+            # Step 3.5 Flash is a reasoning model — always "thinks" internally.
+            # reasoning: {enabled: true} forces thinking tokens into a SEPARATE field,
+            # so they don't count as completion tokens (~2-3k instead of 15-27k).
+            payload["reasoning"] = {"enabled": True}
 
-        # === REAL-TIME SSE STREAMING to Telegram ===
-        if telegram_stream:
-            payload["stream"] = True
-            tg_s = telegram_stream["session"]
-            tg_c = telegram_stream["chat_id"]
-            tg_m = telegram_stream["message_id"]
-            tg_t = telegram_stream["bot_token"]
-            try:
-                accumulated = ""
-                last_edit = 0
-                token_count = 0
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.post("https://openrouter.ai/api/v1/chat/completions",
-                                         headers=headers, json=payload, timeout=180) as resp:
-                        if resp.status == 200:
-                            async for line in resp.content:
-                                line = line.decode("utf-8").strip()
-                                if not line.startswith("data: "):
-                                    continue
-                                data_str = line[6:]
-                                if data_str == "[DONE]":
-                                    break
-                                try:
-                                    chunk = json.loads(data_str)
-                                    delta = chunk["choices"][0].get("delta", {})
-                                    token = delta.get("content", "")
-                                    if token:
-                                        accumulated += token
-                                        token_count += 1
-                                        now = _time.monotonic()
-                                        # Update Telegram every 1.5s (rate limit safe)
-                                        if now - last_edit >= 1.5 and len(accumulated.strip()) > 10:
-                                            display = accumulated.strip() + " ▌"
-                                            if len(display) > 4000:
-                                                display = "..." + display[-3997:]
-                                            await _edit_telegram_msg(tg_s, tg_c, tg_m,
-                                                f"⚡ *OpenClaw AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
-                                            last_edit = now
-                                except (json.JSONDecodeError, KeyError, IndexError):
-                                    continue
-
-                            if accumulated.strip():
-                                # Final message — complete, no cursor
-                                final = accumulated.strip()
-                                if len(final) > 3900:
-                                    final = final[:3900] + "..."
-                                await _edit_telegram_msg(tg_s, tg_c, tg_m,
-                                    f"⚡ *OpenClaw AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
-                                ai_response = accumulated.strip()
-                                logging.info(f"✅ OpenClaw Live Stream: {token_count} tokens → Telegram (real-time)")
-                        else:
-                            logging.warning(f"⚠️ OpenRouter stream error: {resp.status}")
-            except Exception as e:
-                logging.warning(f"⚠️ OpenRouter streaming error ({e}), trying non-stream...")
-
-        # === Non-streaming fallback (automated signals, no Telegram edit) ===
-        if not ai_response:
-            for attempt in range(2):  # retry once on failure
+            # === REAL-TIME SSE STREAMING to Telegram ===
+            if telegram_stream:
+                payload["stream"] = True
+                tg_s = telegram_stream["session"]
+                tg_c = telegram_stream["chat_id"]
+                tg_m = telegram_stream["message_id"]
+                tg_t = telegram_stream["bot_token"]
                 try:
-                    payload.pop("stream", None)
-                    payload.pop("reasoning", None)  # strip reasoning for non-stream
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                                headers=headers, json=payload, timeout=180) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                candidate = data["choices"][0]["message"]["content"].strip()
-                                if _is_valid_analysis(candidate):
-                                    ai_response = candidate
-                                    logging.info("✅ [OpenRouter Direct] AI inference complete.")
-                                else:
-                                    logging.warning(f"⚠️ [OpenRouter Direct] Response failed validation (attempt {attempt+1}). Preview: {candidate[:200]}")
-                                    if attempt == 1:
-                                        ai_response = candidate  # accept on last attempt anyway
-                            elif response.status == 429:
-                                retry_after = int(response.headers.get("Retry-After", "5"))
-                                logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s...")
-                                await asyncio.sleep(retry_after)
-                                continue
+                    accumulated = ""
+                    last_edit = 0
+                    token_count = 0
+                    async with aiohttp.ClientSession() as sess:
+                        async with sess.post("https://openrouter.ai/api/v1/chat/completions",
+                                             headers=headers, json=payload, timeout=180) as resp:
+                            if resp.status == 200:
+                                async for line in resp.content:
+                                    line = line.decode("utf-8").strip()
+                                    if not line.startswith("data: "):
+                                        continue
+                                    data_str = line[6:]
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        chunk = json.loads(data_str)
+                                        delta = chunk["choices"][0].get("delta", {})
+                                        token = delta.get("content", "")
+                                        if token:
+                                            accumulated += token
+                                            token_count += 1
+                                            now = _time.monotonic()
+                                            if now - last_edit >= 1.5 and len(accumulated.strip()) > 10:
+                                                display = accumulated.strip() + " ▌"
+                                                if len(display) > 4000:
+                                                    display = "..." + display[-3997:]
+                                                await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                                    f"⚡ *OpenClaw AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
+                                                last_edit = now
+                                    except (json.JSONDecodeError, KeyError, IndexError):
+                                        continue
+
+                                if accumulated.strip():
+                                    final = accumulated.strip()
+                                    if len(final) > 3900:
+                                        final = final[:3900] + "..."
+                                    await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                        f"⚡ *OpenClaw AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
+                                    ai_response = accumulated.strip()
+                                    logging.info(f"✅ OpenClaw Live Stream: {token_count} tokens → Telegram (real-time)")
                             else:
-                                body = await response.text()
-                                logging.warning(f"⚠️ [OpenRouter Direct] HTTP {response.status}: {body[:300]}")
-                                ai_response = f"❌ API Error: {response.status}"
-                    if ai_response:
-                        break
+                                logging.warning(f"⚠️ OpenRouter stream error: {resp.status}")
                 except Exception as e:
-                    logging.warning(f"⚠️ [OpenRouter Direct] Network error (attempt {attempt+1}): {type(e).__name__}: {e}")
-                    if attempt == 0:
-                        await asyncio.sleep(3)  # wait before retry
-                    else:
-                        ai_response = f"❌ Network Error: {e}"
+                    logging.warning(f"⚠️ OpenRouter streaming error ({e}), trying non-stream...")
+
+            # === Non-streaming fallback (automated signals, no Telegram edit) ===
+            if not ai_response:
+                for attempt in range(2):  # retry once on failure
+                    try:
+                        payload.pop("stream", None)
+                        # Keep reasoning: {enabled: true} — forces thinking tokens into
+                        # separate field, prevents 15-27k hidden completion token bloat
+                        async with aiohttp.ClientSession() as session:
+                            async with session.post("https://openrouter.ai/api/v1/chat/completions",
+                                                    headers=headers, json=payload, timeout=180) as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    candidate = data["choices"][0]["message"]["content"].strip()
+                                    if _is_valid_analysis(candidate):
+                                        ai_response = candidate
+                                        logging.info("✅ [OpenRouter Direct] AI inference complete.")
+                                    else:
+                                        logging.warning(f"⚠️ [OpenRouter Direct] Response failed validation (attempt {attempt+1}). Preview: {candidate[:200]}")
+                                        if attempt == 1:
+                                            ai_response = candidate  # accept on last attempt anyway
+                                elif response.status == 429:
+                                    retry_after = int(response.headers.get("Retry-After", "5"))
+                                    logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s...")
+                                    await asyncio.sleep(retry_after)
+                                    continue
+                                else:
+                                    body = await response.text()
+                                    logging.warning(f"⚠️ [OpenRouter Direct] HTTP {response.status}: {body[:300]}")
+                                    ai_response = f"❌ API Error: {response.status}"
+                        if ai_response:
+                            break
+                    except Exception as e:
+                        logging.warning(f"⚠️ [OpenRouter Direct] Network error (attempt {attempt+1}): {type(e).__name__}: {e}")
+                        if attempt == 0:
+                            await asyncio.sleep(3)  # wait before retry
+                        else:
+                            ai_response = f"❌ Network Error: {e}"
+        finally:
+            _ai_last_request_time = _time.monotonic()
+            _ai_request_lock.release()
 
     # ---------------------------------------------------------
     # PHASE 3: PROGRESSIVE DISPLAY (only if text obtained without streaming)
