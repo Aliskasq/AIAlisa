@@ -591,84 +591,11 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
     ai_response = None
     full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-    # --- STEP 1: OpenClaw SDK (Extract → Agent) with timeout + validation ---
-    SDK_TIMEOUT = 60  # seconds — don't let SDK hang longer than this
-    if openclaw_installed and openclaw:
-        try:
-            logging.info("🧠 Attempting inference via openclaw.AsyncOpenClaw()...")
-            client = openclaw.AsyncOpenClaw.remote(api_key=os.getenv("CMDOP_API_KEY"))
-
-            # Try Extract (structured Pydantic output)
-            try:
-                logging.info(f"📊 [OpenClaw Extract] Requesting structured TradeVerdict via {OPENROUTER_MODEL}...")
-                extract_result = await asyncio.wait_for(
-                    client.extract.run(
-                        model=TradeVerdict,
-                        prompt=full_prompt,
-                        options=cmdop.ExtractOptions(
-                            temperature=0.2,
-                            timeout_seconds=SDK_TIMEOUT,
-                            max_tokens=4096,
-                            model=OPENROUTER_MODEL,
-                        )
-                    ),
-                    timeout=SDK_TIMEOUT
-                )
-                if extract_result.data:
-                    v = extract_result.data
-                    # Validate SL/TP direction consistency
-                    if v.direction.upper() == "LONG" and v.stop_loss > v.entry_price:
-                        logging.warning(f"⚠️ [SL FIX] LONG but SL({v.stop_loss}) > Entry({v.entry_price}), swapping SL↔TP")
-                        v.stop_loss, v.take_profit = v.take_profit, v.stop_loss
-                    elif v.direction.upper() == "SHORT" and v.stop_loss < v.entry_price:
-                        logging.warning(f"⚠️ [SL FIX] SHORT but SL({v.stop_loss}) < Entry({v.entry_price}), swapping SL↔TP")
-                        v.stop_loss, v.take_profit = v.take_profit, v.stop_loss
-                    candidate = _format_verdict(v, base_coin, price, dynamics_text)
-                    if _is_valid_analysis(candidate):
-                        ai_response = candidate
-                        logging.info(f"✅ OpenClaw Extract: Structured verdict → {v.direction}")
-                    else:
-                        logging.warning(f"⚠️ [OpenClaw Extract] Response failed validation, skipping. Preview: {candidate[:120]}")
-                else:
-                    logging.info("📊 [OpenClaw Extract] No data returned, trying agent pipeline...")
-            except asyncio.TimeoutError:
-                logging.warning(f"⚠️ [OpenClaw Extract] Timed out after {SDK_TIMEOUT}s")
-            except Exception as extract_err:
-                logging.warning(f"⚠️ [OpenClaw Extract] Error: {type(extract_err).__name__}: {extract_err}")
-
-            # Try Agent (free-text)
-            if not ai_response:
-                try:
-                    result = await asyncio.wait_for(
-                        client.agent.run(full_prompt),
-                        timeout=SDK_TIMEOUT
-                    )
-                    candidate = None
-                    if hasattr(result, 'success') and result.success is False:
-                        logging.info("🔄 [OpenClaw Agent] success=False, falling through...")
-                    elif hasattr(result, 'text') and result.text:
-                        candidate = result.text
-                    elif hasattr(result, 'content') and result.content:
-                        candidate = result.content
-                    elif isinstance(result, str) and len(result) > 20 and 'request_id=' not in result:
-                        candidate = result
-
-                    if candidate and _is_valid_analysis(candidate):
-                        ai_response = candidate
-                        logging.info(f"✅ [OpenClaw Agent] Inference complete ({len(candidate)} chars)")
-                    elif candidate:
-                        logging.warning(f"⚠️ [OpenClaw Agent] Response failed validation. Preview: {candidate[:200]}")
-                    else:
-                        logging.info("🔄 [OpenClaw Agent] No valid response, falling through to OpenRouter direct...")
-                except asyncio.TimeoutError:
-                    logging.warning(f"⚠️ [OpenClaw Agent] Timed out after {SDK_TIMEOUT}s")
-                except Exception as agent_err:
-                    logging.warning(f"⚠️ [OpenClaw Agent] Error: {type(agent_err).__name__}: {agent_err}")
-
-        except Exception as e:
-            logging.warning(f"⚠️ [OpenClaw SDK] Init error: {type(e).__name__}: {e}")
-    else:
-        logging.info("🔄 [OpenClaw SDK] Not installed, using OpenRouter direct...")
+    # --- STEP 1: OpenClaw SDK — DISABLED ---
+    # SDK Extract/Agent always fail on free tier and waste rate limit,
+    # causing 429 on the subsequent OpenRouter Direct request.
+    # Going straight to OpenRouter Direct saves ~7s per request.
+    logging.info("🔄 [OpenClaw SDK] Skipped (disabled) → OpenRouter direct...")
 
     # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
     if not ai_response:
