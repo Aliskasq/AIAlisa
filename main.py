@@ -356,7 +356,7 @@ async def main():
                                     else:
                                         is_sent, _ = await send_breakout_notification(
                                             symbol, full_df, line_data, tf_key, alert_type, session,
-                                            dynamic_trigger, ai_verdict
+                                            dynamic_trigger, ai_verdict or ""
                                         )
                                 else:
                                     logging.error(f"❌ Failed to download chart for {symbol}. Will retry next cycle.")

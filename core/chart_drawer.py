@@ -144,6 +144,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     short_symbol = symbol.replace('USDT', '')
     
     # Обрезаем ИИ текст до 800 символов, чтобы не нарваться на ошибку Telegram!
+    ai_text = ai_text or ""
     safe_ai_text = ai_text if len(ai_text) < 800 else ai_text[:800] + "...\n*[Текст обрезан]*"
     
     caption = (
