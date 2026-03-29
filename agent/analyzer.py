@@ -591,54 +591,11 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
     ai_response = None
     full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-    # --- STEP 1: OpenClaw SDK (Extract → Agent) — presence only, no real API calls ---
+    # --- STEP 1: OpenClaw SDK (presence logging only — no real API calls) ---
+    # Real SDK calls (extract.run / agent.run) consume rate limit via OpenClaw backend proxy,
+    # causing 429 on subsequent OpenRouter Direct requests. Log only for visibility.
     if openclaw_installed and openclaw:
-        try:
-            logging.info("🧠 Attempting inference via openclaw.AsyncOpenClaw()...")
-            client = openclaw.AsyncOpenClaw.remote(api_key=os.getenv("CMDOP_API_KEY"))
-
-            # Try Extract (structured Pydantic output) — no model param to avoid real StepFun call
-            try:
-                logging.info("📊 [OpenClaw Extract] Requesting structured TradeVerdict...")
-                extract_result = await client.extract.run(
-                    model=TradeVerdict,
-                    prompt=full_prompt,
-                    options=cmdop.ExtractOptions(
-                        temperature=0.2,
-                        timeout_seconds=120,
-                        max_tokens=4096
-                    )
-                )
-                if extract_result.data:
-                    ai_response = _format_verdict(extract_result.data, base_coin, price, dynamics_text)
-                    logging.info(f"✅ OpenClaw Extract: Structured verdict → {extract_result.data.direction}")
-                else:
-                    logging.info("📊 [OpenClaw Extract] Routing to agent pipeline...")
-            except Exception as extract_err:
-                logging.info(f"📊 [OpenClaw] Extract → agent pipeline routing...")
-
-            # Try Agent (free-text)
-            if not ai_response:
-                try:
-                    result = await client.agent.run(full_prompt)
-                    if hasattr(result, 'success') and result.success is False:
-                        logging.info("🔄 [OpenClaw] Agent routing through OpenRouter relay...")
-                    elif hasattr(result, 'text') and result.text:
-                        ai_response = result.text
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
-                    elif hasattr(result, 'content') and result.content:
-                        ai_response = result.content
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
-                    elif isinstance(result, str) and len(result) > 20 and 'request_id=' not in result:
-                        ai_response = result
-                        logging.info("✅ [OpenClaw] Agent inference complete.")
-                    else:
-                        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
-                except Exception as agent_err:
-                    logging.info(f"🔄 [OpenClaw] Routing through OpenRouter relay...")
-
-        except Exception as e:
-            logging.info(f"🔄 [OpenClaw] SDK initializing... routing through OpenRouter relay...")
+        logging.info("🧠 [OpenClaw SDK] Available. Routing through OpenRouter relay...")
     else:
         logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
 
