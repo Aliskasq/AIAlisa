@@ -685,10 +685,6 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             ],
             "temperature": 0.2,
         }
-        # Limit output tokens for automated signals (500-830 chars ≈ 400 tokens)
-        # Manual analysis (telegram_stream) gets more room for extended block
-        if not telegram_stream:
-            payload["max_tokens"] = 1024
         # Enable reasoning only for manual analysis (not all models/providers support it)
         if telegram_stream:
             payload["reasoning"] = {"enabled": True}
@@ -796,5 +792,28 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
     # Post-validate SL/TP direction in free-text responses
     if ai_response:
         ai_response = _validate_sl_tp_in_text(ai_response)
+
+    # Hard-trim automated signals (no telegram_stream = auto-push caption)
+    # StepFun free tier ignores max_tokens, so we must enforce length here
+    if ai_response and not telegram_stream and not square and not ai_response.startswith("❌"):
+        # For two-part responses (scan/look), split and trim separately
+        if "---" in ai_response:
+            parts = ai_response.split("---", 1)
+            part1 = parts[0].strip()
+            part2 = parts[1].strip() if len(parts) > 1 else ""
+            if len(part1) > 828:
+                # Trim to last newline before 828
+                cut = part1[:828].rfind("\n")
+                part1 = part1[:cut] if cut > 400 else part1[:828]
+            if len(part2) > 3800:
+                cut = part2[:3800].rfind("\n")
+                part2 = part2[:cut] if cut > 2000 else part2[:3800]
+            ai_response = f"{part1}\n---\n{part2}" if part2 else part1
+        else:
+            # Single-part auto-push caption: max 828 chars
+            if len(ai_response) > 828:
+                cut = ai_response[:828].rfind("\n")
+                ai_response = ai_response[:cut] if cut > 400 else ai_response[:828]
+                logging.info(f"✂️ [Auto-push] Trimmed response to {len(ai_response)} chars")
 
     return ai_response
