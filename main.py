@@ -314,7 +314,15 @@ async def main():
                                         logging.error(f"❌ SMC auto-scan error: {e}")
 
                                     # 4. Request AI verdict with 429 retry logic
-                                    ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
+                                    # Use extended=True (same as manual scan) to avoid hidden reasoning token bloat
+                                    # (~2-3k tokens vs ~18-21k with short prompt). Only Part 1 is used for chart caption.
+                                    ai_verdict_full = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, extended=True, mtf_data=mtf_data, smc_data=smc_data)
+
+                                    # Extract Part 1 only (before ---) for chart caption
+                                    if ai_verdict_full and "---" in ai_verdict_full:
+                                        ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                                    else:
+                                        ai_verdict = ai_verdict_full
 
                                     # Check for AI errors (429, network error, API error) — retry before sending chart
                                     ai_has_error = False
@@ -338,7 +346,11 @@ async def main():
                                             dynamic_trigger, f"⏳ AI {error_type} — retrying..."
                                         )
                                         await asyncio.sleep(15)
-                                        ai_verdict = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, mtf_data=mtf_data, smc_data=smc_data)
+                                        ai_verdict_full = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, extended=True, mtf_data=mtf_data, smc_data=smc_data)
+                                        if ai_verdict_full and "---" in ai_verdict_full:
+                                            ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                                        else:
+                                            ai_verdict = ai_verdict_full
                                         if ai_verdict and _is_ai_error(ai_verdict):
                                             ai_has_error = True
                                             logging.error(f"❌ AI retry failed for {symbol} ({error_type}), keeping error chart")
