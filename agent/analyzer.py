@@ -685,13 +685,11 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             ],
             "temperature": 0.2,
         }
-        # Step 3.5 Flash is a reasoning model — it "thinks" by default, burning hidden tokens.
-        # Explicitly disable reasoning for auto-push to save tokens (~15k → ~1k).
-        # Enable reasoning only for manual analysis (streaming to Telegram).
-        if telegram_stream:
-            payload["reasoning"] = {"enabled": True}
-        else:
-            payload["reasoning"] = {"enabled": False}
+        # Step 3.5 Flash is a reasoning model — always "thinks" internally.
+        # reasoning: {enabled: true} forces thinking tokens into a SEPARATE field,
+        # so they don't count as completion tokens (~2-3k instead of 15-27k).
+        # Without this flag, thinking tokens are hidden but still billed as completion.
+        payload["reasoning"] = {"enabled": True}
 
         # === REAL-TIME SSE STREAMING to Telegram ===
         if telegram_stream:
