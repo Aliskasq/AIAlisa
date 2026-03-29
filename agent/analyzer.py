@@ -685,13 +685,13 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             ],
             "temperature": 0.2,
         }
-        # Limit output tokens for automated signals (500-830 chars ≈ 400 tokens)
-        # Manual analysis (telegram_stream) gets more room for extended block
-        if not telegram_stream:
-            payload["max_tokens"] = 1024
-        # Enable reasoning only for manual analysis (not all models/providers support it)
+        # Step 3.5 Flash is a reasoning model — it "thinks" by default, burning hidden tokens.
+        # Explicitly disable reasoning for auto-push to save tokens (~15k → ~1k).
+        # Enable reasoning only for manual analysis (streaming to Telegram).
         if telegram_stream:
             payload["reasoning"] = {"enabled": True}
+        else:
+            payload["reasoning"] = {"enabled": False}
 
         # === REAL-TIME SSE STREAMING to Telegram ===
         if telegram_stream:
