@@ -588,31 +588,31 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         elif adx_5.iloc[-1] < adx_5.iloc[-3] - 2:
             adx_trend = "falling"
     
-    # StochRSI Trend (50 candles)
+    # StochRSI Trend (15 candles — fast oscillator, 50 is noise)
     stoch_k_trend = "stable"
-    stoch_overbought_bars_50 = 0
-    stoch_oversold_bars_50 = 0
-    stoch_kd_crosses_50 = 0
+    stoch_overbought_bars_15 = 0
+    stoch_oversold_bars_15 = 0
+    stoch_kd_crosses_15 = 0
     
-    if len(df) >= 50:
-        stoch_k_50 = df['stoch_k'].tail(50)
-        stoch_d_50 = df['stoch_d'].tail(50)
-        stoch_overbought_bars_50 = (stoch_k_50 > 80).sum()
-        stoch_oversold_bars_50 = (stoch_k_50 < 20).sum()
+    if len(df) >= 15:
+        stoch_k_15 = df['stoch_k'].tail(15)
+        stoch_d_15 = df['stoch_d'].tail(15)
+        stoch_overbought_bars_15 = (stoch_k_15 > 80).sum()
+        stoch_oversold_bars_15 = (stoch_k_15 < 20).sum()
         
         # K/D crosses count
-        for i in range(1, 50):
-            prev_diff = stoch_k_50.iloc[i-1] - stoch_d_50.iloc[i-1]
-            curr_diff = stoch_k_50.iloc[i] - stoch_d_50.iloc[i]
+        for i in range(1, 15):
+            prev_diff = stoch_k_15.iloc[i-1] - stoch_d_15.iloc[i-1]
+            curr_diff = stoch_k_15.iloc[i] - stoch_d_15.iloc[i]
             if (prev_diff <= 0 < curr_diff) or (prev_diff >= 0 > curr_diff):
-                stoch_kd_crosses_50 += 1
+                stoch_kd_crosses_15 += 1
         
-        # Trend: compare first 10 avg vs last 10 avg
-        sk_first_10 = stoch_k_50.head(10).mean()
-        sk_last_10 = stoch_k_50.tail(10).mean()
-        if sk_last_10 > sk_first_10 + 10:
+        # Trend: compare first 5 avg vs last 5 avg
+        sk_first_5 = stoch_k_15.head(5).mean()
+        sk_last_5 = stoch_k_15.tail(5).mean()
+        if sk_last_5 > sk_first_5 + 10:
             stoch_k_trend = "rising"
-        elif sk_last_10 < sk_first_10 - 10:
+        elif sk_last_5 < sk_first_5 - 10:
             stoch_k_trend = "falling"
     elif len(df) >= 5:
         stoch_k_5 = df['stoch_k'].tail(5)
@@ -621,53 +621,53 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         elif stoch_k_5.iloc[-1] < stoch_k_5.iloc[-3] - 5:
             stoch_k_trend = "falling"
     
-    # MFI Trend (50 candles)
-    mfi_trend_50 = "stable"
-    mfi_avg_50 = 50
-    mfi_overbought_bars_50 = 0
-    mfi_oversold_bars_50 = 0
+    # MFI Trend (20 candles — volume oscillator, 50 is overkill for OB/OS counts)
+    mfi_trend_20 = "stable"
+    mfi_avg_20 = 50
+    mfi_overbought_bars_20 = 0
+    mfi_oversold_bars_20 = 0
     
-    if len(df) >= 50:
-        mfi_50 = df['mfi'].tail(50)
-        mfi_avg_50 = mfi_50.mean()
-        mfi_overbought_bars_50 = (mfi_50 > 80).sum()
-        mfi_oversold_bars_50 = (mfi_50 < 20).sum()
+    if len(df) >= 20:
+        mfi_20 = df['mfi'].tail(20)
+        mfi_avg_20 = mfi_20.mean()
+        mfi_overbought_bars_20 = (mfi_20 > 80).sum()
+        mfi_oversold_bars_20 = (mfi_20 < 20).sum()
         
-        mfi_first_10 = mfi_50.head(10).mean()
-        mfi_last_10 = mfi_50.tail(10).mean()
-        if mfi_last_10 > mfi_first_10 + 5:
-            mfi_trend_50 = "rising"
-        elif mfi_last_10 < mfi_first_10 - 5:
-            mfi_trend_50 = "falling"
+        mfi_first_7 = mfi_20.head(7).mean()
+        mfi_last_7 = mfi_20.tail(7).mean()
+        if mfi_last_7 > mfi_first_7 + 5:
+            mfi_trend_20 = "rising"
+        elif mfi_last_7 < mfi_first_7 - 5:
+            mfi_trend_20 = "falling"
     elif len(df) >= 5:
         mfi_5 = df['mfi'].tail(5)
         if mfi_5.iloc[-1] > mfi_5.iloc[-3] + 3:
-            mfi_trend_50 = "rising"
+            mfi_trend_20 = "rising"
         elif mfi_5.iloc[-1] < mfi_5.iloc[-3] - 3:
-            mfi_trend_50 = "falling"
+            mfi_trend_20 = "falling"
     
-    # CMF Trend (50 candles)
-    cmf_trend_50 = "stable"
-    cmf_avg_50 = 0
-    cmf_positive_bars_50 = 0
+    # CMF Trend (30 candles — 20-period window inside, 50 too far)
+    cmf_trend_30 = "stable"
+    cmf_avg_30 = 0
+    cmf_positive_bars_30 = 0
     
-    if len(df) >= 50:
-        cmf_50 = df['cmf'].tail(50)
-        cmf_avg_50 = cmf_50.mean()
-        cmf_positive_bars_50 = (cmf_50 > 0).sum()
+    if len(df) >= 30:
+        cmf_30 = df['cmf'].tail(30)
+        cmf_avg_30 = cmf_30.mean()
+        cmf_positive_bars_30 = (cmf_30 > 0).sum()
         
-        cmf_first_10 = cmf_50.head(10).mean()
-        cmf_last_10 = cmf_50.tail(10).mean()
+        cmf_first_10 = cmf_30.head(10).mean()
+        cmf_last_10 = cmf_30.tail(10).mean()
         if cmf_last_10 > cmf_first_10 + 0.03:
-            cmf_trend_50 = "rising"
+            cmf_trend_30 = "rising"
         elif cmf_last_10 < cmf_first_10 - 0.03:
-            cmf_trend_50 = "falling"
+            cmf_trend_30 = "falling"
     elif len(df) >= 5:
         cmf_5 = df['cmf'].tail(5)
         if cmf_5.iloc[-1] > cmf_5.iloc[-3] + 0.02:
-            cmf_trend_50 = "rising"
+            cmf_trend_30 = "rising"
         elif cmf_5.iloc[-1] < cmf_5.iloc[-3] - 0.02:
-            cmf_trend_50 = "falling"
+            cmf_trend_30 = "falling"
 
     last_indic_row = {
         "close": last['close'],
@@ -761,22 +761,22 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "di_cross_bars": di_cross_bars,
         "di_cross_dir": di_cross_dir,
         
-        # StochRSI History (50 candles)
+        # StochRSI History (15 candles)
         "stoch_k_trend": stoch_k_trend,
-        "stoch_overbought_bars_50": stoch_overbought_bars_50,
-        "stoch_oversold_bars_50": stoch_oversold_bars_50,
-        "stoch_kd_crosses_50": stoch_kd_crosses_50,
+        "stoch_overbought_bars_15": stoch_overbought_bars_15,
+        "stoch_oversold_bars_15": stoch_oversold_bars_15,
+        "stoch_kd_crosses_15": stoch_kd_crosses_15,
         
-        # MFI History (50 candles)
-        "mfi_trend_50": mfi_trend_50,
-        "mfi_avg_50": round(mfi_avg_50, 1),
-        "mfi_overbought_bars_50": mfi_overbought_bars_50,
-        "mfi_oversold_bars_50": mfi_oversold_bars_50,
+        # MFI History (20 candles)
+        "mfi_trend_20": mfi_trend_20,
+        "mfi_avg_20": round(mfi_avg_20, 1),
+        "mfi_overbought_bars_20": mfi_overbought_bars_20,
+        "mfi_oversold_bars_20": mfi_oversold_bars_20,
         
-        # CMF History (50 candles)
-        "cmf_trend_50": cmf_trend_50,
-        "cmf_avg_50": round(cmf_avg_50, 3),
-        "cmf_positive_bars_50": cmf_positive_bars_50,
+        # CMF History (30 candles)
+        "cmf_trend_30": cmf_trend_30,
+        "cmf_avg_30": round(cmf_avg_30, 3),
+        "cmf_positive_bars_30": cmf_positive_bars_30,
     }
 
     return last_indic_row, df
@@ -1056,9 +1056,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     stoch_k = indic['stoch_k']
     stoch_d = indic['stoch_d']
     stoch_k_trend = indic.get('stoch_k_trend', 'stable')
-    stoch_ob_bars = indic.get('stoch_overbought_bars_50', 0)
-    stoch_os_bars = indic.get('stoch_oversold_bars_50', 0)
-    stoch_crosses = indic.get('stoch_kd_crosses_50', 0)
+    stoch_ob_bars = indic.get('stoch_overbought_bars_15', 0)
+    stoch_os_bars = indic.get('stoch_oversold_bars_15', 0)
+    stoch_crosses = indic.get('stoch_kd_crosses_15', 0)
     
     if stoch_k > 80:
         stoch_signal = f"⚠️ BEARISH VOTE (overbought zone)"
@@ -1072,17 +1072,17 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     idx += 1
     stoch_analysis = (f"{idx}. StochRSI: K={stoch_k:.0f} D={stoch_d:.0f} "
                      f"{'OVERBOUGHT' if stoch_k > 80 else ('OVERSOLD' if stoch_k < 20 else 'NORMAL')} | "
-                     f"K trend 50bar: {stoch_k_trend}\n"
-                     f"   50bar: OB bars={stoch_ob_bars}/50 | OS bars={stoch_os_bars}/50 | K/D crosses: {stoch_crosses} | {'CHOPPY' if stoch_crosses > 6 else 'TRENDING'}\n"
+                     f"K trend 15bar: {stoch_k_trend}\n"
+                     f"   15bar: OB bars={stoch_ob_bars}/15 | OS bars={stoch_os_bars}/15 | K/D crosses: {stoch_crosses} | {'CHOPPY' if stoch_crosses > 4 else 'TRENDING'}\n"
                      f"   → {stoch_signal}")
     raw_lines.append(stoch_analysis)
     
     # MFI (NOW VOTES)
     mfi = indic['mfi']
-    mfi_trend = indic.get('mfi_trend_50', 'stable')
-    mfi_avg = indic.get('mfi_avg_50', 50)
-    mfi_ob = indic.get('mfi_overbought_bars_50', 0)
-    mfi_os = indic.get('mfi_oversold_bars_50', 0)
+    mfi_trend = indic.get('mfi_trend_20', 'stable')
+    mfi_avg = indic.get('mfi_avg_20', 50)
+    mfi_ob = indic.get('mfi_overbought_bars_20', 0)
+    mfi_os = indic.get('mfi_oversold_bars_20', 0)
     
     if mfi > 80:
         mfi_signal = f"⚠️ BEARISH (overbought)"
@@ -1094,16 +1094,16 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         mfi_signal = f"🔴 BEARISH"
     
     idx += 1
-    mfi_analysis = (f"{idx}. MFI: {mfi:.0f} {'BULLISH' if mfi > 50 else 'BEARISH'} | Trend 50bar: {mfi_trend} | Avg={mfi_avg:.0f}\n"
-                   f"   50bar: OB bars={mfi_ob}/50 | OS bars={mfi_os}/50\n"
+    mfi_analysis = (f"{idx}. MFI: {mfi:.0f} {'BULLISH' if mfi > 50 else 'BEARISH'} | Trend 20bar: {mfi_trend} | Avg={mfi_avg:.0f}\n"
+                   f"   20bar: OB bars={mfi_ob}/20 | OS bars={mfi_os}/20\n"
                    f"   → {mfi_signal}")
     raw_lines.append(mfi_analysis)
     
     # CMF (NOW VOTES)
     cmf = indic['cmf']
-    cmf_trend = indic.get('cmf_trend_50', 'stable')
-    cmf_avg = indic.get('cmf_avg_50', 0)
-    cmf_pos_bars = indic.get('cmf_positive_bars_50', 0)
+    cmf_trend = indic.get('cmf_trend_30', 'stable')
+    cmf_avg = indic.get('cmf_avg_30', 0)
+    cmf_pos_bars = indic.get('cmf_positive_bars_30', 0)
     
     if cmf > 0.1:
         cmf_signal = f"🟢 BULLISH (strong buying)"
@@ -1118,8 +1118,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     idx += 1
     cmf_analysis = (f"{idx}. CMF: {cmf:.3f} {'STRONG' if abs(cmf) > 0.1 else ''} "
-                   f"{'BUYING' if cmf > 0 else 'SELLING'} | Trend 50bar: {cmf_trend} | Avg={cmf_avg:.3f}\n"
-                   f"   Positive bars: {cmf_pos_bars}/50 ({'buying dominant' if cmf_pos_bars > 30 else ('selling dominant' if cmf_pos_bars < 20 else 'mixed')})\n"
+                   f"{'BUYING' if cmf > 0 else 'SELLING'} | Trend 30bar: {cmf_trend} | Avg={cmf_avg:.3f}\n"
+                   f"   Positive bars: {cmf_pos_bars}/30 ({'buying dominant' if cmf_pos_bars > 18 else ('selling dominant' if cmf_pos_bars < 12 else 'mixed')})\n"
                    f"   → {cmf_signal}")
     raw_lines.append(cmf_analysis)
 
