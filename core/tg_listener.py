@@ -58,7 +58,7 @@ def set_chat_lang(chat_id, lang):
     langs[str(chat_id)] = lang
     _save_langs(langs)
 
-from core.binance_api import fetch_klines, fetch_funding_rate, fetch_market_positioning, format_positioning_text
+from core.binance_api import fetch_klines, fetch_funding_rate, fetch_funding_history, fetch_market_positioning, format_positioning_text
 from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 import agent.analyzer  
@@ -1506,7 +1506,7 @@ async def telegram_polling_loop(app_session):
                                     row_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
                                     row_1h = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0] if raw_1h else None
                                     row_15m = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0] if raw_15m else None
-                                    funding = await fetch_funding_rate(app_session, learn_symbol)
+                                    funding = await fetch_funding_history(app_session, learn_symbol)
 
                                     def _fmt_tf_learn(row, tf_label, lang):
                                         price = row.get("close", 0)
@@ -2137,7 +2137,7 @@ async def telegram_polling_loop(app_session):
                             if raw_df:
                                 df = pd.DataFrame(raw_df)
                                 last_row, full_df = calculate_binance_indicators(df, "4H")
-                                funding = await fetch_funding_rate(app_session, symbol)
+                                funding = await fetch_funding_history(app_session, symbol)
                                 last_row["funding_rate"] = funding
                                 positioning = await fetch_market_positioning(app_session, symbol)
                                 last_row["positioning"] = positioning
@@ -2329,7 +2329,7 @@ async def telegram_polling_loop(app_session):
                                 raw_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 250)
                                 if raw_4h:
                                     last_row, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
-                                    funding = await fetch_funding_rate(app_session, coin_to_analyze)
+                                    funding = await fetch_funding_history(app_session, coin_to_analyze)
                                     last_row["funding_rate"] = funding
                                     positioning = await fetch_market_positioning(app_session, coin_to_analyze)
                                     last_row["positioning"] = positioning

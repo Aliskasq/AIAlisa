@@ -105,6 +105,21 @@ async def fetch_funding_rate(session, symbol):
         return "Unknown"
 
 
+async def fetch_funding_history(session, symbol):
+    """Fetch last 3 funding rate epochs with dynamics: 0.0100% → 0.0150% → 0.0250%"""
+    url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit=3"
+    try:
+        async with session.get(url, timeout=5) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                rates = [f"{float(item['fundingRate']) * 100:.4f}%" for item in data]
+                if rates:
+                    return " → ".join(rates)
+    except Exception:
+        pass
+    return "Unknown"
+
+
 # --- MARKET POSITIONING (OI, L/S Ratio, Taker Volume) ---
 async def fetch_market_positioning(session, symbol):
     """

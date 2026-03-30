@@ -234,34 +234,34 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     # ⭐ HISTORICAL CONTEXT FIELDS (NEW)
     # ==========================================
     
-    # EMA History (10 candles)
-    ema7_slope_10 = 0
-    ema25_slope_10 = 0
-    ema99_slope_10 = 0
+    # EMA History (50 candles)
+    ema7_slope_50 = 0
+    ema25_slope_50 = 0
+    ema99_slope_50 = 0
     ema7_25_cross_bars = None
     ema7_25_cross_dir = None
     price_above_ema7_count = 0
     price_above_ema25_count = 0
     price_above_ema99_count = 0
     
-    if len(df) >= 10:
-        # EMA slopes over last 10 candles
-        ema7_10_ago = df['ema7'].iloc[-11]
-        ema25_10_ago = df['ema25'].iloc[-11]
-        ema99_10_ago = df['ema99'].iloc[-11]
+    if len(df) >= 51:
+        # EMA slopes over last 50 candles
+        ema7_50_ago = df['ema7'].iloc[-51]
+        ema25_50_ago = df['ema25'].iloc[-51]
+        ema99_50_ago = df['ema99'].iloc[-51]
         
-        if ema7_10_ago > 0:
-            ema7_slope_10 = ((last['ema7'] - ema7_10_ago) / ema7_10_ago) * 100
-        if ema25_10_ago > 0:
-            ema25_slope_10 = ((last['ema25'] - ema25_10_ago) / ema25_10_ago) * 100
-        if ema99_10_ago > 0:
-            ema99_slope_10 = ((last['ema99'] - ema99_10_ago) / ema99_10_ago) * 100
+        if ema7_50_ago > 0:
+            ema7_slope_50 = ((last['ema7'] - ema7_50_ago) / ema7_50_ago) * 100
+        if ema25_50_ago > 0:
+            ema25_slope_50 = ((last['ema25'] - ema25_50_ago) / ema25_50_ago) * 100
+        if ema99_50_ago > 0:
+            ema99_slope_50 = ((last['ema99'] - ema99_50_ago) / ema99_50_ago) * 100
             
-        # Price above EMA counts (last 10 candles)
-        last_10 = df.tail(10)
-        price_above_ema7_count = (last_10['close'] > last_10['ema7']).sum()
-        price_above_ema25_count = (last_10['close'] > last_10['ema25']).sum()
-        price_above_ema99_count = (last_10['close'] > last_10['ema99']).sum()
+        # Price above EMA counts (last 50 candles)
+        last_50 = df.tail(50)
+        price_above_ema7_count = (last_50['close'] > last_50['ema7']).sum()
+        price_above_ema25_count = (last_50['close'] > last_50['ema25']).sum()
+        price_above_ema99_count = (last_50['close'] > last_50['ema99']).sum()
     
     # EMA7-EMA25 cross detection (last 50 bars)
     if len(df) >= 50:
@@ -284,108 +284,201 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
                 ema7_25_cross_dir = "death"
                 break
     
-    # MACD History
-    macd_hist_trend_5 = []
+    # MACD History (50 candles)
+    macd_hist_trend_50 = []
     macd_hist_direction = "unknown"
     macd_bars_since_cross = None
     macd_hist_accel = 0
+    macd_hist_min_50 = 0
+    macd_hist_max_50 = 0
+    macd_hist_avg_50 = 0
+    macd_zero_crosses_50 = 0
     
-    if len(df) >= 5:
-        macd_hist_trend_5 = df['macd_hist'].tail(5).tolist()
+    if len(df) >= 50:
+        macd_hist_trend_50 = df['macd_hist'].tail(50).tolist()
+        macd_hist_min_50 = min(macd_hist_trend_50)
+        macd_hist_max_50 = max(macd_hist_trend_50)
+        macd_hist_avg_50 = sum(macd_hist_trend_50) / len(macd_hist_trend_50)
+        
+        # Count zero-line crosses in last 50 bars (choppy = many crosses)
+        for i in range(1, len(macd_hist_trend_50)):
+            if (macd_hist_trend_50[i-1] <= 0 < macd_hist_trend_50[i]) or \
+               (macd_hist_trend_50[i-1] >= 0 > macd_hist_trend_50[i]):
+                macd_zero_crosses_50 += 1
         
         # Determine histogram direction (critical for momentum analysis)
-        if len(macd_hist_trend_5) >= 3:
-            recent_trend = macd_hist_trend_5[-3:]
+        recent_trend = macd_hist_trend_50[-3:]
+        last_h = recent_trend[-1]
+        prev_h = recent_trend[-2]
+        first_h = recent_trend[0]
+        
+        if prev_h <= 0 < last_h:
+            macd_hist_direction = "turned_positive"
+        elif prev_h >= 0 > last_h:
+            macd_hist_direction = "turned_negative"
+        elif last_h > 0 and last_h > first_h:
+            macd_hist_direction = "growing"
+        elif last_h > 0 and last_h < first_h:
+            macd_hist_direction = "fading_bullish"
+        elif last_h < 0 and last_h < first_h:
+            macd_hist_direction = "shrinking"
+        elif last_h < 0 and last_h > first_h:
+            macd_hist_direction = "fading_bearish"
+        else:
+            macd_hist_direction = "stable"
+        
+        # MACD histogram acceleration
+        change1 = macd_hist_trend_50[-1] - macd_hist_trend_50[-2]
+        change2 = macd_hist_trend_50[-2] - macd_hist_trend_50[-3]
+        macd_hist_accel = change1 - change2
+    elif len(df) >= 5:
+        macd_hist_trend_50 = df['macd_hist'].tail(5).tolist()
+        if len(macd_hist_trend_50) >= 3:
+            recent_trend = macd_hist_trend_50[-3:]
             last_h = recent_trend[-1]
             prev_h = recent_trend[-2]
             first_h = recent_trend[0]
-            
             if prev_h <= 0 < last_h:
                 macd_hist_direction = "turned_positive"
             elif prev_h >= 0 > last_h:
                 macd_hist_direction = "turned_negative"
             elif last_h > 0 and last_h > first_h:
-                macd_hist_direction = "growing"        # Positive and increasing = strong bullish momentum
+                macd_hist_direction = "growing"
             elif last_h > 0 and last_h < first_h:
-                macd_hist_direction = "fading_bullish"  # Positive but decreasing = bullish momentum FADING
+                macd_hist_direction = "fading_bullish"
             elif last_h < 0 and last_h < first_h:
-                macd_hist_direction = "shrinking"       # Negative and decreasing = strong bearish momentum
+                macd_hist_direction = "shrinking"
             elif last_h < 0 and last_h > first_h:
-                macd_hist_direction = "fading_bearish"  # Negative but increasing toward 0 = bearish momentum FADING
+                macd_hist_direction = "fading_bearish"
             else:
                 macd_hist_direction = "stable"
-        
-        # MACD histogram acceleration
-        if len(macd_hist_trend_5) >= 3:
-            change1 = macd_hist_trend_5[-1] - macd_hist_trend_5[-2]
-            change2 = macd_hist_trend_5[-2] - macd_hist_trend_5[-3]
+            change1 = macd_hist_trend_50[-1] - macd_hist_trend_50[-2]
+            change2 = macd_hist_trend_50[-2] - macd_hist_trend_50[-3]
             macd_hist_accel = change1 - change2
     
-    # MACD line/signal cross detection (last 30 bars)
-    if len(df) >= 30:
-        macd_line_30 = df['macd_line'].tail(30)
-        macd_signal_30 = df['macd_signal'].tail(30)
+    # MACD line/signal cross detection (last 50 bars)
+    if len(df) >= 50:
+        macd_line_50 = df['macd_line'].tail(50)
+        macd_signal_50 = df['macd_signal'].tail(50)
         
-        for i in range(1, 30):
-            prev_diff = macd_line_30.iloc[-i-1] - macd_signal_30.iloc[-i-1]
-            curr_diff = macd_line_30.iloc[-i] - macd_signal_30.iloc[-i]
+        for i in range(1, 50):
+            prev_diff = macd_line_50.iloc[-i-1] - macd_signal_50.iloc[-i-1]
+            curr_diff = macd_line_50.iloc[-i] - macd_signal_50.iloc[-i]
             
             if (prev_diff <= 0 < curr_diff) or (prev_diff >= 0 > curr_diff):
                 macd_bars_since_cross = i
                 break
     
-    # OBV History
-    obv_roc_5 = 0
+    # OBV History (50 candles)
+    obv_roc_50 = 0
+    obv_roc_10 = 0
     obv_spike = False
     obv_price_divergence = "none"
+    obv_trend_50 = "stable"
     
-    if len(df) >= 5:
-        obv_5_ago = df['obv'].iloc[-6]
-        if obv_5_ago != 0:
-            obv_roc_5 = ((last['obv'] - obv_5_ago) / abs(obv_5_ago)) * 100
+    if len(df) >= 51:
+        obv_50_ago = df['obv'].iloc[-51]
+        if obv_50_ago != 0:
+            obv_roc_50 = ((last['obv'] - obv_50_ago) / abs(obv_50_ago)) * 100
     
-    # OBV spike detection (2 std deviations over 20 candles)
-    if len(df) >= 22:
-        obv_changes = df['obv'].diff().tail(20)
+    if len(df) >= 11:
+        obv_10_ago = df['obv'].iloc[-11]
+        if obv_10_ago != 0:
+            obv_roc_10 = ((last['obv'] - obv_10_ago) / abs(obv_10_ago)) * 100
+    
+    # OBV trend over 50 candles (split into halves)
+    if len(df) >= 50:
+        obv_first_half = df['obv'].tail(50).head(25).mean()
+        obv_second_half = df['obv'].tail(25).mean()
+        if obv_second_half > obv_first_half * 1.02:
+            obv_trend_50 = "rising"
+        elif obv_second_half < obv_first_half * 0.98:
+            obv_trend_50 = "falling"
+    
+    # OBV spike detection (2 std deviations over 50 candles)
+    if len(df) >= 50:
+        obv_changes = df['obv'].diff().tail(50)
         recent_obv_change = df['obv'].iloc[-1] - df['obv'].iloc[-3]  # Last 2 candles
         obv_std = obv_changes.std()
-        if abs(recent_obv_change) > 2 * obv_std:
+        if obv_std > 0 and abs(recent_obv_change) > 2 * obv_std:
             obv_spike = True
     
-    # OBV-Price divergence (last 10 candles)
-    if len(df) >= 10:
-        last_10 = df.tail(10)
-        price_change = (last_10['close'].iloc[-1] - last_10['close'].iloc[0]) / last_10['close'].iloc[0]
-        obv_change = (last_10['obv'].iloc[-1] - last_10['obv'].iloc[0]) / abs(last_10['obv'].iloc[0])
+    # OBV-Price divergence (last 50 candles)
+    if len(df) >= 50:
+        last_50_obv = df.tail(50)
+        price_change = (last_50_obv['close'].iloc[-1] - last_50_obv['close'].iloc[0]) / last_50_obv['close'].iloc[0]
+        obv_val_start = last_50_obv['obv'].iloc[0]
+        if abs(obv_val_start) > 0:
+            obv_change = (last_50_obv['obv'].iloc[-1] - obv_val_start) / abs(obv_val_start)
+        else:
+            obv_change = 0
         
         if price_change > 0.02 and obv_change < -0.02:  # Price up, OBV down
             obv_price_divergence = "bearish"
         elif price_change < -0.02 and obv_change > 0.02:  # Price down, OBV up
             obv_price_divergence = "bullish"
     
-    # RSI History
-    rsi_trend_5 = "stable"
-    rsi_values_5 = []
+    # RSI History (50 candles)
+    rsi_trend_50 = "stable"
+    rsi_values_50 = []
+    rsi_min_50 = 50
+    rsi_max_50 = 50
+    rsi_avg_50 = 50
+    rsi_time_overbought = 0  # candles above 70
+    rsi_time_oversold = 0    # candles below 30
+    rsi_price_divergence = "none"
     
-    if len(df) >= 5:
-        rsi_values_5 = df['rsi14'].tail(5).tolist()
-        if len(rsi_values_5) >= 3:
-            if rsi_values_5[-1] > rsi_values_5[-3] + 2:
-                rsi_trend_5 = "rising"
-            elif rsi_values_5[-1] < rsi_values_5[-3] - 2:
-                rsi_trend_5 = "falling"
+    if len(df) >= 50:
+        rsi_values_50 = df['rsi14'].tail(50).tolist()
+        rsi_min_50 = min(rsi_values_50)
+        rsi_max_50 = max(rsi_values_50)
+        rsi_avg_50 = sum(rsi_values_50) / len(rsi_values_50)
+        rsi_time_overbought = sum(1 for r in rsi_values_50 if r > 70)
+        rsi_time_oversold = sum(1 for r in rsi_values_50 if r < 30)
+        
+        # RSI trend: compare first 10 avg vs last 10 avg
+        first_10_avg = sum(rsi_values_50[:10]) / 10
+        last_10_avg = sum(rsi_values_50[-10:]) / 10
+        if last_10_avg > first_10_avg + 5:
+            rsi_trend_50 = "rising"
+        elif last_10_avg < first_10_avg - 5:
+            rsi_trend_50 = "falling"
+        
+        # RSI-Price divergence (price making new highs but RSI declining, or vice versa)
+        price_50 = df['close'].tail(50)
+        rsi_50 = df['rsi14'].tail(50)
+        price_first_half_max = price_50.head(25).max()
+        price_second_half_max = price_50.tail(25).max()
+        rsi_first_half_max = rsi_50.head(25).max()
+        rsi_second_half_max = rsi_50.tail(25).max()
+        
+        if price_second_half_max > price_first_half_max and rsi_second_half_max < rsi_first_half_max - 5:
+            rsi_price_divergence = "bearish"  # Higher price, lower RSI
+        elif price_50.tail(25).min() < price_50.head(25).min() and rsi_50.tail(25).min() > rsi_50.head(25).min() + 5:
+            rsi_price_divergence = "bullish"  # Lower price, higher RSI
+    elif len(df) >= 5:
+        rsi_values_50 = df['rsi14'].tail(5).tolist()
+        if len(rsi_values_50) >= 3:
+            if rsi_values_50[-1] > rsi_values_50[-3] + 2:
+                rsi_trend_50 = "rising"
+            elif rsi_values_50[-1] < rsi_values_50[-3] - 2:
+                rsi_trend_50 = "falling"
     
-    # SuperTrend History
+    # SuperTrend History (50 candles)
     st_bars_since_flip = 0
     st_distance_pct = 0
+    st_flips_50 = 0  # number of direction changes in 50 bars (choppy = many)
+    st_bullish_bars_50 = 0
     
-    if len(df) >= 30:
-        # Find last SuperTrend flip
-        st_dir_series = df['supertrend_dir'].tail(30)
-        for i in range(1, 30):
+    if len(df) >= 50:
+        st_dir_series = df['supertrend_dir'].tail(50)
+        # Find last flip
+        for i in range(1, 50):
             if st_dir_series.iloc[-i] != st_dir_series.iloc[-i-1]:
-                st_bars_since_flip = i
-                break
+                if st_bars_since_flip == 0:
+                    st_bars_since_flip = i
+                st_flips_50 += 1
+        st_bullish_bars_50 = (st_dir_series == 1).sum()
     
     # Distance from SuperTrend line
     if last['supertrend'] > 0:
@@ -417,10 +510,10 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
             prev_3_avg = ((df['bb_upper'] - df['bb_lower']) / df['bb_mid']).tail(4).iloc[:-1].mean()
             bb_expanding = current_width > prev_3_avg
         
-        # Walking bands (last 10 candles)
-        last_10 = df.tail(10)
-        bb_walking_upper = (last_10['close'] > last_10['bb_upper'] * 0.998).sum()
-        bb_walking_lower = (last_10['close'] < last_10['bb_lower'] * 1.002).sum()
+        # Walking bands (last 50 candles)
+        last_50_bb = df.tail(50)
+        bb_walking_upper = (last_50_bb['close'] > last_50_bb['bb_upper'] * 0.998).sum()
+        bb_walking_lower = (last_50_bb['close'] < last_50_bb['bb_lower'] * 1.002).sum()
     
     # Ichimoku History
     tk_cross = "neutral"
@@ -454,41 +547,127 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
             senkou_b_future = (df['high'].tail(52).max() + df['low'].tail(52).min()) / 2
             future_cloud = "bullish" if senkou_a_future > senkou_b_future else "bearish"
     
-    # ADX Trend
+    # ADX Trend (50 candles)
     adx_trend = "stable"
-    if len(df) >= 5:
+    adx_avg_50 = 0
+    adx_max_50 = 0
+    di_cross_bars = None
+    di_cross_dir = None
+    
+    if len(df) >= 50:
+        adx_50 = df['adx'].tail(50)
+        adx_avg_50 = adx_50.mean()
+        adx_max_50 = adx_50.max()
+        
+        # ADX trend: compare first 10 avg vs last 10 avg
+        adx_first_10 = adx_50.head(10).mean()
+        adx_last_10 = adx_50.tail(10).mean()
+        if adx_last_10 > adx_first_10 + 3:
+            adx_trend = "rising"
+        elif adx_last_10 < adx_first_10 - 3:
+            adx_trend = "falling"
+        
+        # DI+/DI- cross detection (last 50 bars)
+        di_plus_50 = df['di_plus'].tail(50)
+        di_minus_50 = df['di_minus'].tail(50)
+        for i in range(1, 50):
+            prev_diff = di_plus_50.iloc[-i-1] - di_minus_50.iloc[-i-1]
+            curr_diff = di_plus_50.iloc[-i] - di_minus_50.iloc[-i]
+            if prev_diff <= 0 < curr_diff:
+                di_cross_bars = i
+                di_cross_dir = "bullish"
+                break
+            elif prev_diff >= 0 > curr_diff:
+                di_cross_bars = i
+                di_cross_dir = "bearish"
+                break
+    elif len(df) >= 5:
         adx_5 = df['adx'].tail(5)
         if adx_5.iloc[-1] > adx_5.iloc[-3] + 2:
             adx_trend = "rising"
         elif adx_5.iloc[-1] < adx_5.iloc[-3] - 2:
             adx_trend = "falling"
     
-    # StochRSI Trend
+    # StochRSI Trend (50 candles)
     stoch_k_trend = "stable"
-    if len(df) >= 5:
+    stoch_overbought_bars_50 = 0
+    stoch_oversold_bars_50 = 0
+    stoch_kd_crosses_50 = 0
+    
+    if len(df) >= 50:
+        stoch_k_50 = df['stoch_k'].tail(50)
+        stoch_d_50 = df['stoch_d'].tail(50)
+        stoch_overbought_bars_50 = (stoch_k_50 > 80).sum()
+        stoch_oversold_bars_50 = (stoch_k_50 < 20).sum()
+        
+        # K/D crosses count
+        for i in range(1, 50):
+            prev_diff = stoch_k_50.iloc[i-1] - stoch_d_50.iloc[i-1]
+            curr_diff = stoch_k_50.iloc[i] - stoch_d_50.iloc[i]
+            if (prev_diff <= 0 < curr_diff) or (prev_diff >= 0 > curr_diff):
+                stoch_kd_crosses_50 += 1
+        
+        # Trend: compare first 10 avg vs last 10 avg
+        sk_first_10 = stoch_k_50.head(10).mean()
+        sk_last_10 = stoch_k_50.tail(10).mean()
+        if sk_last_10 > sk_first_10 + 10:
+            stoch_k_trend = "rising"
+        elif sk_last_10 < sk_first_10 - 10:
+            stoch_k_trend = "falling"
+    elif len(df) >= 5:
         stoch_k_5 = df['stoch_k'].tail(5)
         if stoch_k_5.iloc[-1] > stoch_k_5.iloc[-3] + 5:
             stoch_k_trend = "rising"
         elif stoch_k_5.iloc[-1] < stoch_k_5.iloc[-3] - 5:
             stoch_k_trend = "falling"
     
-    # MFI Trend
-    mfi_trend_5 = "stable"
-    if len(df) >= 5:
+    # MFI Trend (50 candles)
+    mfi_trend_50 = "stable"
+    mfi_avg_50 = 50
+    mfi_overbought_bars_50 = 0
+    mfi_oversold_bars_50 = 0
+    
+    if len(df) >= 50:
+        mfi_50 = df['mfi'].tail(50)
+        mfi_avg_50 = mfi_50.mean()
+        mfi_overbought_bars_50 = (mfi_50 > 80).sum()
+        mfi_oversold_bars_50 = (mfi_50 < 20).sum()
+        
+        mfi_first_10 = mfi_50.head(10).mean()
+        mfi_last_10 = mfi_50.tail(10).mean()
+        if mfi_last_10 > mfi_first_10 + 5:
+            mfi_trend_50 = "rising"
+        elif mfi_last_10 < mfi_first_10 - 5:
+            mfi_trend_50 = "falling"
+    elif len(df) >= 5:
         mfi_5 = df['mfi'].tail(5)
         if mfi_5.iloc[-1] > mfi_5.iloc[-3] + 3:
-            mfi_trend_5 = "rising"
+            mfi_trend_50 = "rising"
         elif mfi_5.iloc[-1] < mfi_5.iloc[-3] - 3:
-            mfi_trend_5 = "falling"
+            mfi_trend_50 = "falling"
     
-    # CMF Trend
-    cmf_trend_5 = "stable"
-    if len(df) >= 5:
+    # CMF Trend (50 candles)
+    cmf_trend_50 = "stable"
+    cmf_avg_50 = 0
+    cmf_positive_bars_50 = 0
+    
+    if len(df) >= 50:
+        cmf_50 = df['cmf'].tail(50)
+        cmf_avg_50 = cmf_50.mean()
+        cmf_positive_bars_50 = (cmf_50 > 0).sum()
+        
+        cmf_first_10 = cmf_50.head(10).mean()
+        cmf_last_10 = cmf_50.tail(10).mean()
+        if cmf_last_10 > cmf_first_10 + 0.03:
+            cmf_trend_50 = "rising"
+        elif cmf_last_10 < cmf_first_10 - 0.03:
+            cmf_trend_50 = "falling"
+    elif len(df) >= 5:
         cmf_5 = df['cmf'].tail(5)
         if cmf_5.iloc[-1] > cmf_5.iloc[-3] + 0.02:
-            cmf_trend_5 = "rising"
+            cmf_trend_50 = "rising"
         elif cmf_5.iloc[-1] < cmf_5.iloc[-3] - 0.02:
-            cmf_trend_5 = "falling"
+            cmf_trend_50 = "falling"
 
     last_indic_row = {
         "close": last['close'],
@@ -518,37 +697,51 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "bb_mid": last['bb_mid'],
         "cmf": last['cmf'],
         
-        # NEW HISTORICAL CONTEXT FIELDS
+        # HISTORICAL CONTEXT FIELDS (50 candles)
         # EMA History
-        "ema7_slope_10": round(ema7_slope_10, 2),
-        "ema25_slope_10": round(ema25_slope_10, 2),
-        "ema99_slope_10": round(ema99_slope_10, 2),
+        "ema7_slope_50": round(ema7_slope_50, 2),
+        "ema25_slope_50": round(ema25_slope_50, 2),
+        "ema99_slope_50": round(ema99_slope_50, 2),
         "ema7_25_cross_bars": ema7_25_cross_bars,
         "ema7_25_cross_dir": ema7_25_cross_dir,
         "price_above_ema7_count": price_above_ema7_count,
         "price_above_ema25_count": price_above_ema25_count,
         "price_above_ema99_count": price_above_ema99_count,
         
-        # MACD History
-        "macd_hist_trend_5": [round(h, 6) for h in macd_hist_trend_5],
+        # MACD History (50 candles)
+        "macd_hist_trend_50": [round(h, 6) for h in macd_hist_trend_50[-10:]],  # last 10 values for prompt
         "macd_hist_direction": macd_hist_direction,
         "macd_bars_since_cross": macd_bars_since_cross,
         "macd_hist_accel": round(macd_hist_accel, 6),
+        "macd_hist_min_50": round(macd_hist_min_50, 6),
+        "macd_hist_max_50": round(macd_hist_max_50, 6),
+        "macd_hist_avg_50": round(macd_hist_avg_50, 6),
+        "macd_zero_crosses_50": macd_zero_crosses_50,
         
-        # OBV History
-        "obv_roc_5": round(obv_roc_5, 2),
+        # OBV History (50 candles)
+        "obv_roc_50": round(obv_roc_50, 2),
+        "obv_roc_10": round(obv_roc_10, 2),
+        "obv_trend_50": obv_trend_50,
         "obv_spike": obv_spike,
         "obv_price_divergence": obv_price_divergence,
         
-        # RSI History
-        "rsi_trend_5": rsi_trend_5,
-        "rsi_values_5": [round(r, 1) for r in rsi_values_5],
+        # RSI History (50 candles)
+        "rsi_trend_50": rsi_trend_50,
+        "rsi_values_50": [round(r, 1) for r in rsi_values_50[-10:]],  # last 10 values for prompt
+        "rsi_min_50": round(rsi_min_50, 1),
+        "rsi_max_50": round(rsi_max_50, 1),
+        "rsi_avg_50": round(rsi_avg_50, 1),
+        "rsi_time_overbought": rsi_time_overbought,
+        "rsi_time_oversold": rsi_time_oversold,
+        "rsi_price_divergence": rsi_price_divergence,
         
-        # SuperTrend History
+        # SuperTrend History (50 candles)
         "st_bars_since_flip": st_bars_since_flip,
         "st_distance_pct": round(st_distance_pct, 2),
+        "st_flips_50": st_flips_50,
+        "st_bullish_bars_50": st_bullish_bars_50,
         
-        # Bollinger Bands History
+        # Bollinger Bands History (50 candles)
         "bb_pctb": round(bb_pctb, 3),
         "bb_squeeze": bb_squeeze,
         "bb_expanding": bb_expanding,
@@ -561,17 +754,29 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "cloud_thickness_pct": round(cloud_thickness_pct, 2),
         "future_cloud": future_cloud,
         
-        # ADX/DI History
+        # ADX/DI History (50 candles)
         "adx_trend": adx_trend,
+        "adx_avg_50": round(adx_avg_50, 1),
+        "adx_max_50": round(adx_max_50, 1),
+        "di_cross_bars": di_cross_bars,
+        "di_cross_dir": di_cross_dir,
         
-        # StochRSI History
+        # StochRSI History (50 candles)
         "stoch_k_trend": stoch_k_trend,
+        "stoch_overbought_bars_50": stoch_overbought_bars_50,
+        "stoch_oversold_bars_50": stoch_oversold_bars_50,
+        "stoch_kd_crosses_50": stoch_kd_crosses_50,
         
-        # MFI History
-        "mfi_trend_5": mfi_trend_5,
+        # MFI History (50 candles)
+        "mfi_trend_50": mfi_trend_50,
+        "mfi_avg_50": round(mfi_avg_50, 1),
+        "mfi_overbought_bars_50": mfi_overbought_bars_50,
+        "mfi_oversold_bars_50": mfi_oversold_bars_50,
         
-        # CMF History
-        "cmf_trend_5": cmf_trend_5,
+        # CMF History (50 candles)
+        "cmf_trend_50": cmf_trend_50,
+        "cmf_avg_50": round(cmf_avg_50, 3),
+        "cmf_positive_bars_50": cmf_positive_bars_50,
     }
 
     return last_indic_row, df
@@ -585,9 +790,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     ema99 = indic['ema99']
 
     # ── EMA ANALYSIS WITH HISTORICAL CONTEXT ──
-    ema7_slope = indic.get('ema7_slope_10', 0)
-    ema25_slope = indic.get('ema25_slope_10', 0)
-    ema99_slope = indic.get('ema99_slope_10', 0)
+    ema7_slope = indic.get('ema7_slope_50', 0)
+    ema25_slope = indic.get('ema25_slope_50', 0)
+    ema99_slope = indic.get('ema99_slope_50', 0)
     cross_bars = indic.get('ema7_25_cross_bars')
     cross_dir = indic.get('ema7_25_cross_dir')
     price_above_7 = indic.get('price_above_ema7_count', 0)
@@ -611,10 +816,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         ema_signal = f"⚪ MIXED (EMA7={slope7_ind}, EMA25={slope25_ind}, EMA99={slope99_ind})"
     
     idx = 1
-    ema_analysis = (f"{idx}. EMA: 7={ema7:.6f}({slope7_ind}{ema7_slope:+.1f}%/10bars) {'>' if ema7 > ema25 else '<'} "
+    ema_analysis = (f"{idx}. EMA: 7={ema7:.6f}({slope7_ind}{ema7_slope:+.1f}%/50bars) {'>' if ema7 > ema25 else '<'} "
                    f"25={ema25:.6f}({slope25_ind}{ema25_slope:+.1f}%) {'>' if ema25 > ema99 else '<'} "
                    f"99={ema99:.6f}({slope99_ind}{'flat' if abs(ema99_slope) < 0.5 else f'{ema99_slope:+.1f}%'})\n"
-                   f"   Price>EMA7: {price_above_7}/10 candles | Price>EMA25: {price_above_25}/10 | Price>EMA99: {price_above_99}/10{cross_text}\n"
+                   f"   Price>EMA7: {price_above_7}/50 candles | Price>EMA25: {price_above_25}/50 | Price>EMA99: {price_above_99}/50{cross_text}\n"
                    f"   → {ema_signal}")
 
     # ── MACD ANALYSIS WITH HISTOGRAM DYNAMICS ──
@@ -622,9 +827,13 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     macd_signal_val = indic['macd_signal']
     macd_hist = indic['macd_hist']
     hist_direction = indic.get('macd_hist_direction', 'unknown')
-    hist_trend = indic.get('macd_hist_trend_5', [])
+    hist_trend = indic.get('macd_hist_trend_50', [])
     bars_since_cross = indic.get('macd_bars_since_cross')
     hist_accel = indic.get('macd_hist_accel', 0)
+    hist_min_50 = indic.get('macd_hist_min_50', 0)
+    hist_max_50 = indic.get('macd_hist_max_50', 0)
+    hist_avg_50 = indic.get('macd_hist_avg_50', 0)
+    zero_crosses = indic.get('macd_zero_crosses_50', 0)
     
     hist_peak = max(hist_trend) if hist_trend else macd_hist
     cross_text = f"Cross {bars_since_cross} bars ago" if bars_since_cross else "No recent cross"
@@ -653,34 +862,43 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     idx += 1
     macd_analysis = (f"{idx}. MACD: DIF={macd_line:.6f} {'>' if macd_line > macd_signal_val else '<'} "
                     f"DEA={macd_signal_val:.6f} | Hist={macd_hist:.6f} {hist_direction.upper()}\n"
-                    f"   {cross_text}, hist peaked at {hist_peak:.6f}, accel={hist_accel:.6f}\n"
+                    f"   {cross_text} | Hist range 50bars: [{hist_min_50:.6f}..{hist_max_50:.6f}] avg={hist_avg_50:.6f} | Zero crosses: {zero_crosses}\n"
+                    f"   Accel={hist_accel:.6f} | {'CHOPPY' if zero_crosses > 4 else 'TRENDING'}\n"
                     f"   → {macd_signal}")
 
     # ── OBV ANALYSIS WITH SPIKE DETECTION ──
     obv_status = indic['obv_status']
-    obv_roc = indic.get('obv_roc_5', 0)
+    obv_roc_50 = indic.get('obv_roc_50', 0)
+    obv_roc_10 = indic.get('obv_roc_10', 0)
+    obv_trend_50 = indic.get('obv_trend_50', 'stable')
     obv_spike = indic.get('obv_spike', False)
     obv_divergence = indic.get('obv_price_divergence', 'none')
     
-    spike_text = f" ⚠️ SPIKE: +{abs(obv_roc):.1f}% last 5 bars (possible short-term {'pump' if obv_roc > 0 else 'dump'})" if obv_spike else ""
-    divergence_text = f"Price-OBV: {'NO DIVERGENCE (confirmed move)' if obv_divergence == 'none' else f'{obv_divergence.upper()} DIVERGENCE'}"
+    spike_text = f" ⚠️ SPIKE detected (2σ over 50 bars)" if obv_spike else ""
+    divergence_text = f"Price-OBV 50bar: {'NO DIVERGENCE (confirmed)' if obv_divergence == 'none' else f'{obv_divergence.upper()} DIVERGENCE ⚠️'}"
     
     if "Accumulation" in obv_status:
-        obv_signal = f"🟢 BULLISH{'but spike=caution' if obv_spike else ''}"
+        obv_signal = f"🟢 BULLISH{' but spike=caution' if obv_spike else ''}"
         obv_vote_weight = 0.5 if obv_spike else 1.0
     else:
-        obv_signal = f"🔴 BEARISH{'but spike=caution' if obv_spike else ''}"
+        obv_signal = f"🔴 BEARISH{' but spike=caution' if obv_spike else ''}"
         obv_vote_weight = 0.5 if obv_spike else 1.0
     
     idx += 1
-    obv_analysis = (f"{idx}. OBV: {obv_status.split('(')[1].replace(')', '')} (>SMA20) | ROC(5)={obv_roc:+.1f}%{spike_text}\n"
+    obv_analysis = (f"{idx}. OBV: {obv_status.split('(')[1].replace(')', '')} (>SMA20) | ROC(10)={obv_roc_10:+.1f}% | ROC(50)={obv_roc_50:+.1f}% | Trend 50bar: {obv_trend_50}{spike_text}\n"
                    f"   {divergence_text}\n"
                    f"   → {obv_signal}")
 
     # ── RSI ANALYSIS WITH PENALTY SYSTEM ──
     rsi = indic['rsi14']
-    rsi_trend = indic.get('rsi_trend_5', 'stable')
-    rsi_values = indic.get('rsi_values_5', [])
+    rsi_trend = indic.get('rsi_trend_50', 'stable')
+    rsi_values = indic.get('rsi_values_50', [])
+    rsi_min = indic.get('rsi_min_50', rsi)
+    rsi_max = indic.get('rsi_max_50', rsi)
+    rsi_avg = indic.get('rsi_avg_50', rsi)
+    rsi_time_ob = indic.get('rsi_time_overbought', 0)
+    rsi_time_os = indic.get('rsi_time_oversold', 0)
+    rsi_div = indic.get('rsi_price_divergence', 'none')
     
     values_str = "→".join([f"{v:.1f}" for v in rsi_values[-5:]]) if rsi_values else f"{rsi:.1f}"
     
@@ -708,10 +926,12 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         rsi_penalty = 0
     
     penalty_text = f"\n   PENALTY: {rsi_penalty:+d}% from LONG score" if rsi_penalty != 0 else ""
+    div_text = f" | RSI-Price DIVERGENCE: {rsi_div.upper()} ⚠️" if rsi_div != "none" else ""
     
     idx += 1
     rsi_analysis = (f"{idx}. RSI: {rsi:.1f} {'OVERBOUGHT' if rsi > 70 else ('OVERSOLD' if rsi < 30 else 'NORMAL')} | "
-                   f"Trend: {rsi_trend} 5 bars ({values_str}){penalty_text}\n"
+                   f"Trend 50bar: {rsi_trend} ({values_str})\n"
+                   f"   50bar range: [{rsi_min:.1f}..{rsi_max:.1f}] avg={rsi_avg:.1f} | OB bars: {rsi_time_ob}/50 | OS bars: {rsi_time_os}/50{div_text}{penalty_text}\n"
                    f"   → {rsi_signal}")
 
     # ── SUPERTREND ANALYSIS WITH FLIP TIMING ──
@@ -719,6 +939,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     st_price = indic['supertrend_price']
     st_flip_bars = indic.get('st_bars_since_flip', 0)
     st_distance = indic.get('st_distance_pct', 0)
+    st_flips = indic.get('st_flips_50', 0)
+    st_bull_bars = indic.get('st_bullish_bars_50', 0)
     
     # Adjust vote weight based on flip timing
     if st_flip_bars < 3:
@@ -734,6 +956,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     # SuperTrend analysis text (idx assigned later when added to list)
     st_analysis_text = (f"SuperTrend: {st_status} @ {st_price:.6f} | Flipped {st_flip_bars} bars ago | "
                        f"Price {st_distance:+.1f}% from ST line\n"
+                       f"   50bar: {st_flips} flips | Bullish {st_bull_bars}/50 bars | {'CHOPPY' if st_flips > 4 else 'TRENDING'}\n"
                        f"   → {st_status.split()[1]} {flip_note}")
 
     # ── BOLLINGER BANDS WITH SQUEEZE/EXPANSION ──
@@ -760,7 +983,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     idx += 1
     bb_analysis = (f"{idx}. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} | %B={bb_pctb:.3f} | Width={bb_width_pct:.1f}%\n"
                   f"   Squeeze: {'YES' if bb_squeeze else 'NO'} | Expanding: {'YES' if bb_expanding else 'NO'} | "
-                  f"Walking upper band: {bb_walk_upper}/10 candles\n"
+                  f"Walking upper band: {bb_walk_upper}/50 candles\n"
                   f"   → {bb_signal}")
 
     # Build indicator lines based on timeframe
@@ -803,6 +1026,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     di_plus = indic.get('di_plus', 0)
     di_minus = indic.get('di_minus', 0)
     adx_trend = indic.get('adx_trend', 'stable')
+    adx_avg = indic.get('adx_avg_50', 0)
+    adx_max = indic.get('adx_max_50', 0)
+    di_cross_b = indic.get('di_cross_bars')
+    di_cross_d = indic.get('di_cross_dir')
     
     if adx > 40:
         trend_strength = "STRONG TREND"
@@ -810,6 +1037,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         trend_strength = "MODERATE TREND"
     else:
         trend_strength = "WEAK/NO TREND"
+    
+    di_cross_text = f" | DI cross: {di_cross_d} {di_cross_b} bars ago" if di_cross_b else ""
     
     if di_plus > di_minus:
         adx_signal = f"🟢 BULLISH (DI+ dominant, trend {'strengthening' if adx_trend == 'rising' else 'stable'})"
@@ -819,6 +1048,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     idx += 1
     adx_analysis = (f"{idx}. ADX: {adx:.0f} {trend_strength} | DI+: {di_plus:.1f} {'>' if di_plus > di_minus else '<'} "
                    f"DI-: {di_minus:.1f} | ADX {adx_trend}\n"
+                   f"   50bar: avg={adx_avg:.0f} max={adx_max:.0f}{di_cross_text}\n"
                    f"   → {adx_signal}")
     raw_lines.append(adx_analysis)
     
@@ -826,6 +1056,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     stoch_k = indic['stoch_k']
     stoch_d = indic['stoch_d']
     stoch_k_trend = indic.get('stoch_k_trend', 'stable')
+    stoch_ob_bars = indic.get('stoch_overbought_bars_50', 0)
+    stoch_os_bars = indic.get('stoch_oversold_bars_50', 0)
+    stoch_crosses = indic.get('stoch_kd_crosses_50', 0)
     
     if stoch_k > 80:
         stoch_signal = f"⚠️ BEARISH VOTE (overbought zone)"
@@ -839,13 +1072,17 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     idx += 1
     stoch_analysis = (f"{idx}. StochRSI: K={stoch_k:.0f} D={stoch_d:.0f} "
                      f"{'OVERBOUGHT' if stoch_k > 80 else ('OVERSOLD' if stoch_k < 20 else 'NORMAL')} | "
-                     f"K trend: {stoch_k_trend}\n"
+                     f"K trend 50bar: {stoch_k_trend}\n"
+                     f"   50bar: OB bars={stoch_ob_bars}/50 | OS bars={stoch_os_bars}/50 | K/D crosses: {stoch_crosses} | {'CHOPPY' if stoch_crosses > 6 else 'TRENDING'}\n"
                      f"   → {stoch_signal}")
     raw_lines.append(stoch_analysis)
     
     # MFI (NOW VOTES)
     mfi = indic['mfi']
-    mfi_trend = indic.get('mfi_trend_5', 'stable')
+    mfi_trend = indic.get('mfi_trend_50', 'stable')
+    mfi_avg = indic.get('mfi_avg_50', 50)
+    mfi_ob = indic.get('mfi_overbought_bars_50', 0)
+    mfi_os = indic.get('mfi_oversold_bars_50', 0)
     
     if mfi > 80:
         mfi_signal = f"⚠️ BEARISH (overbought)"
@@ -857,13 +1094,16 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         mfi_signal = f"🔴 BEARISH"
     
     idx += 1
-    mfi_analysis = (f"{idx}. MFI: {mfi:.0f} {'BULLISH' if mfi > 50 else 'BEARISH'} | Trend: {mfi_trend} 5 bars\n"
+    mfi_analysis = (f"{idx}. MFI: {mfi:.0f} {'BULLISH' if mfi > 50 else 'BEARISH'} | Trend 50bar: {mfi_trend} | Avg={mfi_avg:.0f}\n"
+                   f"   50bar: OB bars={mfi_ob}/50 | OS bars={mfi_os}/50\n"
                    f"   → {mfi_signal}")
     raw_lines.append(mfi_analysis)
     
     # CMF (NOW VOTES)
     cmf = indic['cmf']
-    cmf_trend = indic.get('cmf_trend_5', 'stable')
+    cmf_trend = indic.get('cmf_trend_50', 'stable')
+    cmf_avg = indic.get('cmf_avg_50', 0)
+    cmf_pos_bars = indic.get('cmf_positive_bars_50', 0)
     
     if cmf > 0.1:
         cmf_signal = f"🟢 BULLISH (strong buying)"
@@ -878,7 +1118,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     idx += 1
     cmf_analysis = (f"{idx}. CMF: {cmf:.3f} {'STRONG' if abs(cmf) > 0.1 else ''} "
-                   f"{'BUYING' if cmf > 0 else 'SELLING'} | Trend: {cmf_trend}\n"
+                   f"{'BUYING' if cmf > 0 else 'SELLING'} | Trend 50bar: {cmf_trend} | Avg={cmf_avg:.3f}\n"
+                   f"   Positive bars: {cmf_pos_bars}/50 ({'buying dominant' if cmf_pos_bars > 30 else ('selling dominant' if cmf_pos_bars < 20 else 'mixed')})\n"
                    f"   → {cmf_signal}")
     raw_lines.append(cmf_analysis)
 

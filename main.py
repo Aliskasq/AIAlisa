@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
 from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params
-from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text
+from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
 import aiohttp
@@ -27,21 +27,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler("bot.log", mode='a', encoding='utf-8'), logging.StreamHandler()]
 )
-
-async def fetch_funding_history(session: aiohttp.ClientSession, symbol: str) -> str:
-    """Requests historical funding rate dynamics (last 3 epochs) from Binance."""
-    url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit=3"
-    try:
-        async with session.get(url, timeout=5) as response:
-            if response.status == 200:
-                data = await response.json()
-                # Convert data to a readable string: "0.0100% -> 0.0150% -> 0.0250%"
-                rates = [f"{float(item['fundingRate']) * 100:.4f}%" for item in data]
-                if rates:
-                    return " -> ".join(rates)
-    except Exception as e:
-        pass
-    return "Unknown"
 
 async def log_cleanup_task():
     """Background task: at 23:55 UTC daily, truncate bot.log and remove log files older than 3 days."""

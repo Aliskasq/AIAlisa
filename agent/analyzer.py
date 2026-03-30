@@ -631,7 +631,8 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             # Step 3.5 Flash is a reasoning model — always "thinks" internally.
             # reasoning: {enabled: true} forces thinking tokens into a SEPARATE field,
             # so they don't count as completion tokens (~2-3k instead of 15-27k).
-            payload["reasoning"] = {"enabled": True}
+            # max_tokens caps reasoning to prevent 14-15k token "overthinking" spikes.
+            payload["reasoning"] = {"enabled": True, "max_tokens": 2048}
 
             # === REAL-TIME SSE STREAMING to Telegram ===
             if telegram_stream:
