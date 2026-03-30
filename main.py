@@ -164,6 +164,7 @@ async def main():
             alerts = load_alerts()
             alerts_to_remove = []
             processed_symbols = set()  # Prevent duplicate processing of same symbol in one cycle
+            breakout_queue = []  # Collect all breakouts, then prep data in parallel, AI in queue
 
             if alerts:
                 logging.info(f"👀 Checking {len(alerts)} coins wating for breakout... Time (UTC+3): {now_msk.strftime('%H:%M:%S')}")
@@ -234,169 +235,212 @@ async def main():
                             if current_price >= dynamic_trigger:
                                 trigger_hit = True
 
-                        # --- TRIGGER ALERT TO TELEGRAM ---
+                        # --- COLLECT BREAKOUTS FOR PARALLEL PREP ---
                         if trigger_hit and symbol not in processed_symbols:
                             processed_symbols.add(symbol)
                             logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price})")
                             line_data = stored_lines.get(tf_key, {}).get(symbol)
-                            is_sent = False # Default to not sent
-
                             if line_data:
-                                # 1. Breakout confirmed! Download history for chart + SMC
-                                limit_k = 250
-                                interval_fetch = '1d' if tf_key == "1D" else '4h'
-                                full_raw = await fetch_klines(session, symbol, interval_fetch, limit_k)
-
-                                if full_raw:
-                                    full_df = pd.DataFrame(full_raw)
-
-                                    # 2. Calculate SMC (Order Blocks, FVG) and standard indicators
-                                    last_indic_row, _ = calculate_binance_indicators(full_df, tf_key)
-
-                                    # 3. Fetch Funding History and add to AI data
-                                    funding_history = await fetch_funding_history(session, symbol)
-                                    last_indic_row["funding_rate"] = funding_history
-
-                                    # 3a. Market Positioning (OI, L/S ratio, Taker volume)
-                                    positioning = await fetch_market_positioning(session, symbol)
-                                    last_indic_row["positioning"] = positioning
-
-                                    # 3b. Multi-timeframe data for better AI accuracy (250 candles for SMC)
-                                    mtf_data = {}
-                                    smc_data = {}
-                                    if tf_key == "1D":
-                                        raw_4h = await fetch_klines(session, symbol, "4h", 250)
-                                        raw_1h = await fetch_klines(session, symbol, "1h", 250)
-                                        raw_15m = await fetch_klines(session, symbol, "15m", 250)
-                                        if raw_4h:
-                                            mtf_data["4H"] = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")[0]
-                                        if raw_1h:
-                                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
-                                        if raw_15m:
-                                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
-                                    else:
-                                        raw_1h = await fetch_klines(session, symbol, "1h", 250)
-                                        raw_15m = await fetch_klines(session, symbol, "15m", 250)
-                                        if raw_1h:
-                                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
-                                        if raw_15m:
-                                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
-
-                                    # 3c. SMC analysis (Smart Money Concepts)
-                                    try:
-                                        from core.smc import analyze_smc
-                                        # SMC on primary TF
-                                        if full_raw:
-                                            smc_data[tf_key] = analyze_smc(pd.DataFrame(full_raw), tf_key)
-                                        # SMC on additional TFs
-                                        if tf_key == "1D" and raw_4h:
-                                            smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
-                                        if raw_1h:
-                                            smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
-                                        if raw_15m:
-                                            smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
-                                    except Exception as e:
-                                        logging.error(f"❌ SMC auto-scan error: {e}")
-
-                                    # 4. Request AI verdict with 429 retry logic
-                                    # Use extended=True (same as manual scan) to avoid hidden reasoning token bloat
-                                    # (~2-3k tokens vs ~18-21k with short prompt). Only Part 1 is used for chart caption.
-                                    ai_verdict_full = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, extended=True, mtf_data=mtf_data, smc_data=smc_data)
-
-                                    # Extract Part 1 only (before ---) for chart caption
-                                    if ai_verdict_full and "---" in ai_verdict_full:
-                                        ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
-                                    else:
-                                        ai_verdict = ai_verdict_full
-
-                                    # Check for AI errors (429, network error, API error) — retry before sending chart
-                                    ai_has_error = False
-                                    error_msg_id = None
-
-                                    def _is_ai_error(text):
-                                        """Check if AI response is an error, not real analysis."""
-                                        if not text:
-                                            return True
-                                        if text.startswith("❌"):
-                                            return True
-                                        error_markers = ["429", "rate limit", "network error", "api error", "timeout"]
-                                        return any(m in text.lower() for m in error_markers)
-
-                                    if ai_verdict and _is_ai_error(ai_verdict):
-                                        error_type = "429/rate limit" if ("429" in ai_verdict or "rate limit" in ai_verdict.lower()) else "network/API error"
-                                        logging.warning(f"⚠️ AI {error_type} for {symbol}, sending chart with placeholder, will retry...")
-                                        # Send chart immediately with error placeholder
-                                        _sent_err, error_msg_id = await send_breakout_notification(
-                                            symbol, full_df, line_data, tf_key, alert_type, session,
-                                            dynamic_trigger, f"⏳ AI {error_type} — retrying..."
-                                        )
-                                        await asyncio.sleep(15)
-                                        ai_verdict_full = await ask_ai_analysis(symbol, tf_key, last_indic_row, dynamic_line_price, extended=True, mtf_data=mtf_data, smc_data=smc_data)
-                                        if ai_verdict_full and "---" in ai_verdict_full:
-                                            ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
-                                        else:
-                                            ai_verdict = ai_verdict_full
-                                        if ai_verdict and _is_ai_error(ai_verdict):
-                                            ai_has_error = True
-                                            logging.error(f"❌ AI retry failed for {symbol} ({error_type}), keeping error chart")
-                                            ai_verdict = ""
-                                        else:
-                                            # AI responded! Delete old error message from TG
-                                            logging.info(f"✅ AI retry succeeded for {symbol}, replacing error chart")
-                                            await delete_telegram_message(session, error_msg_id)
-                                            error_msg_id = None
-
-                                    # 5. Send chart (with AI text if available; skip if error chart already sent and retry failed)
-                                    if ai_has_error:
-                                        # Error chart already in TG, just mark as sent
-                                        is_sent = True
-                                    else:
-                                        is_sent, _ = await send_breakout_notification(
-                                            symbol, full_df, line_data, tf_key, alert_type, session,
-                                            dynamic_trigger, ai_verdict or ""
-                                        )
-                                else:
-                                    logging.error(f"❌ Failed to download chart for {symbol}. Will retry next cycle.")
+                                breakout_queue.append({
+                                    "symbol": symbol,
+                                    "tf_key": tf_key,
+                                    "alert_type": alert_type,
+                                    "alert": alert,
+                                    "line_data": line_data,
+                                    "dynamic_trigger": dynamic_trigger,
+                                    "current_price": current_price,
+                                })
                             else:
                                 # Line not in memory cache (bug). Delete to avoid infinite loop.
-                                is_sent = True
-
-                            if is_sent:
-                                # Parse AI direction and trade params from verdict text
-                                _ai_dir = ""
-                                _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
-                                if ai_verdict:
-                                    # Parse direction from VERDICT line (LONG/SHORT/SKIP)
-                                    import re as _re
-                                    _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT|SKIP)", ai_verdict, _re.IGNORECASE)
-                                    if _verdict_match:
-                                        _ai_dir = _verdict_match.group(1).upper()
-                                    else:
-                                        # Fallback: last LONG/SHORT in text (verdict is usually at the end of analysis)
-                                        _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
-                                        if _all_dirs:
-                                            _ai_dir = _all_dirs[-1]
-                                # ── HARD CAPS: leverage ≤ 3x, deposit ≤ 2% ──
-                                _raw_lev = _ai_params.get("ai_leverage") if _ai_params else None
-                                _raw_dep = _ai_params.get("ai_deposit_pct") if _ai_params else None
-                                _capped_lev = min(_raw_lev, 3) if _raw_lev else None
-                                _capped_dep = min(_raw_dep, 2.0) if _raw_dep else 2.0
-
-                                # Log breakout — ALL signals get pushed (SKIP included for tracking)
-                                add_breakout_entry(symbol, tf_key, dynamic_trigger, current_price, alert_type,
-                                                   ai_direction=_ai_dir,
-                                                   ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
-                                                   ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
-                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
-                                                   ai_leverage=_capped_lev,
-                                                   ai_deposit_pct=_capped_dep)
-                                # REMOVE FROM QUEUE — delivered
                                 alerts_to_remove.append(alert)
-                            else:
-                                logging.warning(f"🔄 Signal {symbol} ({tf_key}) LEFT IN QUEUE. Will retry in 5 minutes.")
 
                     await wait_for_weight(session, 1800)
                     await asyncio.sleep(3.0)
+
+                # =========================================================
+                # PARALLEL DATA PREP + SEQUENTIAL AI QUEUE
+                # =========================================================
+                if breakout_queue:
+                    logging.info(f"📋 Processing {len(breakout_queue)} breakouts: parallel data fetch → sequential AI queue")
+
+                    async def _prepare_breakout_data(item, http_session):
+                        """Fetch all data for a breakout (klines, MTF, funding, positioning, SMC).
+                        This runs in parallel for all breakouts — NO AI calls here."""
+                        sym = item["symbol"]
+                        tf = item["tf_key"]
+                        try:
+                            interval_fetch = '1d' if tf == "1D" else '4h'
+                            full_raw = await fetch_klines(http_session, sym, interval_fetch, 250)
+                            if not full_raw:
+                                item["error"] = "no_klines"
+                                return item
+
+                            full_df = pd.DataFrame(full_raw)
+                            last_indic_row, _ = calculate_binance_indicators(full_df, tf)
+
+                            # Parallel fetch: funding + positioning + MTF klines
+                            mtf_tasks = [
+                                fetch_funding_history(http_session, sym),
+                                fetch_market_positioning(http_session, sym),
+                                fetch_klines(http_session, sym, "1h", 250),
+                                fetch_klines(http_session, sym, "15m", 250),
+                            ]
+                            if tf == "1D":
+                                mtf_tasks.append(fetch_klines(http_session, sym, "4h", 250))
+
+                            mtf_results = await asyncio.gather(*mtf_tasks, return_exceptions=True)
+
+                            funding = mtf_results[0] if not isinstance(mtf_results[0], Exception) else "Unknown"
+                            positioning = mtf_results[1] if not isinstance(mtf_results[1], Exception) else {}
+                            raw_1h = mtf_results[2] if not isinstance(mtf_results[2], Exception) else None
+                            raw_15m = mtf_results[3] if not isinstance(mtf_results[3], Exception) else None
+                            raw_4h = mtf_results[4] if len(mtf_results) > 4 and not isinstance(mtf_results[4], Exception) else None
+
+                            last_indic_row["funding_rate"] = funding
+                            last_indic_row["positioning"] = positioning
+
+                            mtf_data = {}
+                            if raw_4h:
+                                mtf_data["4H"] = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")[0]
+                            if raw_1h:
+                                mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                            if raw_15m:
+                                mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+
+                            smc_data = {}
+                            try:
+                                from core.smc import analyze_smc
+                                smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf)
+                                if raw_4h and tf == "1D":
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                                if raw_1h:
+                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                                if raw_15m:
+                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                            except Exception as e:
+                                logging.error(f"❌ SMC error for {sym}: {e}")
+
+                            item["full_df"] = full_df
+                            item["last_indic_row"] = last_indic_row
+                            item["mtf_data"] = mtf_data
+                            item["smc_data"] = smc_data
+                            item["ready"] = True
+                        except Exception as e:
+                            logging.error(f"❌ Data prep error for {sym}: {e}")
+                            item["error"] = str(e)
+                        return item
+
+                    # Phase 1: Fetch all data in parallel (no AI, no 429 risk)
+                    prep_tasks = [_prepare_breakout_data(item, session) for item in breakout_queue]
+                    await asyncio.gather(*prep_tasks)
+
+                    ready_count = sum(1 for item in breakout_queue if item.get("ready"))
+                    logging.info(f"✅ Data ready for {ready_count}/{len(breakout_queue)} breakouts. Starting AI queue...")
+
+                    # Phase 2: Sequential AI calls (through lock + cooldown = no 429)
+                    def _is_ai_error(text):
+                        """Check if AI response is an error, not real analysis."""
+                        if not text:
+                            return True
+                        if text.startswith("❌"):
+                            return True
+                        error_markers = ["429", "rate limit", "network error", "api error", "timeout"]
+                        return any(m in text.lower() for m in error_markers)
+
+                    for idx, item in enumerate(breakout_queue):
+                        if not item.get("ready"):
+                            if item.get("error") == "no_klines":
+                                logging.error(f"❌ No klines for {item['symbol']}. Will retry next cycle.")
+                            continue
+
+                        sym = item["symbol"]
+                        tf = item["tf_key"]
+                        alert_type = item["alert_type"]
+                        dynamic_trigger = item["dynamic_trigger"]
+                        full_df = item["full_df"]
+                        line_data = item["line_data"]
+                        last_indic_row = item["last_indic_row"]
+
+                        logging.info(f"🤖 AI queue [{idx+1}/{len(breakout_queue)}]: {sym} {tf}")
+
+                        # AI call (goes through asyncio.Lock + 10s cooldown automatically)
+                        ai_verdict_full = await ask_ai_analysis(
+                            sym, tf, last_indic_row, item.get("dynamic_trigger"),
+                            extended=True, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                        )
+
+                        # Extract Part 1 only (before ---) for chart caption
+                        if ai_verdict_full and "---" in ai_verdict_full:
+                            ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                        else:
+                            ai_verdict = ai_verdict_full
+
+                        # Check for AI errors — retry once
+                        ai_has_error = False
+                        error_msg_id = None
+
+                        if ai_verdict and _is_ai_error(ai_verdict):
+                            error_type = "429/rate limit" if ("429" in ai_verdict or "rate limit" in ai_verdict.lower()) else "network/API error"
+                            logging.warning(f"⚠️ AI {error_type} for {sym}, sending chart with placeholder, will retry...")
+                            _sent_err, error_msg_id = await send_breakout_notification(
+                                sym, full_df, line_data, tf, alert_type, session,
+                                dynamic_trigger, f"⏳ AI {error_type} — retrying..."
+                            )
+                            await asyncio.sleep(15)
+                            ai_verdict_full = await ask_ai_analysis(
+                                sym, tf, last_indic_row, dynamic_trigger,
+                                extended=True, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            )
+                            if ai_verdict_full and "---" in ai_verdict_full:
+                                ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                            else:
+                                ai_verdict = ai_verdict_full
+                            if ai_verdict and _is_ai_error(ai_verdict):
+                                ai_has_error = True
+                                logging.error(f"❌ AI retry failed for {sym} ({error_type}), keeping error chart")
+                                ai_verdict = ""
+                            else:
+                                logging.info(f"✅ AI retry succeeded for {sym}, replacing error chart")
+                                await delete_telegram_message(session, error_msg_id)
+                                error_msg_id = None
+
+                        # Send chart
+                        is_sent = False
+                        if ai_has_error:
+                            is_sent = True
+                        else:
+                            is_sent, _ = await send_breakout_notification(
+                                sym, full_df, line_data, tf, alert_type, session,
+                                dynamic_trigger, ai_verdict or ""
+                            )
+
+                        if is_sent:
+                            _ai_dir = ""
+                            _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
+                            if ai_verdict:
+                                import re as _re
+                                _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT|SKIP)", ai_verdict, _re.IGNORECASE)
+                                if _verdict_match:
+                                    _ai_dir = _verdict_match.group(1).upper()
+                                else:
+                                    _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
+                                    if _all_dirs:
+                                        _ai_dir = _all_dirs[-1]
+                            _raw_lev = _ai_params.get("ai_leverage") if _ai_params else None
+                            _raw_dep = _ai_params.get("ai_deposit_pct") if _ai_params else None
+                            _capped_lev = min(_raw_lev, 3) if _raw_lev else None
+                            _capped_dep = min(_raw_dep, 2.0) if _raw_dep else 2.0
+
+                            add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
+                                               ai_direction=_ai_dir,
+                                               ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
+                                               ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
+                                               ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
+                                               ai_leverage=_capped_lev,
+                                               ai_deposit_pct=_capped_dep)
+                            alerts_to_remove.append(item["alert"])
+                        else:
+                            logging.warning(f"🔄 Signal {sym} ({tf}) LEFT IN QUEUE. Will retry in 5 minutes.")
 
                 # Clean up processed alerts
                 if alerts_to_remove:
