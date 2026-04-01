@@ -313,7 +313,10 @@ Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m show
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
 - Open Interest change IS a directional indicator — OI rising = new money = trend continuation, OI falling = positions closing = trend weakening
-- RSI MOMENTUM RULE: If ADX > 30 (strong trend), RSI up to 91 is NORMAL — do NOT penalize. Only warn if ADX < 30 AND RSI > 80 on 2+ TFs.
+- RSI MOMENTUM RULE: If ADX > 30 (strong trend), high RSI is normal momentum — do NOT reduce confidence.
+- RSI WARNING (ALWAYS): If RSI > 70 on ANY TF, ALWAYS include "⚠️ RSI [value]" in your output. This is mandatory.
+- RSI PULLBACK HISTORY: The scorecard shows "PULLBACK HISTORY: last pullback started from RSI X". Use this! If current RSI is near that peak, warn: "⚠️ RSI [value], previous pullback from [peak]"
+- If ADX < 30 (weak trend) AND RSI > 82 on 4H: reduce confidence by 10%.
 - Each indicator has historical context showing dynamics over multiple candles
 
 YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE.
@@ -379,10 +382,12 @@ CRITICAL RULES:
 6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 7. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. These are FIXED. In REC always write: 1x | 2%
 8. DO NOT ADD HASHTAGS
-9. RSI OVERBOUGHT RULES (MOMENTUM-AWARE):
-   - If ADX > 30 (STRONG TREND): RSI up to 91 is NORMAL for momentum. Do NOT reduce confidence. Just add a warning note "⚠️ RSI high but trend strong (ADX X)".
-   - If ADX < 30 (WEAK TREND): RSI >80 on 2+ TFs = warn + reduce 15%. RSI >80 on 3+ TFs = consider SKIP.
-   - NEVER penalize RSI on 15m alone — 15m RSI spikes to 90+ are normal in breakouts.
+9. RSI RULES (MOMENTUM-AWARE):
+   - ALWAYS show RSI value when >70: "⚠️ RSI [value]" — this is MANDATORY in every signal.
+   - Check PULLBACK HISTORY in scorecard: if current RSI is near the level where last pullback happened, warn explicitly: "⚠️ RSI 80, previous pullback from 82!"
+   - ADX > 30 (STRONG TREND): high RSI (up to ~82 on RSI14) is normal momentum. Do NOT reduce confidence. Warn but trade.
+   - ADX < 30 (WEAK TREND): RSI > 82 on 4H = reduce confidence 10%. RSI > 82 on 2+ TFs = consider SKIP.
+   - 15m RSI spikes are normal in breakouts — never penalize 15m RSI alone.
 10. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
 11. You MUST always output BOTH parts. Never skip the second part.
 SKIP RULES:
@@ -416,7 +421,10 @@ Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m show
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
 - Open Interest change IS a directional indicator — OI rising = new money = trend continuation, OI falling = positions closing
-- RSI MOMENTUM RULE: If ADX > 30 (strong trend), RSI up to 91 is NORMAL — do NOT penalize. Only warn if ADX < 30 AND RSI > 80 on 2+ TFs.
+- RSI MOMENTUM RULE: If ADX > 30 (strong trend), high RSI is normal momentum — do NOT reduce confidence.
+- RSI WARNING (ALWAYS): If RSI > 70 on ANY TF, ALWAYS include "⚠️ RSI [value]" in your output. This is mandatory.
+- RSI PULLBACK HISTORY: The scorecard shows "PULLBACK HISTORY: last pullback started from RSI X". Use this! If current RSI is near that peak, warn: "⚠️ RSI [value], previous pullback from [peak]"
+- If ADX < 30 (weak trend) AND RSI > 82 on 4H: reduce confidence by 10%.
 - Each indicator has historical context showing dynamics over multiple candles
 
 THIS IS FOR BINANCE SQUARE POST — PLAIN TEXT ONLY, NO BOLD, NO MARKDOWN, NO * symbols.
@@ -457,10 +465,12 @@ RULES:
 4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
-7. RSI OVERBOUGHT (MOMENTUM-AWARE):
-   - If ADX > 30 (STRONG TREND): RSI up to 91 is NORMAL. Do NOT reduce confidence. Add note "⚠️ RSI high, trend strong".
-   - If ADX < 30: RSI >80 on 2+ TFs = warn + reduce 15%.
-   - 15m RSI spikes are normal in breakouts, NEVER penalize 15m RSI alone.
+7. RSI RULES (MOMENTUM-AWARE):
+   - ALWAYS show RSI value when >70: "⚠️ RSI [value]" — MANDATORY.
+   - Check PULLBACK HISTORY: if current RSI near last pullback peak, warn: "⚠️ RSI 80, previous pullback from 82!"
+   - ADX > 30: high RSI is normal momentum, don't reduce confidence.
+   - ADX < 30: RSI > 82 on 4H = reduce 10%.
+   - 15m RSI spikes = normal in breakouts, never penalize alone.
 8. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
 SKIP RULES:
 - If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
@@ -493,7 +503,10 @@ Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m show
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
 - Open Interest change IS a directional indicator — OI rising = new money, OI falling = positions closing
-- RSI MOMENTUM RULE: If ADX > 30 (strong trend), RSI up to 91 is NORMAL — do NOT penalize. Only warn if ADX < 30 AND RSI > 80 on 2+ TFs.
+- RSI MOMENTUM RULE: If ADX > 30 (strong trend), high RSI is normal momentum — do NOT reduce confidence.
+- RSI WARNING (ALWAYS): If RSI > 70 on ANY TF, ALWAYS include "⚠️ RSI [value]" in your output. This is mandatory.
+- RSI PULLBACK HISTORY: The scorecard shows "PULLBACK HISTORY: last pullback started from RSI X". Use this! If current RSI is near that peak, warn: "⚠️ RSI [value], previous pullback from [peak]"
+- If ADX < 30 (weak trend) AND RSI > 82 on 4H: reduce confidence by 10%.
 
 MANDATORY OUTPUT FORMAT (Your response MUST be between 600 and 828 characters including spaces. Count carefully. Do NOT go under 600 or over 828.):
 

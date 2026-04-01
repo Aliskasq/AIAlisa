@@ -464,6 +464,24 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
             elif rsi_values_50[-1] < rsi_values_50[-3] - 2:
                 rsi_trend_50 = "falling"
     
+    # RSI Pullback Peak Detection (last 50 candles)
+    # Find the highest RSI value that was followed by a meaningful drop (pullback)
+    # This gives a dynamic "danger level" — e.g. "last pullback started from RSI 82"
+    rsi_pullback_peak = 0
+    rsi_pullback_drop = 0
+    if len(rsi_values_50) >= 10:
+        # Scan backwards: find peaks where RSI dropped by ≥8 points after
+        for i in range(len(rsi_values_50) - 3, 0, -1):
+            val = rsi_values_50[i]
+            if val >= 70:  # only care about overbought peaks
+                # Check if RSI dropped significantly after this point
+                future_min = min(rsi_values_50[i+1:min(i+10, len(rsi_values_50))])
+                drop = val - future_min
+                if drop >= 8:  # meaningful pullback (at least 8 RSI points)
+                    rsi_pullback_peak = round(val, 1)
+                    rsi_pullback_drop = round(drop, 1)
+                    break  # take the most recent one
+
     # SuperTrend History (50 candles)
     st_bars_since_flip = 0
     st_distance_pct = 0
@@ -921,10 +939,17 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     penalty_text = ""  # No penalty applied in scorecard
     div_text = f" | RSI-Price DIVERGENCE: {rsi_div.upper()} ⚠️" if rsi_div != "none" else ""
     
+    # Pullback warning text
+    pullback_text = ""
+    if rsi_pullback_peak > 0 and rsi > 70:
+        pullback_text = f"\n   ⚠️ PULLBACK HISTORY: last pullback started from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
+        if rsi >= rsi_pullback_peak - 2:
+            pullback_text += f" — CURRENT RSI {rsi:.0f} IS NEAR THAT LEVEL!"
+    
     idx += 1
     rsi_analysis = (f"{idx}. RSI: {rsi:.1f} {'OVERBOUGHT' if rsi > 70 else ('OVERSOLD' if rsi < 30 else 'NORMAL')} | "
                    f"Trend 50bar: {rsi_trend} ({values_str})\n"
-                   f"   50bar range: [{rsi_min:.1f}..{rsi_max:.1f}] avg={rsi_avg:.1f} | OB bars: {rsi_time_ob}/50 | OS bars: {rsi_time_os}/50{div_text}{penalty_text}\n"
+                   f"   50bar range: [{rsi_min:.1f}..{rsi_max:.1f}] avg={rsi_avg:.1f} | OB bars: {rsi_time_ob}/50 | OS bars: {rsi_time_os}/50{div_text}{pullback_text}\n"
                    f"   → {rsi_signal}")
 
     # ── SUPERTREND ANALYSIS WITH FLIP TIMING ──
