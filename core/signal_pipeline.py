@@ -29,23 +29,31 @@ FIXED_LEVERAGE = 1
 FIXED_DEPOSIT_PCT = 2  # 2% of bank per trade
 
 
-def classify_signal(long_pct: float, short_pct: float, adx: float) -> str:
+def classify_signal(long_pct: float, short_pct: float, adx: float,
+                    adx_trend: str = "stable", adx_avg_50: float = 0) -> str:
     """
     Classify signal tier based on confidence and market regime.
     
+    Uses ADX from 4H (primary breakout TF) + its 50-candle dynamics.
+    
     MOMENTUM OVERRIDE: If ADX > 30 (strong trend), lower threshold to 55%.
+    RISING ADX BONUS: If ADX is rising (trend strengthening), treat ADX 25+ as strong.
     This prevents missing +200% pumps where RSI is always overbought.
-    In a strong trend, overbought RSI is NORMAL — not a reason to skip.
     
     Returns: "full", "monitor", or "info"
     """
     confidence = max(long_pct, short_pct)
     
+    # Effective ADX: if trend is strengthening, give it a boost
+    effective_adx = adx
+    if adx_trend == "rising" and adx >= 20:
+        effective_adx = adx + 5  # rising trend is more significant
+    
     # Momentum override: strong trend = lower threshold
-    if adx >= 30 and confidence >= 55:
+    if effective_adx >= 30 and confidence >= 55:
         return "full"  # Strong trend + decent confidence = go
     
-    if confidence >= CONFIDENCE_FULL and adx >= ADX_TRENDING:
+    if confidence >= CONFIDENCE_FULL and effective_adx >= ADX_TRENDING:
         return "full"
     elif confidence >= CONFIDENCE_MONITOR:
         return "monitor"
@@ -344,7 +352,10 @@ async def monitor_recheck_loop(session):
 
                     long_pct, short_pct = parse_confidence_from_ai(ai_text or "")
                     adx_val = indicators.get("adx", 0)
-                    new_tier = classify_signal(long_pct, short_pct, adx_val)
+                    adx_trend_val = indicators.get("adx_trend", "stable")
+                    adx_avg_val = indicators.get("adx_avg_50", 0)
+                    new_tier = classify_signal(long_pct, short_pct, adx_val,
+                                             adx_trend=adx_trend_val, adx_avg_50=adx_avg_val)
 
                     if new_tier == "full":
                         remove_monitor(m["key"])

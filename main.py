@@ -448,7 +448,10 @@ async def main():
                         # Parse confidence from AI and classify signal tier
                         long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
                         adx_value = last_indic_row.get("adx", 0)
-                        tier = classify_signal(long_pct, short_pct, adx_value)
+                        adx_trend = last_indic_row.get("adx_trend", "stable")
+                        adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
+                        tier = classify_signal(long_pct, short_pct, adx_value,
+                                              adx_trend=adx_trend, adx_avg_50=adx_avg_50)
 
                         if tier == "monitor" and not ai_has_error:
                             # 🔵 MONITOR — don't send as full signal, add to monitor queue
