@@ -902,30 +902,23 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     values_str = "→".join([f"{v:.1f}" for v in rsi_values[-5:]]) if rsi_values else f"{rsi:.1f}"
     
-    rsi_penalty = 0
+    rsi_penalty = 0  # NO penalty — AI decides based on ADX context
     if rsi > 80:
-        rsi_signal = f"⚠️ BEARISH VOTE (extremely overbought override)"
-        rsi_penalty = -20  # -20% penalty from LONG
+        rsi_signal = f"⚠️ OVERBOUGHT ({rsi:.0f}) — check ADX: if strong trend this is normal"
     elif rsi > 70:
-        rsi_signal = f"⚠️ BEARISH VOTE (overbought override)"
-        rsi_penalty = -10  # -10% penalty from LONG
+        rsi_signal = f"⚠️ OVERBOUGHT ({rsi:.0f}) — warn only, no auto-penalty"
     elif rsi < 20:
-        rsi_signal = f"⚠️ BULLISH VOTE (extremely oversold override)"
-        rsi_penalty = 20  # +20% bonus to LONG
+        rsi_signal = f"⚠️ OVERSOLD ({rsi:.0f}) — check ADX: if strong downtrend this is normal"
     elif rsi < 30:
-        rsi_signal = f"⚠️ BULLISH VOTE (oversold override)"
-        rsi_penalty = 10  # +10% bonus to LONG
+        rsi_signal = f"⚠️ OVERSOLD ({rsi:.0f}) — warn only, no auto-penalty"
     elif rsi > 55:
         rsi_signal = f"🟢 BULLISH"
-        rsi_penalty = 0
     elif rsi < 45:
         rsi_signal = f"🔴 BEARISH"
-        rsi_penalty = 0
     else:
         rsi_signal = f"⚪ NEUTRAL"
-        rsi_penalty = 0
     
-    penalty_text = f"\n   PENALTY: {rsi_penalty:+d}% from LONG score" if rsi_penalty != 0 else ""
+    penalty_text = ""  # No penalty applied in scorecard
     div_text = f" | RSI-Price DIVERGENCE: {rsi_div.upper()} ⚠️" if rsi_div != "none" else ""
     
     idx += 1
@@ -1183,17 +1176,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     else:
         bull_pct = bear_pct = 50
     
-    # Apply RSI penalties
-    if rsi_penalty != 0:
-        penalty_text = f"RSI PENALTY: {rsi_penalty:+d}% ({'extremely ' if abs(rsi_penalty) > 15 else ''}{'overbought' if rsi_penalty < 0 else 'oversold'})"
-        if rsi_penalty < 0:  # Reduce LONG
-            bull_pct = max(0, bull_pct + rsi_penalty)
-            bear_pct = min(100, 100 - bull_pct)
-        else:  # Increase LONG
-            bull_pct = min(100, bull_pct + rsi_penalty)
-            bear_pct = max(0, 100 - bull_pct)
-    else:
-        penalty_text = ""
+    # RSI penalty REMOVED — AI decides based on ADX context (momentum-aware)
+    # Strong trend (ADX>30) + high RSI = normal momentum, not a penalty
+    penalty_text = ""
     
     # Check for Open Interest impact (if positioning data available)
     oi_impact = ""

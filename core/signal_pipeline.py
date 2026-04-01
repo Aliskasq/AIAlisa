@@ -33,9 +33,17 @@ def classify_signal(long_pct: float, short_pct: float, adx: float) -> str:
     """
     Classify signal tier based on confidence and market regime.
     
+    MOMENTUM OVERRIDE: If ADX > 30 (strong trend), lower threshold to 55%.
+    This prevents missing +200% pumps where RSI is always overbought.
+    In a strong trend, overbought RSI is NORMAL — not a reason to skip.
+    
     Returns: "full", "monitor", or "info"
     """
     confidence = max(long_pct, short_pct)
+    
+    # Momentum override: strong trend = lower threshold
+    if adx >= 30 and confidence >= 55:
+        return "full"  # Strong trend + decent confidence = go
     
     if confidence >= CONFIDENCE_FULL and adx >= ADX_TRENDING:
         return "full"
