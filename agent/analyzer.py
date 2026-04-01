@@ -24,6 +24,21 @@ except ImportError:
 _ai_request_lock = asyncio.Lock()
 _ai_last_request_time = 0  # timestamp of last completed AI request
 
+# Fast verdict prompt for auto/monitor modes — no reasoning, 3-5 sec response
+FAST_VERDICT_PROMPT = """Read scorecard data. Output ONLY these fields:
+
+DIRECTION: LONG or SHORT or SKIP
+LONG_PCT: [number]
+SHORT_PCT: [number]
+ENTRY: [current price]
+SL: [2×ATR below entry for LONG, above for SHORT]
+TP: [3×ATR above entry for LONG, below for SHORT]
+REASON: [one sentence]
+
+Weights: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
+If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
+Leverage: 1x. Deposit: 2%. No explanation needed."""
+
 
 # ---------------------------------------------------------
 # OPENCLAW STRUCTURED OUTPUT: AI TRADING VERDICT MODEL
@@ -171,7 +186,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None) -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan") -> str:
     """
     OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
     and sends aggregated context to OpenRouter.
@@ -281,13 +296,19 @@ HOW TO CALCULATE LONG/SHORT PERCENTAGE PER TIMEFRAME:
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
 
-TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
-- 15m = 35% weight (most important — immediate momentum and entry timing)
-- 1H = 30% weight (short-term trend confirmation)
-- 4H = 20% weight (medium-term context)
-- 1D = 15% weight (background trend, least weight for entry direction)
-If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
-Example: 1D LONG 100% + 4H LONG 100% but 1H SHORT 80% + 15m SHORT 90% = VERDICT should be SHORT (short-term bearish momentum dominates for current-price entry).
+TWO-STEP ANALYSIS:
+
+STEP 1 — DIRECTION (which way to trade):
+- 4H = 50% weight (PRIMARY — breakout detected here)
+- 1H = 30% weight (CONFIRMATION — momentum developing?)
+- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
+- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+
+CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
+Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
+
+STEP 2 — ENTRY TIMING (after direction decided):
+Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m shows pullback.
 
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
@@ -356,11 +377,15 @@ CRITICAL RULES:
 4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
 6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
-7. MAX LEVERAGE: 3x. MAX DEPOSIT: 2%
+7. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. These are FIXED. In REC always write: 1x | 2%
 8. DO NOT ADD HASHTAGS
 9. OVERBOUGHT/OVERSOLD RULES: RSI >75 on 1 TF = warn, reduce 10%. RSI >75 on 2+ TFs = reduce 25%+, NEVER 100% LONG. RSI >75 on 3+ TFs = consider SKIP or SHORT.
 10. SKIP only if truly 50/50 or 3+ TFs overbought/oversold. Otherwise give direction.
 11. You MUST always output BOTH parts. Never skip the second part.
+SKIP RULES:
+- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
+- SKIP signals go to hourly monitoring and may upgrade later
 """
     elif square:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -371,12 +396,19 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVER
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
 
-TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
-- 15m = 35% weight (most important — immediate momentum and entry timing)
-- 1H = 30% weight (short-term trend confirmation)
-- 4H = 20% weight (medium-term context)
-- 1D = 15% weight (background trend, least weight for entry direction)
-If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
+TWO-STEP ANALYSIS:
+
+STEP 1 — DIRECTION (which way to trade):
+- 4H = 50% weight (PRIMARY — breakout detected here)
+- 1H = 30% weight (CONFIRMATION — momentum developing?)
+- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
+- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+
+CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
+Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
+
+STEP 2 — ENTRY TIMING (after direction decided):
+Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m shows pullback.
 
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
@@ -419,11 +451,15 @@ RULES:
 1. PLAIN TEXT ONLY — no bold, no markdown, no * or ** symbols. Binance Square does not render formatting.
 2. Entry = current price. Safe = better entry from support/OB
 3. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
-4. MAX leverage 3x. MAX deposit 2%
+4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
 7. OVERBOUGHT/OVERSOLD: RSI >75 on 2+ TFs = reduce confidence, warn clearly
 8. SKIP only if truly 50/50 or 3+ TFs overbought/oversold. Otherwise give direction.
+SKIP RULES:
+- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
+- SKIP signals go to hourly monitoring and may upgrade later
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -434,12 +470,19 @@ You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVER
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
 Use these scorecards as your starting point and combine across timeframes.
 
-TIMEFRAME WEIGHTING FOR FINAL VERDICT (entry is at CURRENT price, so short-term matters most):
-- 15m = 35% weight (most important — immediate momentum and entry timing)
-- 1H = 30% weight (short-term trend confirmation)
-- 4H = 20% weight (medium-term context)
-- 1D = 15% weight (background trend, least weight for entry direction)
-If 15m+1H disagree with 4H+1D, the SHORT-TERM view wins for the VERDICT direction.
+TWO-STEP ANALYSIS:
+
+STEP 1 — DIRECTION (which way to trade):
+- 4H = 50% weight (PRIMARY — breakout detected here)
+- 1H = 30% weight (CONFIRMATION — momentum developing?)
+- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
+- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+
+CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
+Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
+
+STEP 2 — ENTRY TIMING (after direction decided):
+Use 15m + 1H: enter NOW if momentum confirms, or wait for SAFE entry if 15m shows pullback.
 
 IMPORTANT DIRECTIONAL RULES:
 - Funding rate and L/S Account Ratio are INFO ONLY — display them but do NOT use for direction voting
@@ -468,9 +511,14 @@ ${base_coin} Analysis🤔
 RULES:
 1. Entry = current price. Safe = better entry from support/OB
 2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
-3. MAX leverage 3x. MAX deposit 2%
+3. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 4. Each TF line: brief reason in parentheses
 5. Response MUST be 600-828 characters exactly
+
+SKIP RULES:
+- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
+- SKIP signals go to hourly monitoring and may upgrade later
 """
 
 
@@ -620,19 +668,46 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                 "Content-Type": "application/json"
             }
-            payload = {
-                "model": OPENROUTER_MODEL,
-                "messages": [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": 0.2,
-            }
-            # Step 3.5 Flash is a reasoning model — always "thinks" internally.
-            # reasoning: {enabled: true} forces thinking tokens into a SEPARATE field,
-            # so they don't count as completion tokens (~2-3k instead of 15-27k).
-            # max_tokens caps reasoning to prevent 14-15k token "overthinking" spikes.
-            payload["reasoning"] = {"enabled": True, "max_tokens": 2048}
+            # Mode-based payload: auto=fast/no reasoning, scan=full/no reasoning, extended=reasoning
+            if mode == "auto":
+                # Fast verdict for breakout push / monitor recheck — 3-5 sec
+                payload = {
+                    "model": OPENROUTER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": FAST_VERDICT_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": 500,
+                    # NO reasoning — scorecards already computed everything
+                }
+                request_timeout = aiohttp.ClientTimeout(total=30)
+            elif mode == "extended":
+                # Deep analysis — reasoning with 2K token cap
+                payload = {
+                    "model": OPENROUTER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.15,
+                    "max_tokens": 4000,
+                    "reasoning": {"enabled": True, "max_tokens": 2000},
+                }
+                request_timeout = aiohttp.ClientTimeout(total=90)
+            else:
+                # scan (default) — full prompt, no reasoning
+                payload = {
+                    "model": OPENROUTER_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.15,
+                    "max_tokens": 1500,
+                    # NO reasoning for scan mode
+                }
+                request_timeout = aiohttp.ClientTimeout(total=60)
 
             # === REAL-TIME SSE STREAMING to Telegram ===
             if telegram_stream:
@@ -647,7 +722,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     token_count = 0
                     async with aiohttp.ClientSession() as sess:
                         async with sess.post("https://openrouter.ai/api/v1/chat/completions",
-                                             headers=headers, json=payload, timeout=180) as resp:
+                                             headers=headers, json=payload, timeout=request_timeout) as resp:
                             if resp.status == 200:
                                 async for line in resp.content:
                                     line = line.decode("utf-8").strip()
@@ -696,7 +771,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                         # separate field, prevents 15-27k hidden completion token bloat
                         async with aiohttp.ClientSession() as session:
                             async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                                    headers=headers, json=payload, timeout=180) as response:
+                                                    headers=headers, json=payload, timeout=request_timeout) as response:
                                 if response.status == 200:
                                     data = await response.json()
                                     candidate = data["choices"][0]["message"]["content"].strip()

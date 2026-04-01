@@ -42,6 +42,18 @@ VIRTUAL_BANK_FILE = "data/virtual_bank.json"
 # --- VIRTUAL BANK ($10,000 starting) ---
 VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
 
+# === SIGNAL PIPELINE SETTINGS ===
+SIGNAL_CONFIDENCE_FULL = 65      # % — full signal with entry
+SIGNAL_CONFIDENCE_MONITOR = 50   # % — put on 30-min watch
+SIGNAL_ADX_TRENDING = 20         # ADX below this = flat market
+SIGNAL_LEVERAGE = 1              # ALWAYS 1x, no leverage
+SIGNAL_DEPOSIT_PCT = 2           # ALWAYS 2% of bank per trade
+SIGNAL_MIN_VOLUME_12H = 500_000  # $500K min in last 12 hours (3×4H candles)
+SIGNAL_MONITOR_RECHECK_SEC = 1800  # 30 min from each signal's OWN time
+SIGNAL_MONITOR_MAX_HOURS = 24      # Expire after 24h (independent of 03:00 redraw)
+SIGNAL_SL_ATR_MULT = 2.0          # SL = 2 × ATR from entry
+SIGNAL_TP_ATR_MULT = 3.0          # TP = 3 × ATR (R:R = 1:1.5)
+
 def load_virtual_bank():
     if os.path.exists(VIRTUAL_BANK_FILE):
         try:
