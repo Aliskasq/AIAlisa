@@ -267,3 +267,120 @@ def cleanup_expired_monitors():
     if expired > 0:
         logging.info(f"🕐 Cleaned {expired} expired monitors")
         save_monitors(active)
+
+
+async def monitor_recheck_loop(session):
+    """
+    Background loop: every 60s checks if any monitors are due for re-analysis.
+    
+    Each monitor has its OWN next_check_ts (30 min from creation/last check).
+    So breakouts at 15:00, 15:05, 15:10 get re-checked at 15:30, 15:35, 15:40.
+    They don't pile up. 10s sleep between AI calls prevents 429.
+    
+    If confidence upgrades to ≥65% AND ADX≥20 → sends FULL signal to group.
+    Monitors expire after 24h independently of 03:00 trendline redraw.
+    """
+    import asyncio
+    import aiohttp
+    import pandas as pd
+
+    # Delayed imports to avoid circular dependency
+    from core.binance_api import fetch_klines, fetch_funding_history, fetch_market_positioning
+    from core.indicators import calculate_binance_indicators
+    from agent.analyzer import ask_ai_analysis
+    from core.chart_drawer import send_breakout_notification
+    from config import BOT_TOKEN, GROUP_CHAT_ID, add_breakout_entry
+
+    logging.info("🔄 Monitor recheck loop started")
+
+    while True:
+        try:
+            await asyncio.sleep(60)  # check every minute
+            cleanup_expired_monitors()
+            due = get_due_monitors()
+            if not due:
+                continue
+
+            logging.info(f"🔄 Monitor: {len(due)} due for re-check")
+
+            for m in due:
+                try:
+                    sym = m["symbol"]
+                    tf = m["tf"]
+                    interval = '1d' if tf == "1D" else '4h'
+
+                    raw = await fetch_klines(session, sym, interval, 250)
+                    if not raw:
+                        update_monitor_checked(m["key"])
+                        continue
+
+                    df = pd.DataFrame(raw)
+                    indicators, _ = calculate_binance_indicators(df, tf)
+
+                    # Fetch MTF data for better analysis
+                    mtf_data = {}
+                    try:
+                        raw_1h = await fetch_klines(session, sym, "1h", 250)
+                        raw_15m = await fetch_klines(session, sym, "15m", 250)
+                        if raw_1h:
+                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                        if raw_15m:
+                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+                    except Exception:
+                        pass
+
+                    # Fast AI verdict (mode=auto, 3-5 sec)
+                    ai_text = await ask_ai_analysis(
+                        sym, tf, indicators, mode="auto", mtf_data=mtf_data
+                    )
+
+                    long_pct, short_pct = parse_confidence_from_ai(ai_text or "")
+                    adx_val = indicators.get("adx", 0)
+                    new_tier = classify_signal(long_pct, short_pct, adx_val)
+
+                    if new_tier == "full":
+                        remove_monitor(m["key"])
+                        direction = "LONG" if long_pct > short_pct else "SHORT"
+                        conf = max(long_pct, short_pct)
+                        current_price = indicators.get("close", 0)
+
+                        logging.info(f"🟢 UPGRADED: {sym} → {direction} {conf}% (was monitor)")
+
+                        # Send notification to group
+                        short_sym = sym.replace("USDT", "")
+                        upgrade_text = (
+                            f"🟢 UPGRADE from MONITOR\n"
+                            f"${short_sym} {direction} {conf}%\n"
+                            f"📊 ADX: {adx_val:.0f} | Was: {m.get('reason', '?')}\n"
+                            f"💰 Entry: ${current_price}\n"
+                            f"💼 REC: 1x | 2%"
+                        )
+                        try:
+                            tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                            await session.post(tg_url, json={
+                                "chat_id": GROUP_CHAT_ID,
+                                "text": upgrade_text
+                            }, timeout=10)
+                        except Exception as e:
+                            logging.error(f"❌ Monitor upgrade send: {e}")
+
+                        # Add to breakout log as full signal
+                        add_breakout_entry(sym, tf, m.get("entry_price", 0), current_price, "monitor_upgrade",
+                                          ai_direction=direction,
+                                          ai_entry=current_price,
+                                          ai_sl=None, ai_tp=None,
+                                          ai_leverage=FIXED_LEVERAGE,
+                                          ai_deposit_pct=FIXED_DEPOSIT_PCT)
+                    else:
+                        update_monitor_checked(m["key"])
+                        logging.info(f"🔵 MONITOR still: {sym} (conf {max(long_pct,short_pct)}%, ADX {adx_val:.0f})")
+
+                    await asyncio.sleep(10)  # rate limit between checks
+
+                except Exception as e:
+                    logging.error(f"❌ Monitor {m.get('symbol','?')}: {e}")
+                    update_monitor_checked(m["key"])
+
+        except Exception as e:
+            logging.error(f"❌ Monitor loop error: {e}")
+            await asyncio.sleep(60)

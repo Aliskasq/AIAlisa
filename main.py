@@ -20,6 +20,11 @@ from agent.analyzer import ask_ai_analysis
 from agent.square_publisher import auto_square_poster
 
 from core.tg_listener import SCAN_SCHEDULE
+from core.signal_pipeline import (
+    classify_signal, parse_confidence_from_ai,
+    check_volume_filter, get_volume_12h,
+    add_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT
+)
 
 # Setup logging
 logging.basicConfig(
@@ -97,6 +102,10 @@ async def main():
 
         # Start log cleanup task (23:55 UTC daily)
         asyncio.create_task(log_cleanup_task())
+
+        # Start monitor recheck loop (re-evaluates MONITOR signals every 30 min)
+        from core.signal_pipeline import monitor_recheck_loop
+        asyncio.create_task(monitor_recheck_loop(session))
 
 
         while True:
@@ -335,7 +344,26 @@ async def main():
                     await asyncio.gather(*prep_tasks)
 
                     ready_count = sum(1 for item in breakout_queue if item.get("ready"))
-                    logging.info(f"✅ Data ready for {ready_count}/{len(breakout_queue)} breakouts. Starting AI queue...")
+                    logging.info(f"✅ Data ready for {ready_count}/{len(breakout_queue)} breakouts.")
+
+                    # Phase 1.5: Volume filter — skip low-volume coins before wasting AI calls
+                    filtered_queue = []
+                    for item in breakout_queue:
+                        if not item.get("ready"):
+                            filtered_queue.append(item)  # keep for error handling
+                            continue
+                        try:
+                            volume_12h = await get_volume_12h(session, item["symbol"])
+                            if not check_volume_filter(volume_12h):
+                                logging.info(f"⏭ {item['symbol']}: 12h vol ${volume_12h:,.0f} < $500K, skip")
+                                alerts_to_remove.append(item["alert"])
+                                continue
+                            item["volume_12h"] = volume_12h
+                        except Exception as e:
+                            logging.warning(f"⚠️ Volume check failed for {item['symbol']}: {e}, allowing through")
+                        filtered_queue.append(item)
+                    breakout_queue = filtered_queue
+                    logging.info(f"📋 After volume filter: {len([i for i in breakout_queue if i.get('ready')])} breakouts. Starting AI queue...")
 
                     # Phase 2: Sequential AI calls (through lock + cooldown = no 429)
                     def _is_ai_error(text):
@@ -363,10 +391,10 @@ async def main():
 
                         logging.info(f"🤖 AI queue [{idx+1}/{len(breakout_queue)}]: {sym} {tf}")
 
-                        # AI call (goes through asyncio.Lock + 10s cooldown automatically)
+                        # AI call — mode="auto" for fast verdict (3-5 sec, no reasoning)
                         ai_verdict_full = await ask_ai_analysis(
                             sym, tf, last_indic_row, item.get("dynamic_trigger"),
-                            extended=True, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            mode="auto", mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                         )
 
                         # Extract Part 1 only (before ---) for chart caption
@@ -389,7 +417,7 @@ async def main():
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, tf, last_indic_row, dynamic_trigger,
-                                extended=True, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                                mode="auto", mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                             )
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
@@ -404,7 +432,49 @@ async def main():
                                 await delete_telegram_message(session, error_msg_id)
                                 error_msg_id = None
 
-                        # Send chart
+                        # === SIGNAL PIPELINE CLASSIFICATION ===
+                        _ai_dir = ""
+                        _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
+                        if ai_verdict and not ai_has_error:
+                            import re as _re
+                            _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT|SKIP)", ai_verdict, _re.IGNORECASE)
+                            if _verdict_match:
+                                _ai_dir = _verdict_match.group(1).upper()
+                            else:
+                                _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
+                                if _all_dirs:
+                                    _ai_dir = _all_dirs[-1]
+
+                        # Parse confidence from AI and classify signal tier
+                        long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
+                        adx_value = last_indic_row.get("adx", 0)
+                        tier = classify_signal(long_pct, short_pct, adx_value)
+
+                        if tier == "monitor" and not ai_has_error:
+                            # 🔵 MONITOR — don't send as full signal, add to monitor queue
+                            reason = "flat_market" if adx_value < 20 else "low_confidence"
+                            direction = "LONG" if long_pct > short_pct else "SHORT"
+                            add_monitor(sym, tf, direction, long_pct, short_pct,
+                                       item["current_price"], reason)
+                            logging.info(f"🔵 MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
+                            # Add to breakout log as info-only (no P&L impact)
+                            add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
+                                               ai_direction="",  # empty = no trade
+                                               ai_entry=None, ai_sl=None, ai_tp=None,
+                                               ai_leverage=1, ai_deposit_pct=2.0)
+                            alerts_to_remove.append(item["alert"])
+                            continue
+
+                        elif tier == "info" and not ai_has_error:
+                            # ⚫ INFO — too low confidence, skip entirely
+                            logging.info(f"⚫ INFO: {sym} — too low confidence ({max(long_pct,short_pct)}%)")
+                            add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
+                                               ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None,
+                                               ai_leverage=1, ai_deposit_pct=2.0)
+                            alerts_to_remove.append(item["alert"])
+                            continue
+
+                        # 🟢 FULL SIGNAL — send chart + notification
                         is_sent = False
                         if ai_has_error:
                             is_sent = True
@@ -413,31 +483,16 @@ async def main():
                                 sym, full_df, line_data, tf, alert_type, session,
                                 dynamic_trigger, ai_verdict or ""
                             )
+                            logging.info(f"🟢 FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
 
                         if is_sent:
-                            _ai_dir = ""
-                            _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
-                            if ai_verdict:
-                                import re as _re
-                                _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT|SKIP)", ai_verdict, _re.IGNORECASE)
-                                if _verdict_match:
-                                    _ai_dir = _verdict_match.group(1).upper()
-                                else:
-                                    _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
-                                    if _all_dirs:
-                                        _ai_dir = _all_dirs[-1]
-                            _raw_lev = _ai_params.get("ai_leverage") if _ai_params else None
-                            _raw_dep = _ai_params.get("ai_deposit_pct") if _ai_params else None
-                            _capped_lev = min(_raw_lev, 3) if _raw_lev else None
-                            _capped_dep = min(_raw_dep, 2.0) if _raw_dep else 2.0
-
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
                                                ai_direction=_ai_dir,
                                                ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
                                                ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
                                                ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
-                                               ai_leverage=_capped_lev,
-                                               ai_deposit_pct=_capped_dep)
+                                               ai_leverage=FIXED_LEVERAGE,       # ALWAYS 1x
+                                               ai_deposit_pct=FIXED_DEPOSIT_PCT) # ALWAYS 2%
                             alerts_to_remove.append(item["alert"])
                         else:
                             logging.warning(f"🔄 Signal {sym} ({tf}) LEFT IN QUEUE. Will retry in 5 minutes.")

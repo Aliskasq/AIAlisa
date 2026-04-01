@@ -2176,7 +2176,7 @@ async def telegram_polling_loop(app_session):
                                         "bot_token": BOT_TOKEN
                                     }
 
-                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mtf_data=mtf_data, smc_data=smc_data)
+                                ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data)
 
                                 # Schedule delayed deletion of streaming message (15s after chart sent)
                                 async def _delayed_delete(sess, cid, mid, delay=15):
@@ -2356,7 +2356,7 @@ async def telegram_polling_loop(app_session):
                                     except Exception as e:
                                         logging.error(f"❌ SMC look error: {e}")
 
-                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mtf_data=mtf_data, smc_data=smc_data)
+                                    ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mode="scan", mtf_data=mtf_data, smc_data=smc_data)
                                     await send_response(app_session, chat_id, ai_msg, msg_id)
 
         except Exception as e:
