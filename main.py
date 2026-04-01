@@ -469,8 +469,12 @@ async def main():
                             continue
 
                         elif tier == "info" and not ai_has_error:
-                            # ⚫ INFO — too low confidence, skip entirely
-                            logging.info(f"⚫ INFO: {sym} — too low confidence ({max(long_pct,short_pct)}%)")
+                            # ⚫ INFO — low confidence, but still monitor (coin might show direction later)
+                            direction = "LONG" if long_pct > short_pct else "SHORT"
+                            add_monitor(sym, tf, direction, long_pct, short_pct,
+                                       item["current_price"], "low_confidence_info",
+                                       recheck_sec=3600)  # 1h interval (slower than monitor)
+                            logging.info(f"⚫ INFO→MONITOR: {sym} (conf {max(long_pct,short_pct)}%, recheck every 1h)")
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
                                                ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None,
                                                ai_leverage=1, ai_deposit_pct=2.0)
