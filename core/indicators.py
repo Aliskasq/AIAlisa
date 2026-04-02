@@ -752,6 +752,8 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "rsi_time_overbought": rsi_time_overbought,
         "rsi_time_oversold": rsi_time_oversold,
         "rsi_price_divergence": rsi_price_divergence,
+        "rsi_pullback_peak": rsi_pullback_peak,
+        "rsi_pullback_drop": rsi_pullback_drop,
         
         # SuperTrend History (50 candles)
         "st_bars_since_flip": st_bars_since_flip,
@@ -941,6 +943,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     
     # Pullback warning text
     pullback_text = ""
+    rsi_pullback_peak = indic.get("rsi_pullback_peak", 0)
+    rsi_pullback_drop = indic.get("rsi_pullback_drop", 0)
     if rsi_pullback_peak > 0 and rsi > 70:
         pullback_text = f"\n   ⚠️ PULLBACK HISTORY: last pullback started from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
         if rsi >= rsi_pullback_peak - 2:
