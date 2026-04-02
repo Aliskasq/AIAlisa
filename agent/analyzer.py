@@ -24,20 +24,49 @@ except ImportError:
 _ai_request_lock = asyncio.Lock()
 _ai_last_request_time = 0  # timestamp of last completed AI request
 
-# Fast verdict prompt for auto/monitor modes — no reasoning, 3-5 sec response
-FAST_VERDICT_PROMPT = """Read scorecard data. Output ONLY these fields:
+# Fast verdict prompt for auto/monitor modes — concise but complete
+FAST_VERDICT_PROMPT_EN = """You are a crypto trading analyst. Analyze the scorecard data and give a verdict.
 
-DIRECTION: LONG or SHORT or SKIP
-LONG_PCT: [number]
-SHORT_PCT: [number]
+IMPORTANT: Think concisely. Your entire response (including any internal reasoning) should stay under 5000 tokens total. Do NOT write long explanations — be sharp and direct.
+
+Output format:
+
+VERDICT: LONG or SHORT or SKIP
+LONG: [number]% / SHORT: [number]%
 ENTRY: [current price]
-SL: [2×ATR below entry for LONG, above for SHORT]
-TP: [3×ATR above entry for LONG, below for SHORT]
-REASON: [one sentence]
+SL: [2×ATR from entry]
+TP: [3×ATR from entry]
+LOGIC: [2-3 sentences — key factors driving the verdict]
+RISK: [1 sentence — main risk to watch]
 
-Weights: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
-If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
-Leverage: 1x. Deposit: 2%. No explanation needed."""
+Rules:
+- Weights: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
+- If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
+- Leverage: always 1x. Deposit: always 2%.
+- Respond in ENGLISH."""
+
+FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик. Проанализируй данные scorecard и дай вердикт.
+
+ВАЖНО: Думай кратко. Весь твой ответ (включая любые внутренние рассуждения) должен уложиться в 5000 токенов. НЕ пиши длинные объяснения — будь чётким и конкретным.
+
+Формат ответа:
+
+ВЕРДИКТ: ЛОНГ или ШОРТ или ПРОПУСК
+ЛОНГ: [число]% / ШОРТ: [число]%
+ВХОД: [текущая цена]
+СЛ: [2×ATR от входа]
+ТП: [3×ATR от входа]
+ЛОГИКА: [2-3 предложения — ключевые факторы вердикта]
+РИСК: [1 предложение — главный риск]
+
+Правила:
+- Веса: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
+- Если оба ниже 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
+- Плечо: всегда 1x. Депозит: всегда 2%.
+- Отвечай СТРОГО на РУССКОМ."""
+
+def get_fast_verdict_prompt(lang: str = "en") -> str:
+    return FAST_VERDICT_PROMPT_RU if lang == "ru" else FAST_VERDICT_PROMPT_EN
 
 
 # ---------------------------------------------------------
@@ -689,20 +718,19 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             }
             # Mode-based payload: auto=fast/no reasoning, scan=full/no reasoning, extended=reasoning
             if mode == "auto":
-                # Fast verdict for breakout push / monitor recheck — 3-5 sec
+                # Fast verdict for breakout push / monitor recheck
                 payload = {
                     "model": OPENROUTER_MODEL,
                     "messages": [
-                        {"role": "system", "content": FAST_VERDICT_PROMPT},
+                        {"role": "system", "content": get_fast_verdict_prompt(lang)},
                         {"role": "user", "content": user_prompt}
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 500,
-                    # NO reasoning — scorecards already computed everything
+                    # No max_tokens limit — prompt instructs concise output
                 }
                 request_timeout = aiohttp.ClientTimeout(total=30)
             elif mode == "extended":
-                # Deep analysis — reasoning with 2K token cap
+                # Deep analysis — reasoning enabled
                 payload = {
                     "model": OPENROUTER_MODEL,
                     "messages": [
@@ -710,8 +738,8 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                         {"role": "user", "content": user_prompt}
                     ],
                     "temperature": 0.15,
-                    "max_tokens": 4000,
-                    "reasoning": {"enabled": True, "max_tokens": 2000},
+                    "reasoning": {"enabled": True},
+                    # No max_tokens limit — prompt instructs concise output
                 }
                 request_timeout = aiohttp.ClientTimeout(total=90)
             else:
@@ -723,8 +751,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                         {"role": "user", "content": user_prompt}
                     ],
                     "temperature": 0.15,
-                    "max_tokens": 1500,
-                    # NO reasoning for scan mode
+                    # No max_tokens limit — prompt instructs concise output
                 }
                 request_timeout = aiohttp.ClientTimeout(total=60)
 

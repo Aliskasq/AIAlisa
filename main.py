@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params
+from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params, BOT_LANG
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
@@ -401,10 +401,10 @@ async def main():
                             ai_tf = "4H"
                             logging.info(f"📊 1D breakout {sym}: using 4H indicators for AI (1D = geometry only)")
 
-                        # AI call — mode="auto" for fast verdict (3-5 sec, no reasoning)
+                        # AI call — mode="auto" for fast verdict
                         ai_verdict_full = await ask_ai_analysis(
                             sym, ai_tf, ai_indic, item.get("dynamic_trigger"),
-                            mode="auto", mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            mode="auto", lang=BOT_LANG, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                         )
 
                         # Extract Part 1 only (before ---) for chart caption
@@ -427,7 +427,7 @@ async def main():
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, tf, last_indic_row, dynamic_trigger,
-                                mode="auto", mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                                mode="auto", lang=BOT_LANG, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                             )
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
@@ -447,13 +447,16 @@ async def main():
                         _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
                         if ai_verdict and not ai_has_error:
                             import re as _re
-                            _verdict_match = _re.search(r"VERDICT[:\s]*(LONG|SHORT|SKIP)", ai_verdict, _re.IGNORECASE)
+                            # Parse verdict: English (LONG/SHORT/SKIP) or Russian (ЛОНГ/ШОРТ/ПРОПУСК)
+                            _verdict_match = _re.search(r"(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК)", ai_verdict, _re.IGNORECASE)
                             if _verdict_match:
-                                _ai_dir = _verdict_match.group(1).upper()
+                                _raw_dir = _verdict_match.group(1).upper()
+                                _ai_dir = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP"}.get(_raw_dir, _raw_dir)
                             else:
-                                _all_dirs = _re.findall(r"\b(LONG|SHORT)\b", ai_verdict.upper())
+                                _all_dirs = _re.findall(r"\b(LONG|SHORT|ЛОНГ|ШОРТ)\b", ai_verdict.upper())
                                 if _all_dirs:
-                                    _ai_dir = _all_dirs[-1]
+                                    _raw = _all_dirs[-1]
+                                    _ai_dir = {"ЛОНГ": "LONG", "ШОРТ": "SHORT"}.get(_raw, _raw)
 
                         # Parse confidence from AI and classify signal tier
                         long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
@@ -474,19 +477,6 @@ async def main():
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
                                                ai_direction="",  # empty = no trade
                                                ai_entry=None, ai_sl=None, ai_tp=None,
-                                               ai_leverage=1, ai_deposit_pct=2.0)
-                            alerts_to_remove.append(item["alert"])
-                            continue
-
-                        elif tier == "info" and not ai_has_error:
-                            # ⚫ INFO — low confidence, but still monitor (coin might show direction later)
-                            direction = "LONG" if long_pct > short_pct else "SHORT"
-                            add_monitor(sym, tf, direction, long_pct, short_pct,
-                                       item["current_price"], "low_confidence_info",
-                                       recheck_sec=3600)  # 1h interval (slower than monitor)
-                            logging.info(f"⚫ INFO→MONITOR: {sym} (conf {max(long_pct,short_pct)}%, recheck every 1h)")
-                            add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
-                                               ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None,
                                                ai_leverage=1, ai_deposit_pct=2.0)
                             alerts_to_remove.append(item["alert"])
                             continue

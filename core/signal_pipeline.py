@@ -1,11 +1,10 @@
 """
-Signal Pipeline — two-tier signal system with hourly re-monitoring.
+Signal Pipeline — two-tier signal system with 30-min re-monitoring.
 
-FULL SIGNAL (🟢): confidence ≥ 65% AND ADX > 20 → trade entry
-MONITOR   (🔵): confidence 50-64% OR ADX < 20  → hourly re-check
-INFO ONLY (⚫): confidence < 50%                → show, don't trade
+FULL SIGNAL (🟢): confidence ≥ 65% AND ADX > 20 → trade entry (+ momentum override)
+MONITOR   (🔵): everything else                  → 30-min re-check (indicators first, AI only if promising)
 
-Monitor loop re-analyzes every hour. If conditions improve → upgrade to FULL.
+Monitor loop: Phase 1 = indicators only (free). Phase 2 = AI only when scorecard improves.
 Expires after 24h without upgrade.
 """
 
@@ -21,7 +20,6 @@ RECHECK_INTERVAL_SEC = 1800  # 30 minutes from each signal's OWN detection time
 
 # --- Confidence threshold ---
 CONFIDENCE_FULL = 65      # % to issue full signal
-CONFIDENCE_MONITOR = 50   # % to put on watch
 ADX_TRENDING = 20         # minimum ADX for trending market
 
 # --- Fixed risk params ---
@@ -40,7 +38,7 @@ def classify_signal(long_pct: float, short_pct: float, adx: float,
     RISING ADX BONUS: If ADX is rising (trend strengthening), treat ADX 25+ as strong.
     This prevents missing +200% pumps where RSI is always overbought.
     
-    Returns: "full", "monitor", or "info"
+    Returns: "full" or "monitor"
     """
     confidence = max(long_pct, short_pct)
     
@@ -55,31 +53,37 @@ def classify_signal(long_pct: float, short_pct: float, adx: float,
     
     if confidence >= CONFIDENCE_FULL and effective_adx >= ADX_TRENDING:
         return "full"
-    elif confidence >= CONFIDENCE_MONITOR:
-        return "monitor"
     else:
-        return "info"
+        return "monitor"
 
 
 def parse_confidence_from_ai(ai_text: str) -> tuple:
     """
     Extract LONG% and SHORT% from AI response text.
-    Looks for pattern like "LONG 62% / SHORT 38%" or "Overall: LONG 55% / SHORT 45%"
+    Supports both English and Russian formats:
+    - "LONG 62% / SHORT 38%"
+    - "ЛОНГ: 62% / ШОРТ: 38%"
+    - "ЛОНГ 62% / ШОРТ 38%"
     
     Returns: (long_pct, short_pct) or (50, 50) if not found
     """
     import re
     
-    # Pattern: "LONG XX% / SHORT YY%" or "LONG XX / SHORT YY"
-    pattern = r'LONG\s*(\d+)%?\s*/\s*SHORT\s*(\d+)%?'
-    matches = re.findall(pattern, ai_text, re.IGNORECASE)
+    # English: "LONG XX% / SHORT YY%"
+    pattern_en = r'LONG[:\s]*(\d+)%?\s*/\s*SHORT[:\s]*(\d+)%?'
+    matches = re.findall(pattern_en, ai_text, re.IGNORECASE)
     
     if matches:
-        # Take the LAST match (usually the "Overall" line)
         last_match = matches[-1]
-        long_pct = float(last_match[0])
-        short_pct = float(last_match[1])
-        return (long_pct, short_pct)
+        return (float(last_match[0]), float(last_match[1]))
+    
+    # Russian: "ЛОНГ XX% / ШОРТ YY%"
+    pattern_ru = r'ЛОНГ[:\s]*(\d+)%?\s*/\s*ШОРТ[:\s]*(\d+)%?'
+    matches = re.findall(pattern_ru, ai_text, re.IGNORECASE)
+    
+    if matches:
+        last_match = matches[-1]
+        return (float(last_match[0]), float(last_match[1]))
     
     return (50, 50)
 
@@ -491,8 +495,9 @@ async def monitor_recheck_loop(session):
                     except Exception:
                         pass
 
+                    from config import BOT_LANG
                     ai_text = await ask_ai_analysis(
-                        sym, tf, indicators, mode="auto", mtf_data=mtf_data
+                        sym, tf, indicators, mode="auto", lang=BOT_LANG, mtf_data=mtf_data
                     )
                     ai_calls += 1
 
@@ -530,7 +535,7 @@ async def monitor_recheck_loop(session):
 
                         ai_full = await ask_ai_analysis(
                             sym, tf, indicators, mode="extended",
-                            extended=True, mtf_data=mtf_data
+                            extended=True, lang=BOT_LANG, mtf_data=mtf_data
                         )
                         ai_calls += 1
 
