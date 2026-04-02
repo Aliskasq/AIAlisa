@@ -542,9 +542,13 @@ async def monitor_recheck_loop(session):
                         ai_calls += 1
 
                         # Extract brief part for caption
-                        ai_brief = ai_full
-                        if ai_full and "---" in ai_full:
-                            ai_brief = ai_full.split("---", 1)[0].strip()
+                        if not ai_full or ai_full.startswith("❌"):
+                            ai_brief = f"⚠️ AI timeout — но сигнал апгрейднулся:\n{sym} {tf} {direction} {conf}%"
+                            logging.warning(f"⚠️ UPGRADED {sym} but AI returned: {ai_full}")
+                        else:
+                            ai_brief = ai_full
+                            if "---" in ai_full:
+                                ai_brief = ai_full.split("---", 1)[0].strip()
 
                         # Draw chart
                         chart_path = None

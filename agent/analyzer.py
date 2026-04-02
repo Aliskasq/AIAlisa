@@ -820,7 +820,13 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                                     headers=headers, json=payload, timeout=request_timeout) as response:
                                 if response.status == 200:
                                     data = await response.json()
-                                    candidate = data["choices"][0]["message"]["content"].strip()
+                                    raw_content = data["choices"][0]["message"]["content"]
+                                    if raw_content is None:
+                                        logging.warning(f"⚠️ [OpenRouter Direct] content=null (attempt {attempt+1}), retrying...")
+                                        if attempt == 0:
+                                            await asyncio.sleep(3)
+                                        continue
+                                    candidate = raw_content.strip()
                                     if _is_valid_analysis(candidate):
                                         ai_response = candidate
                                         logging.info("✅ [OpenRouter Direct] AI inference complete.")

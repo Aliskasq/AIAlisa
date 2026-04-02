@@ -1224,6 +1224,8 @@ async def telegram_polling_loop(app_session):
                                 "    _Top 10 growth/drops 24h / Топ 10 рост/падение_\n\n"
                                 "📊 `/trend`\n"
                                 "    _All breakouts since scan / Все пробития_\n\n"
+                                "👁 `/monitor`\n"
+                                "    _Coins in monitor / Монеты в мониторинге_\n\n"
                                 "🔔 `/alert BTC 69500`\n"
                                 "    _Price alert / Алерт на цену_\n"
                                 "🔔 `/alert list` — _active / активные_\n"
@@ -1764,6 +1766,64 @@ async def telegram_polling_loop(app_session):
                         # ==========================================
                         # TREND BREAKOUT LIST (/trend) — simple breakout list
                         # ==========================================
+                        # ── /monitor — show all coins currently in monitor ──
+                        if text.startswith("/monitor") or text in ["монитор", "мониторинг"]:
+                            from core.signal_pipeline import load_monitors
+                            monitors = load_monitors()
+                            if not monitors:
+                                no_mon = "📭 No coins in monitor." if lang_pref == "en" else "📭 Нет монет в мониторинге."
+                                await send_response(app_session, chat_id, no_mon, msg_id)
+                                continue
+
+                            # Fetch current prices for all monitored symbols
+                            mon_symbols = list(set(m["symbol"] for m in monitors))
+                            current_prices = {}
+                            try:
+                                async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                                    if resp.status == 200:
+                                        tickers = await resp.json()
+                                        price_map = {t["symbol"]: float(t["price"]) for t in tickers}
+                                        for s in mon_symbols:
+                                            if s in price_map:
+                                                current_prices[s] = price_map[s]
+                            except Exception as e:
+                                logging.error(f"❌ /monitor price fetch: {e}")
+
+                            header = "📊 *Мониторинг*\n\n" if lang_pref == "ru" else "📊 *Monitor*\n\n"
+                            lines = []
+                            for m in sorted(monitors, key=lambda x: x.get("symbol", "")):
+                                sym = m["symbol"]
+                                tf = m.get("tf", "?")
+                                direction = m.get("direction", "?").upper()
+                                entry = m.get("entry_price", 0)
+                                reason = m.get("reason", "")
+                                checks = m.get("check_count", 0)
+                                cur = current_prices.get(sym, 0)
+
+                                if entry and entry > 0 and cur > 0:
+                                    pct = ((cur - entry) / entry) * 100
+                                    pct_str = f"{pct:+.2f}%"
+                                else:
+                                    pct_str = "—"
+
+                                emoji = "🟢" if "long" in direction.lower() else "🔴" if "short" in direction.lower() else "⚪"
+                                lines.append(
+                                    f"{emoji} *{sym}* {tf} {direction}\n"
+                                    f"   Вход: `{entry:.6f}` → Сейчас: `{cur:.6f}` ({pct_str})\n"
+                                    f"   Причина: {reason} | Проверок: {checks}"
+                                )
+
+                            # Split into messages if too many (Telegram 4096 char limit)
+                            chunk = header
+                            for line in lines:
+                                if len(chunk) + len(line) + 2 > 3900:
+                                    await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
+                                    chunk = ""
+                                chunk += line + "\n\n"
+                            if chunk.strip():
+                                await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
+                            continue
+
                         if text.startswith("/trend") or text in ["тренд", "тренды", "пробития"]:
                             log = load_breakout_log()
                             if not log:
