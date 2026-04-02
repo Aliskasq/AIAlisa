@@ -11,6 +11,23 @@ def rma(series, length):
         res[i] = alpha * val + (1 - alpha) * res[i - 1]
     return pd.Series(res, index=series.index)
 
+
+def calc_dema(series, length):
+    """Double EMA — used by CCMI (Chande Composite Momentum Index)"""
+    e1 = series.ewm(span=length, adjust=False).mean()
+    e2 = e1.ewm(span=length, adjust=False).mean()
+    return 2 * e1 - e2
+
+
+def calc_cmo_component(src, period):
+    """Chande Momentum Oscillator for given period, DEMA-smoothed (period 3)."""
+    diff = src.diff()
+    up_sum = diff.where(diff > 0, 0.0).rolling(period).sum()
+    dn_sum = (-diff.where(diff < 0, 0.0)).rolling(period).sum()
+    total = up_sum + dn_sum
+    raw_cmo = 100 * (up_sum - dn_sum) / total.replace(0, np.nan)
+    return calc_dema(raw_cmo.fillna(0), 3)
+
 def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     """
     Calculates basic (EMA, RSI, MACD, Fibo) + advanced indicators
@@ -180,6 +197,111 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low']).replace(0, np.nan)
     mf_volume = mf_multiplier * df['volume']
     df['cmf'] = mf_volume.rolling(20).sum() / df['volume'].rolling(20).sum()
+
+    # ==========================================
+    # 🆕 CCMI — Chande Composite Momentum Index
+    # ==========================================
+    close_s = df['close']
+
+    cmo5 = calc_cmo_component(close_s, 5)
+    cmo10 = calc_cmo_component(close_s, 10)
+    cmo20 = calc_cmo_component(close_s, 20)
+
+    std5 = close_s.rolling(5).std().fillna(0)
+    std10 = close_s.rolling(10).std().fillna(0)
+    std20 = close_s.rolling(20).std().fillna(0)
+
+    std_sum = std5 + std10 + std20
+    ccmi_raw = (std5 * cmo5 + std10 * cmo10 + std20 * cmo20) / std_sum.replace(0, np.nan)
+    ccmi_raw = ccmi_raw.fillna(0)
+
+    df['ccmi'] = ccmi_raw.ewm(span=3, adjust=False).mean()
+    df['ccmi_signal'] = ccmi_raw.rolling(5).mean()
+
+    # ==========================================
+    # 🆕 IMI — Intraday Momentum Index
+    # ==========================================
+    imi_length = 14
+    body_gain = (close_s - df['open']).where(close_s > df['open'], 0.0)
+    body_loss = (df['open'] - close_s).where(close_s < df['open'], 0.0)
+
+    imi_upt = body_gain.rolling(imi_length).sum()
+    imi_dnt = body_loss.rolling(imi_length).sum()
+    imi_total = imi_upt + imi_dnt
+    df['imi'] = (100 * imi_upt / imi_total.replace(0, np.nan)).fillna(50)
+    df['imi_ma'] = df['imi'].ewm(span=6, adjust=False).mean()
+
+    # ==========================================
+    # 🆕 RSI-Momentum Divergence
+    # ==========================================
+    mom10 = close_s.diff(10)
+    delta_mom = mom10.diff()
+    gain_mom = delta_mom.where(delta_mom > 0, 0.0)
+    loss_mom = -delta_mom.where(delta_mom < 0, 0.0)
+    avg_g_mom = rma(gain_mom.fillna(0), 14)
+    avg_l_mom = rma(loss_mom.fillna(0), 14)
+    rs_mom = avg_g_mom / avg_l_mom.replace(0, np.nan)
+    df['rsi_mom'] = (100 - (100 / (1 + rs_mom))).fillna(50)
+
+    rsi_mom_bull_div = False
+    rsi_mom_bear_div = False
+    rsi_mom_bull_div_detail = ""
+    rsi_mom_bear_div_detail = ""
+
+    if len(df) >= 60:
+        rsi_mom_arr = df['rsi_mom'].values
+        low_arr = df['low'].values
+        high_arr = df['high'].values
+        n = len(df)
+        pivot_lr = 5
+
+        pivot_lows = []
+        for i in range(pivot_lr, n - pivot_lr):
+            is_pivot = True
+            for j in range(1, pivot_lr + 1):
+                if rsi_mom_arr[i] > rsi_mom_arr[i - j] or rsi_mom_arr[i] > rsi_mom_arr[i + j]:
+                    is_pivot = False
+                    break
+            if is_pivot:
+                pivot_lows.append(i)
+
+        pivot_highs = []
+        for i in range(pivot_lr, n - pivot_lr):
+            is_pivot = True
+            for j in range(1, pivot_lr + 1):
+                if rsi_mom_arr[i] < rsi_mom_arr[i - j] or rsi_mom_arr[i] < rsi_mom_arr[i + j]:
+                    is_pivot = False
+                    break
+            if is_pivot:
+                pivot_highs.append(i)
+
+        if len(pivot_lows) >= 2:
+            curr_pl = pivot_lows[-1]
+            prev_pl = pivot_lows[-2]
+            bars_between = curr_pl - prev_pl
+            if 5 <= bars_between <= 50:
+                if low_arr[curr_pl] < low_arr[prev_pl] and rsi_mom_arr[curr_pl] > rsi_mom_arr[prev_pl]:
+                    rsi_mom_bull_div = True
+                    bars_ago = n - 1 - curr_pl
+                    rsi_mom_bull_div_detail = (
+                        f"Price LL ({low_arr[prev_pl]:.6f}->{low_arr[curr_pl]:.6f}) "
+                        f"but RSI-Mom HL ({rsi_mom_arr[prev_pl]:.1f}->{rsi_mom_arr[curr_pl]:.1f}), "
+                        f"{bars_ago} bars ago"
+                    )
+
+        if len(pivot_highs) >= 2:
+            curr_ph = pivot_highs[-1]
+            prev_ph = pivot_highs[-2]
+            bars_between = curr_ph - prev_ph
+            if 5 <= bars_between <= 50:
+                if high_arr[curr_ph] > high_arr[prev_ph] and rsi_mom_arr[curr_ph] < rsi_mom_arr[prev_ph]:
+                    rsi_mom_bear_div = True
+                    bars_ago = n - 1 - curr_ph
+                    rsi_mom_bear_div_detail = (
+                        f"Price HH ({high_arr[prev_ph]:.6f}->{high_arr[curr_ph]:.6f}) "
+                        f"but RSI-Mom LH ({rsi_mom_arr[prev_ph]:.1f}->{rsi_mom_arr[curr_ph]:.1f}), "
+                        f"{bars_ago} bars ago"
+                    )
 
     # ==========================================
     # ⏳ DYNAMIC PRICE CHANGE (1H/4H & 24H)
@@ -797,6 +919,21 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "cmf_trend_30": cmf_trend_30,
         "cmf_avg_30": round(cmf_avg_30, 3),
         "cmf_positive_bars_30": cmf_positive_bars_30,
+
+        # CCMI (Chande Composite Momentum Index)
+        "ccmi": round(float(last['ccmi']), 2) if not pd.isna(last['ccmi']) else 0,
+        "ccmi_signal": round(float(last['ccmi_signal']), 2) if not pd.isna(last['ccmi_signal']) else 0,
+
+        # IMI (Intraday Momentum Index)
+        "imi": round(float(last['imi']), 1) if not pd.isna(last['imi']) else 50,
+        "imi_ma": round(float(last['imi_ma']), 1) if not pd.isna(last['imi_ma']) else 50,
+
+        # RSI-Momentum Divergence
+        "rsi_mom": round(float(last['rsi_mom']), 1) if not pd.isna(last['rsi_mom']) else 50,
+        "rsi_mom_bull_div": rsi_mom_bull_div,
+        "rsi_mom_bear_div": rsi_mom_bear_div,
+        "rsi_mom_bull_div_detail": rsi_mom_bull_div_detail,
+        "rsi_mom_bear_div_detail": rsi_mom_bear_div_detail,
     }
 
     return last_indic_row, df
@@ -1145,6 +1282,87 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
                    f"   → {cmf_signal}")
     raw_lines.append(cmf_analysis)
 
+    # ── CCMI (Chande Composite Momentum Index) ──
+    ccmi_val = indic.get('ccmi', 0)
+    ccmi_sig = indic.get('ccmi_signal', 0)
+    ccmi_crossover = ccmi_val > ccmi_sig
+
+    if ccmi_val > 70:
+        ccmi_signal_txt = f"⚠️ OVERBOUGHT ({ccmi_val:.0f}) — momentum extreme"
+    elif ccmi_val < -70:
+        ccmi_signal_txt = f"⚠️ OVERSOLD ({ccmi_val:.0f}) — momentum extreme"
+    elif ccmi_val > 30 and ccmi_crossover:
+        ccmi_signal_txt = f"🟢 BULLISH (above signal, momentum rising)"
+    elif ccmi_val > 0:
+        ccmi_signal_txt = f"🟢 BULLISH ({'accelerating' if ccmi_crossover else 'decelerating'})"
+    elif ccmi_val < -30 and not ccmi_crossover:
+        ccmi_signal_txt = f"🔴 BEARISH (below signal, momentum falling)"
+    elif ccmi_val < 0:
+        ccmi_signal_txt = f"🔴 BEARISH ({'recovering' if ccmi_crossover else 'accelerating down'})"
+    else:
+        ccmi_signal_txt = f"⚪ NEUTRAL"
+
+    idx += 1
+    ccmi_analysis = (f"{idx}. CCMI: {ccmi_val:.1f} | Signal: {ccmi_sig:.1f} | "
+                    f"Cross: {'ABOVE ↑' if ccmi_crossover else 'BELOW ↓'}\n"
+                    f"   Multi-period momentum (5/10/20) volatility-weighted\n"
+                    f"   → {ccmi_signal_txt}")
+    raw_lines.append(ccmi_analysis)
+
+    # ── IMI (Intraday Momentum Index) ──
+    imi_val = indic.get('imi', 50)
+    imi_ma_val = indic.get('imi_ma', 50)
+
+    if imi_val > 70:
+        imi_signal_txt = f"🟢 STRONG BUYING pressure ({imi_val:.0f}) — buyers dominate candle bodies"
+    elif imi_val > 50:
+        imi_signal_txt = f"🟢 BULLISH pressure ({imi_val:.0f})"
+    elif imi_val < 20:
+        imi_signal_txt = f"🔴 STRONG SELLING pressure ({imi_val:.0f}) — sellers dominate candle bodies"
+    elif imi_val < 50:
+        imi_signal_txt = f"🔴 BEARISH pressure ({imi_val:.0f})"
+    else:
+        imi_signal_txt = f"⚪ NEUTRAL (balanced)"
+
+    idx += 1
+    imi_analysis = (f"{idx}. IMI: {imi_val:.1f} | MA(6): {imi_ma_val:.1f} | "
+                   f"{'OB zone' if imi_val > 70 else ('OS zone' if imi_val < 20 else 'Normal')}\n"
+                   f"   Candle body pressure (close vs open) — what RSI doesn't see\n"
+                   f"   → {imi_signal_txt}")
+    raw_lines.append(imi_analysis)
+
+    # ── RSI-Momentum Divergence ──
+    rsi_mom_val = indic.get('rsi_mom', 50)
+    rsi_mom_bull = indic.get('rsi_mom_bull_div', False)
+    rsi_mom_bear = indic.get('rsi_mom_bear_div', False)
+    rsi_mom_bull_detail = indic.get('rsi_mom_bull_div_detail', '')
+    rsi_mom_bear_detail = indic.get('rsi_mom_bear_div_detail', '')
+
+    div_lines = []
+    if rsi_mom_bull:
+        div_lines.append(f"   🟢 BULLISH DIVERGENCE: {rsi_mom_bull_detail}")
+    if rsi_mom_bear:
+        div_lines.append(f"   🔴 BEARISH DIVERGENCE: {rsi_mom_bear_detail}")
+    if not div_lines:
+        div_lines.append(f"   No divergence detected")
+
+    if rsi_mom_bear:
+        rsi_mom_signal_txt = f"⚠️ BEARISH REVERSAL WARNING — price momentum diverging"
+    elif rsi_mom_bull:
+        rsi_mom_signal_txt = f"⚠️ BULLISH REVERSAL SIGNAL — price momentum diverging"
+    elif rsi_mom_val > 60:
+        rsi_mom_signal_txt = f"🟢 BULLISH (momentum accelerating)"
+    elif rsi_mom_val < 40:
+        rsi_mom_signal_txt = f"🔴 BEARISH (momentum decelerating)"
+    else:
+        rsi_mom_signal_txt = f"⚪ NEUTRAL"
+
+    idx += 1
+    rsi_mom_analysis = (f"{idx}. RSI-Mom: {rsi_mom_val:.1f} (RSI of momentum(10) — 2nd derivative of price)\n"
+                       + "\n".join(div_lines) + "\n"
+                       f"   → {rsi_mom_signal_txt}")
+    raw_lines.append(rsi_mom_analysis)
+
     # ── WEIGHTED VOTING SCORECARD ──
     bullish_votes = 0
     bearish_votes = 0
@@ -1176,6 +1394,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         ("StochRSI", stoch_signal, 1.0),
         ("MFI", mfi_signal, 1.0),
         ("CMF", cmf_signal, 1.0),
+        ("CCMI", ccmi_signal_txt, 1.0),
+        ("IMI", imi_signal_txt, 1.0),
+        ("RSI-Mom", rsi_mom_signal_txt, 1.0 if (rsi_mom_bull or rsi_mom_bear) else 0.5),
     ])
     
     for name, signal, weight in voting_indicators:

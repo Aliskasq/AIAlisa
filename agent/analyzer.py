@@ -728,7 +728,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     "temperature": 0.1,
                     # No max_tokens limit — prompt instructs concise output
                 }
-                request_timeout = aiohttp.ClientTimeout(total=30)
+                request_timeout = aiohttp.ClientTimeout(total=180)
             elif mode == "extended":
                 # Deep analysis — reasoning enabled
                 payload = {
@@ -741,7 +741,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     "reasoning": {"enabled": True},
                     # No max_tokens limit — prompt instructs concise output
                 }
-                request_timeout = aiohttp.ClientTimeout(total=90)
+                request_timeout = aiohttp.ClientTimeout(total=180)
             else:
                 # scan (default) — full prompt, no reasoning
                 payload = {
@@ -753,7 +753,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     "temperature": 0.15,
                     # No max_tokens limit — prompt instructs concise output
                 }
-                request_timeout = aiohttp.ClientTimeout(total=60)
+                request_timeout = aiohttp.ClientTimeout(total=180)
 
             # === REAL-TIME SSE STREAMING to Telegram ===
             if telegram_stream:
