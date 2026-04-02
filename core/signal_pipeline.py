@@ -495,9 +495,11 @@ async def monitor_recheck_loop(session):
                     except Exception:
                         pass
 
-                    from config import BOT_LANG
+                    from core.tg_listener import get_chat_lang
+                    from config import GROUP_CHAT_ID
+                    _lang = get_chat_lang(GROUP_CHAT_ID)
                     ai_text = await ask_ai_analysis(
-                        sym, tf, indicators, mode="auto", lang=BOT_LANG, mtf_data=mtf_data
+                        sym, tf, indicators, mode="auto", lang=_lang, mtf_data=mtf_data
                     )
                     ai_calls += 1
 
@@ -535,7 +537,7 @@ async def monitor_recheck_loop(session):
 
                         ai_full = await ask_ai_analysis(
                             sym, tf, indicators, mode="extended",
-                            extended=True, lang=BOT_LANG, mtf_data=mtf_data
+                            extended=True, lang=_lang, mtf_data=mtf_data
                         )
                         ai_calls += 1
 

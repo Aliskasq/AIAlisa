@@ -17,8 +17,7 @@ GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
 
-# Bot language for auto-push signals and monitor upgrades ("ru" or "en")
-BOT_LANG = os.getenv("BOT_LANG", "ru")
+
 
 # Binance Square
 SQUARE_OPENAPI_KEY = os.getenv("SQUARE_OPENAPI_KEY")

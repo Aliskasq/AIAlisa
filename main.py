@@ -7,14 +7,14 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params, BOT_LANG
+from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params, GROUP_CHAT_ID
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
 import aiohttp
 
 # --- AI AND INDICATOR IMPORTS ---
-from core.tg_listener import telegram_polling_loop, auto_trend_sender, price_alert_monitor
+from core.tg_listener import telegram_polling_loop, auto_trend_sender, price_alert_monitor, get_chat_lang
 from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 from agent.square_publisher import auto_square_poster
@@ -404,7 +404,7 @@ async def main():
                         # AI call — mode="auto" for fast verdict
                         ai_verdict_full = await ask_ai_analysis(
                             sym, ai_tf, ai_indic, item.get("dynamic_trigger"),
-                            mode="auto", lang=BOT_LANG, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            mode="auto", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                         )
 
                         # Extract Part 1 only (before ---) for chart caption
@@ -427,7 +427,7 @@ async def main():
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, tf, last_indic_row, dynamic_trigger,
-                                mode="auto", lang=BOT_LANG, mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                                mode="auto", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                             )
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
