@@ -23,7 +23,8 @@ from core.tg_listener import SCAN_SCHEDULE
 from core.signal_pipeline import (
     classify_signal, parse_confidence_from_ai,
     check_volume_filter, get_volume_12h,
-    add_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT
+    add_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
+    get_1d_emergency_warnings
 )
 
 # Setup logging
@@ -391,9 +392,18 @@ async def main():
 
                         logging.info(f"🤖 AI queue [{idx+1}/{len(breakout_queue)}]: {sym} {tf}")
 
+                        # For 1D breakouts: use 4H as primary indicators (not 1D)
+                        # 1D geometry detects trendline break, but trade decision = 4H+1H
+                        ai_indic = last_indic_row
+                        ai_tf = tf
+                        if tf == "1D" and "4H" in item.get("mtf_data", {}):
+                            ai_indic = item["mtf_data"]["4H"]
+                            ai_tf = "4H"
+                            logging.info(f"📊 1D breakout {sym}: using 4H indicators for AI (1D = geometry only)")
+
                         # AI call — mode="auto" for fast verdict (3-5 sec, no reasoning)
                         ai_verdict_full = await ask_ai_analysis(
-                            sym, tf, last_indic_row, item.get("dynamic_trigger"),
+                            sym, ai_tf, ai_indic, item.get("dynamic_trigger"),
                             mode="auto", mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                         )
 
@@ -481,7 +491,33 @@ async def main():
                             alerts_to_remove.append(item["alert"])
                             continue
 
-                        # 🟢 FULL SIGNAL — send chart + notification
+                        # 🟢 FULL SIGNAL — fetch 1D emergency warnings before sending
+                        emergency_warnings = []
+                        try:
+                            raw_1d = await fetch_klines(session, sym, "1d", 250)
+                            if raw_1d:
+                                from core.indicators import calculate_binance_indicators as _calc_indic
+                                indic_1d, _ = _calc_indic(pd.DataFrame(raw_1d), "1D")
+                                emergency_warnings = get_1d_emergency_warnings(indic_1d)
+                                if emergency_warnings:
+                                    logging.warning(f"⚠️ 1D EMERGENCY for {sym}: {emergency_warnings}")
+                                    # Append warnings to AI verdict caption
+                                    warn_text = "\n".join(emergency_warnings)
+                                    if ai_verdict:
+                                        ai_verdict = ai_verdict + f"\n\n📊 1D MACRO:\n{warn_text}"
+                                    
+                                    # For 1D breakout: use 4H indicators as primary (not 1D)
+                                    # 1D geometry detects the line, but trade decision uses 4H+1H
+                                    if tf == "1D" and "4H" not in item.get("mtf_data", {}):
+                                        try:
+                                            raw_4h_for_1d = await fetch_klines(session, sym, "4h", 250)
+                                            if raw_4h_for_1d:
+                                                item["mtf_data"]["4H"] = _calc_indic(pd.DataFrame(raw_4h_for_1d), "4H")[0]
+                                        except Exception:
+                                            pass
+                        except Exception as e:
+                            logging.error(f"❌ 1D emergency check for {sym}: {e}")
+
                         is_sent = False
                         if ai_has_error:
                             is_sent = True

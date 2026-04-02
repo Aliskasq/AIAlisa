@@ -287,30 +287,96 @@ def cleanup_expired_monitors():
         save_monitors(active)
 
 
+def get_1d_emergency_warnings(indicators_1d: dict) -> list:
+    """
+    Extract emergency-level warnings from 1D indicators.
+    
+    These are macro-level red flags that the 4H analysis can't see.
+    Only fires on EXTREME conditions — not normal overbought/oversold.
+    
+    Checked ONLY for FULL signals (not monitor/info — they don't trade).
+    Appended to AI prompt so the model can factor in macro risk.
+    
+    Returns: list of warning strings (empty = all clear)
+    """
+    warnings = []
+    
+    rsi = indicators_1d.get("rsi14", 50)
+    adx = indicators_1d.get("adx", 25)
+    bb_pctb = indicators_1d.get("bb_pctb", 0.5)
+    rsi_div = indicators_1d.get("rsi_price_divergence", "none")
+    obv_div = indicators_1d.get("obv_price_divergence", "none")
+    
+    # RSI > 85 on 1D = extreme overbought (very rare, usually precedes dump)
+    if rsi > 85:
+        warnings.append(f"⚠️ 1D RSI={rsi:.1f} EXTREME OVERBOUGHT — high reversal risk")
+    
+    # RSI < 15 on 1D = extreme oversold (capitulation)
+    if rsi < 15:
+        warnings.append(f"⚠️ 1D RSI={rsi:.1f} EXTREME OVERSOLD — capitulation zone")
+    
+    # ADX < 12 on 1D = dead market, no macro trend
+    if adx < 12:
+        warnings.append(f"⚠️ 1D ADX={adx:.1f} — no macro trend (flat market on daily)")
+    
+    # BB %B > 1.05 = price way above upper BB on daily (extended)
+    if bb_pctb > 1.05:
+        warnings.append(f"⚠️ 1D BB %B={bb_pctb:.2f} — price extended above daily Bollinger upper band")
+    
+    # BB %B < -0.05 = price way below lower BB on daily (capitulation)
+    if bb_pctb < -0.05:
+        warnings.append(f"⚠️ 1D BB %B={bb_pctb:.2f} — price below daily Bollinger lower band")
+    
+    # Bearish RSI divergence on 1D = major warning for longs
+    if rsi_div == "bearish":
+        warnings.append("⚠️ 1D BEARISH RSI DIVERGENCE — price rising but daily RSI falling")
+    
+    # Bullish RSI divergence on 1D = major warning for shorts
+    if rsi_div == "bullish":
+        warnings.append("⚠️ 1D BULLISH RSI DIVERGENCE — price falling but daily RSI rising")
+    
+    # OBV divergence on 1D
+    if obv_div == "bearish":
+        warnings.append("⚠️ 1D BEARISH OBV DIVERGENCE — volume not confirming price rise")
+    
+    return warnings
+
+
 def _scorecard_looks_promising(indicators: dict, mtf_data: dict = None) -> tuple:
     """
     Quick indicator-only check: does the scorecard suggest improvement?
     
-    Uses bull/bear percentages from 4H scorecard + MTF ADX/RSI.
+    Weighted assessment: 4H=50%, 1H=30%, 15m=20% (matches AI weights).
     NO AI call needed — just math on existing indicators.
     
-    Returns: (promising: bool, bull_pct: float, adx: float, reason: str)
+    Returns: (promising: bool, weighted_bull_pct: float, adx: float, reason: str)
     """
     from core.indicators import format_tf_summary
     import re
     
-    # Get 4H scorecard text and extract bull/bear %
-    summary = format_tf_summary(indicators, "4H")
+    def _extract_bull_pct(indic, tf_label):
+        summary = format_tf_summary(indic, tf_label)
+        match = re.search(r'LONG\s*(\d+)%\s*/\s*SHORT\s*(\d+)%', summary)
+        if match:
+            return float(match.group(1))
+        return 50
     
-    # Parse "LONG XX% / SHORT YY%" from scorecard
-    match = re.search(r'LONG\s*(\d+)%\s*/\s*SHORT\s*(\d+)%', summary)
-    if match:
-        bull_pct = float(match.group(1))
-    else:
-        bull_pct = 50
-    
+    # 4H (primary)
+    bull_4h = _extract_bull_pct(indicators, "4H")
     adx = indicators.get("adx", 0)
     adx_trend = indicators.get("adx_trend", "stable")
+    
+    # 1H + 15m from MTF data
+    bull_1h = 50
+    bull_15m = 50
+    if mtf_data:
+        if "1H" in mtf_data:
+            bull_1h = _extract_bull_pct(mtf_data["1H"], "1H")
+        if "15m" in mtf_data:
+            bull_15m = _extract_bull_pct(mtf_data["15m"], "15m")
+    
+    # Weighted bull %: 4H=50%, 1H=30%, 15m=20%
+    bull_pct = bull_4h * 0.50 + bull_1h * 0.30 + bull_15m * 0.20
     
     # Effective ADX with rising bonus
     effective_adx = adx + 5 if (adx_trend == "rising" and adx >= 20) else adx
@@ -374,7 +440,18 @@ async def monitor_recheck_loop(session):
                     interval = '1d' if tf == "1D" else '4h'
 
                     # === PHASE 1: INDICATORS ONLY (free, no API cost) ===
-                    raw = await fetch_klines(session, sym, interval, 250)
+                    # Fetch 4H + 1H + 15m in parallel for weighted scorecard
+                    phase1_tasks = [
+                        fetch_klines(session, sym, interval, 250),
+                        fetch_klines(session, sym, "1h", 250),
+                        fetch_klines(session, sym, "15m", 250),
+                    ]
+                    phase1_results = await asyncio.gather(*phase1_tasks, return_exceptions=True)
+                    
+                    raw = phase1_results[0] if not isinstance(phase1_results[0], Exception) else None
+                    raw_1h = phase1_results[1] if not isinstance(phase1_results[1], Exception) else None
+                    raw_15m = phase1_results[2] if not isinstance(phase1_results[2], Exception) else None
+                    
                     if not raw:
                         update_monitor_checked(m["key"])
                         continue
@@ -382,14 +459,12 @@ async def monitor_recheck_loop(session):
                     df = pd.DataFrame(raw)
                     indicators, _ = calculate_binance_indicators(df, tf)
 
-                    # Quick MTF check (1H for confirmation)
+                    # MTF indicators for weighted scorecard (4H=50%, 1H=30%, 15m=20%)
                     mtf_data = {}
-                    try:
-                        raw_1h = await fetch_klines(session, sym, "1h", 250)
-                        if raw_1h:
-                            mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
-                    except Exception:
-                        pass
+                    if raw_1h:
+                        mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                    if raw_15m:
+                        mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
                     # Check scorecard WITHOUT AI
                     promising, bull_pct, adx_val, reason = _scorecard_looks_promising(indicators, mtf_data)
@@ -435,8 +510,24 @@ async def monitor_recheck_loop(session):
 
                         logging.info(f"🟢 UPGRADED: {sym} → {direction} {conf}% (was {m.get('reason','?')})")
 
+                        # === 1D EMERGENCY CHECK (macro risk for upgraded signals) ===
+                        emergency_warnings = []
+                        try:
+                            raw_1d = await fetch_klines(session, sym, "1d", 250)
+                            if raw_1d:
+                                indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
+                                emergency_warnings = get_1d_emergency_warnings(indic_1d)
+                                if emergency_warnings:
+                                    logging.warning(f"⚠️ 1D EMERGENCY for {sym}: {emergency_warnings}")
+                        except Exception as e:
+                            logging.error(f"❌ 1D emergency check failed for {sym}: {e}")
+
                         # === FULL SIGNAL: chart + AI verdict (same as normal breakout) ===
                         # Get extended AI analysis for the signal
+                        # Append 1D warnings to indicators so AI sees them
+                        if emergency_warnings:
+                            indicators["_1d_emergency_warnings"] = emergency_warnings
+
                         ai_full = await ask_ai_analysis(
                             sym, tf, indicators, mode="extended",
                             extended=True, mtf_data=mtf_data
