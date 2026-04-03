@@ -403,10 +403,10 @@ async def main():
                             ai_tf = "4H"
                             logging.info(f"📊 1D breakout {sym}: using 4H indicators for AI (1D = geometry only)")
 
-                        # AI call — mode="auto" for fast verdict
+                        # AI call — mode="scan" for full multi-TF analysis
                         ai_verdict_full = await ask_ai_analysis(
                             sym, ai_tf, ai_indic, item.get("dynamic_trigger"),
-                            mode="auto", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                         )
 
                         # Extract Part 1 only (before ---) for chart caption
@@ -429,7 +429,7 @@ async def main():
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, tf, last_indic_row, dynamic_trigger,
-                                mode="auto", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                                mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
                             )
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
