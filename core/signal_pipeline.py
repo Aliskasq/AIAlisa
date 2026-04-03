@@ -567,7 +567,8 @@ async def monitor_recheck_loop(session):
                         except Exception as e:
                             logging.error(f"❌ Monitor chart error: {e}")
 
-                        # Send to group (same format as breakout)
+                        # Send to monitor group (or main group if not configured)
+                        _upgrade_chat = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
                         if chart_path:
                             try:
                                 import os as _os
@@ -575,7 +576,7 @@ async def monitor_recheck_loop(session):
                                 photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                                 with open(chart_path, 'rb') as f:
                                     data = aiohttp.FormData()
-                                    data.add_field('chat_id', str(GROUP_CHAT_ID))
+                                    data.add_field('chat_id', str(_upgrade_chat))
                                     data.add_field('caption', f"🟢 UPGRADED from MONITOR\n{safe_brief}")
                                     data.add_field('photo', f, filename=f"{sym}.png", content_type='image/png')
                                     await session.post(photo_url, data=data, timeout=30)
@@ -588,7 +589,7 @@ async def monitor_recheck_loop(session):
                                 tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                                 text = f"🟢 UPGRADED from MONITOR\n\n{ai_brief[:4000]}"
                                 await session.post(tg_url, json={
-                                    "chat_id": GROUP_CHAT_ID, "text": text
+                                    "chat_id": _upgrade_chat, "text": text
                                 }, timeout=10)
                             except Exception as e:
                                 logging.error(f"❌ Monitor upgrade send: {e}")
