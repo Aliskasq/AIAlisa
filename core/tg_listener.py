@@ -1070,11 +1070,19 @@ async def telegram_polling_loop(app_session):
                         if text.startswith("/lang"):
                             parts = text.split()
                             if len(parts) >= 2 and parts[1] in ("en", "ru"):
-                                set_chat_lang(chat_id, parts[1])
-                                if parts[1] == "en":
-                                    await send_response(app_session, chat_id, "🌐 Language set to *English* 🇬🇧", msg_id, parse_mode="Markdown")
+                                new_lang = parts[1]
+                                # Set for current chat
+                                set_chat_lang(chat_id, new_lang)
+                                # Also set for autopush & monitor groups so /lang switches everything
+                                from config import GROUP_CHAT_ID as _gcid, MONITOR_GROUP_CHAT_ID as _mcid
+                                if _gcid and str(chat_id) != str(_gcid):
+                                    set_chat_lang(_gcid, new_lang)
+                                if _mcid and str(chat_id) != str(_mcid):
+                                    set_chat_lang(_mcid, new_lang)
+                                if new_lang == "en":
+                                    await send_response(app_session, chat_id, "🌐 Language set to *English* 🇬🇧 (autopush + monitor)", msg_id, parse_mode="Markdown")
                                 else:
-                                    await send_response(app_session, chat_id, "🌐 Язык установлен: *Русский* 🇷🇺", msg_id, parse_mode="Markdown")
+                                    await send_response(app_session, chat_id, "🌐 Язык: *Русский* 🇷🇺 (автопуш + монитор)", msg_id, parse_mode="Markdown")
                             else:
                                 await send_response(app_session, chat_id, "🌐 Usage: `/lang en` or `/lang ru`", msg_id, parse_mode="Markdown")
                             continue
