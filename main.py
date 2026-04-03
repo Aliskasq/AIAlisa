@@ -476,23 +476,20 @@ async def main():
                                        item["current_price"], reason)
                             logging.info(f"🔵 MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
 
-                            # Send full breakout with SKIP verdict to monitor group (if configured)
-                            _monitor_target = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
-                            if _monitor_target:
-                                try:
-                                    _skip_caption = ai_verdict or ""
-                                    if not _skip_caption:
-                                        _skip_caption = f"🔵 MONITOR: {sym} {tf} {direction}\nConf: {max(long_pct,short_pct):.0f}% | ADX: {adx_value:.0f}\nReason: {reason}"
-                                    _skip_caption = f"🔵 MONITOR (SKIP)\n{_skip_caption}"
-                                    _mon_sent, _ = await send_breakout_notification(
-                                        sym, item["full_df"], item["line_data"], tf, alert_type, session,
-                                        dynamic_trigger, _skip_caption,
-                                        target_chat_id=_monitor_target
-                                    )
-                                    if _mon_sent:
-                                        logging.info(f"📤 MONITOR signal sent to {'monitor' if MONITOR_GROUP_CHAT_ID else 'main'} group: {sym}")
-                                except Exception as _me:
-                                    logging.error(f"❌ Monitor send error for {sym}: {_me}")
+                            # Send full breakout with SKIP verdict to MAIN group (all breakouts go to main)
+                            try:
+                                _skip_caption = ai_verdict or ""
+                                if not _skip_caption:
+                                    _skip_caption = f"🔵 MONITOR: {sym} {tf} {direction}\nConf: {max(long_pct,short_pct):.0f}% | ADX: {adx_value:.0f}\nReason: {reason}"
+                                _skip_caption = f"🔵 MONITOR (SKIP)\n{_skip_caption}"
+                                _mon_sent, _ = await send_breakout_notification(
+                                    sym, item["full_df"], item["line_data"], tf, alert_type, session,
+                                    dynamic_trigger, _skip_caption
+                                )
+                                if _mon_sent:
+                                    logging.info(f"📤 MONITOR signal sent to main group: {sym}")
+                            except Exception as _me:
+                                logging.error(f"❌ Monitor send error for {sym}: {_me}")
 
                             # Add to breakout log as info-only (no P&L impact)
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
