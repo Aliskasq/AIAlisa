@@ -48,6 +48,10 @@ BREAKOUT_LOG_FILE = "data/breakout_log.json"
 PRICE_ALERTS_FILE = "data/price_alerts.json"
 VIRTUAL_BANK_FILE = "data/virtual_bank.json"
 
+# --- MONITOR virtual bank (separate from main signals) ---
+MONITOR_BREAKOUT_LOG_FILE = "data/breakout_log_monitor.json"
+MONITOR_VIRTUAL_BANK_FILE = "data/virtual_bank_monitor.json"
+
 # --- VIRTUAL BANK ($10,000 starting) ---
 VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
 
@@ -218,6 +222,106 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
 
 def clear_breakout_log():
     save_breakout_log([])
+
+
+# ============================
+# MONITOR VIRTUAL BANK (separate)
+# ============================
+
+def load_monitor_virtual_bank():
+    if os.path.exists(MONITOR_VIRTUAL_BANK_FILE):
+        try:
+            with open(MONITOR_VIRTUAL_BANK_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Error reading monitor virtual bank: {e}")
+    return {"starting_balance": 10000, "balance": 10000, "total_trades": 0, "total_wins": 0, "total_losses": 0, "history": []}
+
+def save_monitor_virtual_bank(bank):
+    try:
+        os.makedirs(os.path.dirname(MONITOR_VIRTUAL_BANK_FILE), exist_ok=True)
+        with open(MONITOR_VIRTUAL_BANK_FILE, "w") as f:
+            json.dump(bank, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing monitor virtual bank: {e}")
+
+def reset_monitor_virtual_bank():
+    bank = {
+        "starting_balance": 10000,
+        "balance": 10000,
+        "total_trades": 0,
+        "total_wins": 0,
+        "total_losses": 0,
+        "history": []
+    }
+    save_monitor_virtual_bank(bank)
+    return bank
+
+def update_monitor_bank_with_trades(trades_pnl):
+    bank = load_monitor_virtual_bank()
+    for symbol, pnl_pct, pnl_dollar in trades_pnl:
+        bank["balance"] += pnl_dollar
+        bank["total_trades"] += 1
+        if pnl_pct >= 0:
+            bank["total_wins"] += 1
+        else:
+            bank["total_losses"] += 1
+        bank["history"].append({
+            "symbol": symbol,
+            "pnl_pct": round(pnl_pct, 2),
+            "pnl_dollar": round(pnl_dollar, 2),
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        })
+    bank["balance"] = round(bank["balance"], 2)
+    save_monitor_virtual_bank(bank)
+    return bank
+
+def load_monitor_breakout_log():
+    if os.path.exists(MONITOR_BREAKOUT_LOG_FILE):
+        try:
+            with open(MONITOR_BREAKOUT_LOG_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_monitor_breakout_log(log):
+    try:
+        os.makedirs(os.path.dirname(MONITOR_BREAKOUT_LOG_FILE), exist_ok=True)
+        with open(MONITOR_BREAKOUT_LOG_FILE, "w") as f:
+            json.dump(log, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing monitor breakout log: {e}")
+
+def add_monitor_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
+    """Add a monitor upgrade event to the monitor log (deduplicates by symbol+tf)."""
+    log = load_monitor_breakout_log()
+    if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
+        entry = {
+            "symbol": symbol,
+            "tf": tf,
+            "breakout_price": round(breakout_price, 8),
+            "current_price": round(current_price, 8),
+            "type": line_type,
+            "ai_direction": ai_direction.upper() if ai_direction else "",
+            "time": datetime.now(timezone.utc).isoformat()
+        }
+        if ai_entry is not None:
+            entry["ai_entry"] = round(ai_entry, 8)
+        if ai_sl is not None:
+            entry["ai_sl"] = round(ai_sl, 8)
+        if ai_tp is not None:
+            entry["ai_tp"] = round(ai_tp, 8)
+        if ai_leverage is not None:
+            entry["ai_leverage"] = ai_leverage
+        if ai_deposit_pct is not None:
+            entry["ai_deposit_pct"] = ai_deposit_pct
+        log.append(entry)
+        save_monitor_breakout_log(log)
+
+def clear_monitor_breakout_log():
+    save_monitor_breakout_log([])
+
 
 # --- PRICE ALERTS ---
 def load_price_alerts():

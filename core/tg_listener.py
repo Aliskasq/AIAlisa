@@ -9,7 +9,9 @@ from datetime import datetime, timezone, timedelta
 from config import (BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts,
                      save_price_alerts, load_virtual_bank, save_virtual_bank, update_bank_with_trades,
                      reset_virtual_bank, VIRTUAL_BANK_POSITION_SIZE,
-                     OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR, MONITOR_GROUP_CHAT_ID)
+                     OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR, MONITOR_GROUP_CHAT_ID,
+                     load_monitor_breakout_log, load_monitor_virtual_bank, save_monitor_virtual_bank,
+                     update_monitor_bank_with_trades, reset_monitor_virtual_bank)
 import config as _cfg
 
 # --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
@@ -677,6 +679,381 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     return all_msgs
 
 
+# ============================
+# MONITOR BANK — /bankm (same logic, separate log/bank)
+# ============================
+
+async def build_signals_text_monitor(session: aiohttp.ClientSession, lang: str = "ru") -> list:
+    """Build monitor virtual bank + all monitor trades text, returns list of message chunks."""
+    log = load_monitor_breakout_log()
+    bank = load_monitor_virtual_bank()
+
+    if not log:
+        total_w = bank["total_wins"]
+        total_l = bank["total_losses"]
+        wr = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+        pnl_dollar = bank["balance"] - bank["starting_balance"]
+        pnl_pct = (pnl_dollar / bank["starting_balance"]) * 100
+        if lang == "ru":
+            return [f"🏦 *Виртуальный банк (Monitor)*\n\n💰 Старт: `${bank['starting_balance']:,.2f}`\n💵 Текущий: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Плюс: {total_w} ({wr:.0f}%) | ❌ Минус: {total_l} ({100-wr:.0f}%)\n📈 Всего: {bank['total_trades']} сделок\n\n📭 Сегодня пока нет сигналов из монитора."]
+        else:
+            return [f"🏦 *Virtual Bank (Monitor)*\n\n💰 Start: `${bank['starting_balance']:,.2f}`\n💵 Current: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Wins: {total_w} ({wr:.0f}%) | ❌ Losses: {total_l} ({100-wr:.0f}%)\n📈 Total: {bank['total_trades']} trades\n\n📭 No monitor signals today yet."]
+
+    # Batch current prices
+    price_map = {}
+    try:
+        async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+            if resp.status == 200:
+                all_prices = await resp.json()
+                for p in all_prices:
+                    price_map[p["symbol"]] = float(p["price"])
+    except Exception:
+        pass
+
+    candle_results = await _batch_check_tp_sl(session, log, price_map)
+
+    day_wins = 0
+    day_losses = 0
+    day_pending = 0
+    day_pnl_dollar = 0.0
+    trade_lines = []
+    day_skipped = 0
+
+    for entry in log:
+        sym = entry["symbol"]
+        tf = entry.get("tf", "?")
+        ai_dir = entry.get("ai_direction", "")
+        ai_sl = entry.get("ai_sl")
+        ai_tp = entry.get("ai_tp")
+        ai_leverage = entry.get("ai_leverage", 1) or 1
+        ai_deposit_pct = entry.get("ai_deposit_pct")
+        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
+        short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        if ai_dir == "SKIP":
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            trade_lines.append(f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭")
+            continue
+
+        if not ai_dir:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            trade_lines.append(f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            continue
+
+        key = f"{sym}_{tf}"
+        candle_status, candle_close = candle_results.get(key, ("open", 0))
+        status = candle_status
+
+        if status == "tp" and ai_tp:
+            now_price = ai_tp
+        elif status == "sl" and ai_sl:
+            now_price = ai_sl
+        else:
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+
+        if entry_price > 0:
+            if ai_dir == "SHORT":
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                else:
+                    pnl_pct = ((entry_price - now_price) / entry_price) * 100
+            else:
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                else:
+                    pnl_pct = ((now_price - entry_price) / entry_price) * 100
+        else:
+            pnl_pct = 0
+
+        pnl_pct_leveraged = pnl_pct * ai_leverage
+        if ai_deposit_pct:
+            position_size = bank["balance"] * (ai_deposit_pct / 100)
+        else:
+            position_size = VIRTUAL_BANK_POSITION_SIZE
+        pnl_dollar = (pnl_pct_leveraged / 100) * position_size
+
+        price_up = now_price >= entry_price
+        ai_match = ""
+        if ai_dir:
+            ai_correct = (ai_dir == "LONG" and price_up) or (ai_dir == "SHORT" and not price_up)
+            ai_match = "✅" if ai_correct else "❌"
+
+        if status == "tp":
+            day_wins += 1
+            icon = "🟢" if price_up else "🔴"
+            status_tag = " ✅TP"
+        elif status == "sl":
+            day_losses += 1
+            icon = "🟢" if price_up else "🔴"
+            status_tag = " 🚫SL"
+        else:
+            day_pending += 1
+            icon = "🟡" if pnl_pct >= 0 else "🟠"
+            status_tag = " ⏳"
+
+        day_pnl_dollar += pnl_dollar
+        lev_tag = f" {ai_leverage}x" if ai_leverage > 1 else ""
+        trade_lines.append(
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
+        )
+
+    total_w = bank["total_wins"] + day_wins
+    total_l = bank["total_losses"] + day_losses
+    total_t = bank["total_trades"] + day_wins + day_losses
+    wr_all = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+    projected_balance = bank["balance"] + day_pnl_dollar
+    total_pnl_dollar = projected_balance - bank["starting_balance"]
+    total_pnl_pct = (total_pnl_dollar / bank["starting_balance"]) * 100
+
+    day_closed = day_wins + day_losses
+    day_total = day_closed + day_pending
+    day_wr = (day_wins / day_closed * 100) if day_closed > 0 else 0
+    skip_text_ru = f" | ⏭ Пропуск: {day_skipped}" if day_skipped > 0 else ""
+    skip_text_en = f" | ⏭ Skip: {day_skipped}" if day_skipped > 0 else ""
+
+    if lang == "ru":
+        pending_text = f" | ⏳ Открытых: {day_pending}" if day_pending > 0 else ""
+        header = (
+            f"🏦 *Виртуальный банк (Monitor)*\n"
+            f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
+            f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
+            f"📅 *Сегодня ({day_total} сигналов из монитора):*\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text_ru}\n"
+            f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
+            f"📈 *Всего за всё время:*\n"
+            f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"
+            f"{'─' * 30}\n"
+        )
+    else:
+        pending_text = f" | ⏳ Open: {day_pending}" if day_pending > 0 else ""
+        header = (
+            f"🏦 *Virtual Bank (Monitor)*\n"
+            f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
+            f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
+            f"📅 *Today ({day_total} monitor signals):*\n"
+            f"✅ TP: {day_wins} | ❌ SL: {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text_en}\n"
+            f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
+            f"📈 *All-time:*\n"
+            f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n"
+            f"{'─' * 30}\n"
+        )
+
+    all_msgs = []
+    current_chunk = header
+    for line in trade_lines:
+        if len(current_chunk) + len(line) + 2 > 3900:
+            all_msgs.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += "\n" + line
+    if current_chunk:
+        all_msgs.append(current_chunk)
+
+    return all_msgs
+
+
+async def build_signals_close_text_monitor(session: aiohttp.ClientSession, lang: str = "ru", show_bank: bool = True, bank_already_updated: bool = False) -> list:
+    """Snapshot view for monitor: close all pending trades at current price, show day P&L summary."""
+    log = load_monitor_breakout_log()
+    bank = load_monitor_virtual_bank()
+
+    if not log:
+        if show_bank:
+            total_w = bank["total_wins"]
+            total_l = bank["total_losses"]
+            wr = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+            pnl_dollar = bank["balance"] - bank["starting_balance"]
+            pnl_pct = (pnl_dollar / bank["starting_balance"]) * 100
+            if lang == "ru":
+                return [f"🏦 *Виртуальный банк (Monitor)*\n\n💰 Старт: `${bank['starting_balance']:,.2f}`\n💵 Текущий: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Плюс: {total_w} ({wr:.0f}%) | ❌ Минус: {total_l} ({100-wr:.0f}%)\n📈 Всего: {bank['total_trades']} сделок\n\n📭 Сегодня пока нет сигналов из монитора."]
+            else:
+                return [f"🏦 *Virtual Bank (Monitor)*\n\n💰 Start: `${bank['starting_balance']:,.2f}`\n💵 Current: `${bank['balance']:,.2f}`\n📊 P&L: `{'+' if pnl_dollar >= 0 else ''}{pnl_dollar:,.2f}$` (`{pnl_pct:+.2f}%`)\n\n✅ Wins: {total_w} ({wr:.0f}%) | ❌ Losses: {total_l} ({100-wr:.0f}%)\n📈 Total: {bank['total_trades']} trades\n\n📭 No monitor signals today yet."]
+        if lang == "ru":
+            return ["📭 Сегодня пока нет сигналов из монитора."]
+        else:
+            return ["📭 No monitor signals today yet."]
+
+    price_map = {}
+    try:
+        async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+            if resp.status == 200:
+                for p in await resp.json():
+                    price_map[p["symbol"]] = float(p["price"])
+    except Exception:
+        pass
+
+    candle_results = await _batch_check_tp_sl(session, log, price_map)
+
+    day_wins = 0
+    day_losses = 0
+    day_skipped = 0
+    day_pnl_dollar = 0.0
+    trade_lines = []
+
+    for entry in log:
+        sym = entry["symbol"]
+        tf = entry.get("tf", "?")
+        ai_dir = entry.get("ai_direction", "")
+        ai_sl = entry.get("ai_sl")
+        ai_tp = entry.get("ai_tp")
+        ai_leverage = entry.get("ai_leverage", 1) or 1
+        ai_deposit_pct = entry.get("ai_deposit_pct")
+        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
+        short_sym = sym.replace("USDT", "")
+        dir_tag = f" {ai_dir}" if ai_dir else ""
+
+        if ai_dir == "SKIP":
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            trade_lines.append(f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭")
+            continue
+
+        if not ai_dir:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            trade_lines.append(f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            continue
+
+        key = f"{sym}_{tf}"
+        candle_status, candle_close = candle_results.get(key, ("open", 0))
+        status = candle_status
+
+        if status == "tp" and ai_tp:
+            now_price = ai_tp
+        elif status == "sl" and ai_sl:
+            now_price = ai_sl
+        else:
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+
+        if entry_price > 0:
+            if ai_dir == "SHORT":
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                else:
+                    pnl_pct = ((entry_price - now_price) / entry_price) * 100
+            else:
+                if status == "tp" and ai_tp:
+                    pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                elif status == "sl" and ai_sl:
+                    pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                else:
+                    pnl_pct = ((now_price - entry_price) / entry_price) * 100
+        else:
+            pnl_pct = 0
+
+        pnl_pct_leveraged = pnl_pct * ai_leverage
+        if ai_deposit_pct:
+            position_size = bank["balance"] * (ai_deposit_pct / 100)
+        else:
+            position_size = VIRTUAL_BANK_POSITION_SIZE
+        pnl_dollar = (pnl_pct_leveraged / 100) * position_size
+
+        price_up = now_price >= entry_price
+        ai_match = ""
+        if ai_dir:
+            ai_correct = (ai_dir == "LONG" and price_up) or (ai_dir == "SHORT" and not price_up)
+            ai_match = "✅" if ai_correct else "❌"
+
+        if pnl_pct >= 0:
+            day_wins += 1
+            icon = "🟢" if price_up else "🔴"
+        else:
+            day_losses += 1
+            icon = "🟢" if price_up else "🔴"
+
+        day_pnl_dollar += pnl_dollar
+        lev_tag = f" {ai_leverage}x" if ai_leverage > 1 else ""
+        if status == "tp":
+            closed_tag = " ✅TP"
+        elif status == "sl":
+            closed_tag = " 🚫SL"
+        else:
+            closed_tag = " 📊MKT"
+        trade_lines.append(
+            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){closed_tag}"
+        )
+
+    day_total = day_wins + day_losses
+    day_wr = (day_wins / day_total * 100) if day_total > 0 else 0
+    skip_text_ru = f" | ⏭ Пропуск: {day_skipped}" if day_skipped > 0 else ""
+    skip_text_en = f" | ⏭ Skip: {day_skipped}" if day_skipped > 0 else ""
+
+    if bank_already_updated:
+        projected_balance = bank["balance"]
+        total_w = bank["total_wins"]
+        total_l = bank["total_losses"]
+        total_t = bank["total_trades"]
+    else:
+        projected_balance = bank["balance"] + day_pnl_dollar
+        total_w = bank["total_wins"] + day_wins
+        total_l = bank["total_losses"] + day_losses
+        total_t = bank["total_trades"] + day_wins + day_losses
+    wr_all = (total_w / (total_w + total_l) * 100) if (total_w + total_l) > 0 else 0
+    total_pnl_dollar = projected_balance - bank["starting_balance"]
+    total_pnl_pct = (total_pnl_dollar / bank["starting_balance"]) * 100
+
+    if show_bank:
+        if lang == "ru":
+            bank_block = (
+                f"🏦 *Виртуальный банк (Monitor)*\n"
+                f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
+                f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n"
+                f"📈 Всего: ✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n\n"
+            )
+        else:
+            bank_block = (
+                f"🏦 *Virtual Bank (Monitor)*\n"
+                f"💰 Start: `${bank['starting_balance']:,.2f}` | Current: `${projected_balance:,.2f}`\n"
+                f"📊 Total P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n"
+                f"📈 All-time: ✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} trades\n\n"
+            )
+    else:
+        bank_block = ""
+
+    if lang == "ru":
+        header = (
+            f"🔒 *Закрытие позиций Monitor (снимок)*\n\n"
+            f"{bank_block}"
+            f"📅 *Сегодня ({day_total} сделок):*\n"
+            f"✅ Плюс: {day_wins} ({day_wr:.0f}%) | ❌ Минус: {day_losses} ({100-day_wr:.0f}%){skip_text_ru}\n"
+            f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
+            f"{'─' * 30}\n"
+        )
+    else:
+        header = (
+            f"🔒 *Close all Monitor positions (snapshot)*\n\n"
+            f"{bank_block}"
+            f"📅 *Today ({day_total} trades):*\n"
+            f"✅ Wins: {day_wins} ({day_wr:.0f}%) | ❌ Losses: {day_losses} ({100-day_wr:.0f}%){skip_text_en}\n"
+            f"💵 Day P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n"
+            f"{'─' * 30}\n"
+        )
+
+    all_msgs = []
+    current_chunk = header
+    for line in trade_lines:
+        if len(current_chunk) + len(line) + 2 > 3900:
+            all_msgs.append(current_chunk)
+            current_chunk = line
+        else:
+            current_chunk += "\n" + line
+    if current_chunk:
+        all_msgs.append(current_chunk)
+
+    return all_msgs
+
+
 async def auto_trend_sender(session: aiohttp.ClientSession):
     """Background task: at 23:59:15 UTC daily — send daily summary to admin DM, update virtual bank, clear log."""
     while True:
@@ -787,9 +1164,66 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             logging.info(f"✅ Daily summary sent to admin DM.")
 
             # 4. Clear breakout log for next day
-            from config import clear_breakout_log
+            from config import clear_breakout_log, clear_monitor_breakout_log
             clear_breakout_log()
             logging.info("🧹 Breakout log cleared for next day.")
+
+            # 4b. Update monitor bank with today's monitor trades, then clear monitor log
+            try:
+                mon_log = load_monitor_breakout_log()
+                if mon_log:
+                    mon_bank = load_monitor_virtual_bank()
+                    mon_candle_results = await _batch_check_tp_sl(session, mon_log, price_map)
+                    mon_trades_pnl = []
+                    for entry in mon_log:
+                        sym = entry["symbol"]
+                        tf = entry.get("tf", "?")
+                        ai_dir = entry.get("ai_direction", "")
+                        if not ai_dir or ai_dir == "SKIP":
+                            continue
+                        ai_sl = entry.get("ai_sl")
+                        ai_tp = entry.get("ai_tp")
+                        ai_leverage = entry.get("ai_leverage", 1) or 1
+                        ai_deposit_pct = entry.get("ai_deposit_pct")
+                        entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
+                        key = f"{sym}_{tf}"
+                        candle_status, _ = mon_candle_results.get(key, ("open", 0))
+                        if candle_status == "tp" and ai_tp:
+                            now_price = ai_tp
+                        elif candle_status == "sl" and ai_sl:
+                            now_price = ai_sl
+                        else:
+                            now_price = price_map.get(sym, entry.get("current_price", 0))
+                        if entry_price > 0:
+                            if ai_dir == "SHORT":
+                                if candle_status == "tp" and ai_tp:
+                                    pnl_pct = ((entry_price - ai_tp) / entry_price) * 100
+                                elif candle_status == "sl" and ai_sl:
+                                    pnl_pct = ((entry_price - ai_sl) / entry_price) * 100
+                                else:
+                                    pnl_pct = ((entry_price - now_price) / entry_price) * 100
+                            else:
+                                if candle_status == "tp" and ai_tp:
+                                    pnl_pct = ((ai_tp - entry_price) / entry_price) * 100
+                                elif candle_status == "sl" and ai_sl:
+                                    pnl_pct = ((ai_sl - entry_price) / entry_price) * 100
+                                else:
+                                    pnl_pct = ((now_price - entry_price) / entry_price) * 100
+                        else:
+                            pnl_pct = 0
+                        pnl_pct_leveraged = pnl_pct * ai_leverage
+                        if ai_deposit_pct:
+                            position_size = mon_bank["balance"] * (ai_deposit_pct / 100)
+                        else:
+                            position_size = VIRTUAL_BANK_POSITION_SIZE
+                        pnl_dollar = (pnl_pct_leveraged / 100) * position_size
+                        mon_trades_pnl.append((sym, pnl_pct_leveraged, pnl_dollar))
+                    update_monitor_bank_with_trades(mon_trades_pnl)
+                    logging.info(f"✅ Monitor bank updated with {len(mon_trades_pnl)} trades.")
+                clear_monitor_breakout_log()
+                logging.info("🧹 Monitor breakout log cleared for next day.")
+            except Exception as e:
+                logging.error(f"❌ Monitor bank daily update error: {e}")
 
             await asyncio.sleep(120)
         except Exception as e:
@@ -1272,6 +1706,9 @@ async def telegram_polling_loop(app_session):
                                     "🏆 `/signals` — signal winrate & bank\n"
                                     "🔒 `/signals close` — snapshot: close all open now\n"
                                     "🔄 `/signals clear` — reset bank to $10k\n"
+                                    "🔵 `/bankm` — monitor bank & trades\n"
+                                    "🔒 `/bankm close` — close all monitor now\n"
+                                    "🔄 `/bankm clear` — reset monitor bank to $10k\n"
                                     "🧠 `/models` — AI engine\n"
                                     "🧠 `/models all` — all OpenRouter models\n"
                                     "🧠 `/models <id>` — switch to any model\n"
@@ -1688,6 +2125,58 @@ async def telegram_polling_loop(app_session):
                                     await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
                             except Exception as e:
                                 logging.error(f"❌ /signals error: {e}")
+                                await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
+                            continue
+
+                        # ==========================================
+                        # MONITOR BANK: /bankm — winrate from monitor log (ADMIN ONLY)
+                        # ==========================================
+                        if text.startswith("/bankm"):
+                            if not is_admin(msg):
+                                deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
+                                await send_response(app_session, chat_id, deny, msg_id)
+                                continue
+
+                            bm_parts = text.split()
+                            # /bankm clear — reset monitor bank
+                            if len(bm_parts) >= 2 and bm_parts[1] in ("clear", "reset", "сброс"):
+                                reset_monitor_virtual_bank()
+                                if lang_pref == "ru":
+                                    await send_response(app_session, chat_id,
+                                        "🔄 *Monitor банк сброшен!*\n\n"
+                                        "💰 Баланс: `$10,000.00`\n"
+                                        "📊 All-time статистика обнулена\n"
+                                        "📋 Сегодняшние сигналы остались в списке",
+                                        msg_id, parse_mode="Markdown")
+                                else:
+                                    await send_response(app_session, chat_id,
+                                        "🔄 *Monitor bank reset!*\n\n"
+                                        "💰 Balance: `$10,000.00`\n"
+                                        "📊 All-time stats cleared\n"
+                                        "📋 Today's signals kept in the list",
+                                        msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /bankm close — snapshot: close all monitor at current price
+                            if len(bm_parts) >= 2 and bm_parts[1] in ("close", "закрыть"):
+                                try:
+                                    chunks = await build_signals_close_text_monitor(app_session, lang=lang_pref)
+                                    for i, chunk in enumerate(chunks):
+                                        rid = msg_id if i == 0 else None
+                                        await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
+                                except Exception as e:
+                                    logging.error(f"❌ /bankm close error: {e}")
+                                    await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
+                                continue
+
+                            # /bankm — show monitor bank + open trades
+                            try:
+                                chunks = await build_signals_text_monitor(app_session, lang=lang_pref)
+                                for i, chunk in enumerate(chunks):
+                                    rid = msg_id if i == 0 else None
+                                    await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
+                            except Exception as e:
+                                logging.error(f"❌ /bankm error: {e}")
                                 await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
                             continue
 

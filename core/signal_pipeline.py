@@ -429,7 +429,7 @@ async def monitor_recheck_loop(session):
     from core.chart_drawer import draw_scan_chart, draw_simple_chart
     from config import (BOT_TOKEN, GROUP_CHAT_ID, MONITOR_GROUP_CHAT_ID,
                          OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR,
-                         add_breakout_entry, parse_ai_trade_params)
+                         add_breakout_entry, add_monitor_breakout_entry, parse_ai_trade_params)
 
     logging.info("🔄 Monitor recheck loop started (two-phase: indicators → AI)")
 
@@ -611,6 +611,15 @@ async def monitor_recheck_loop(session):
                         # Parse trade params and add to breakout log
                         ai_params = parse_ai_trade_params(ai_brief) if ai_brief else {}
                         add_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
+                                          "monitor_upgrade",
+                                          ai_direction=direction,
+                                          ai_entry=ai_params.get("ai_entry", current_price),
+                                          ai_sl=ai_params.get("ai_sl"),
+                                          ai_tp=ai_params.get("ai_tp"),
+                                          ai_leverage=FIXED_LEVERAGE,
+                                          ai_deposit_pct=FIXED_DEPOSIT_PCT)
+                        # Also add to separate monitor bank log
+                        add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
                                           "monitor_upgrade",
                                           ai_direction=direction,
                                           ai_entry=ai_params.get("ai_entry", current_price),
