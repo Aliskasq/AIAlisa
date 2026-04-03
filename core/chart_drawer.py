@@ -163,16 +163,35 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         return txt
     safe_ai_text = _sanitize_tg_markdown(safe_ai_text)
     
-    # Short caption for the chart image
-    photo_caption = (
+    # Build header for photo caption
+    header = (
         f"${short_symbol} 🎯 TREND BREAKOUT\n"
         f"⏳ TF: {tf} | 💰 Price: {current_price:.6f}\n"
-        f"💡 Above trendline by {diff_pct:.2f}%"
+        f"💡 Above trendline by {diff_pct:.2f}%\n\n"
+        f"🤖 AI-Alisa-CopilotClow:\n"
     )
 
-    # Full AI text goes as a separate message
-    ai_message_text = f"🤖 AI-Alisa-CopilotClow:\n{safe_ai_text}" if safe_ai_text else ""
-    
+    # Telegram caption limit is 1024 chars
+    CAPTION_LIMIT = 1024
+    full_caption = header + safe_ai_text
+    overflow_text = ""
+
+    if len(full_caption) <= CAPTION_LIMIT:
+        # Everything fits in caption
+        photo_caption = full_caption
+    else:
+        # Split: fit as much AI text as possible into caption, rest goes to separate message
+        available = CAPTION_LIMIT - len(header)
+        # Try to split at last newline within limit for clean break
+        cut_text = safe_ai_text[:available]
+        last_nl = cut_text.rfind('\n')
+        if last_nl > available // 2:
+            cut_point = last_nl
+        else:
+            cut_point = available
+        photo_caption = header + safe_ai_text[:cut_point]
+        overflow_text = safe_ai_text[cut_point:].strip()
+
     app_link = f"https://app.binance.com/en/futures/{symbol.upper()}"
     web_link = f"https://www.binance.com/en/futures/{symbol.upper()}"
     
@@ -190,7 +209,8 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     sent_message_id = None
     _send_chat_id = str(target_chat_id) if target_chat_id else str(GROUP_CHAT_ID)
 
-    # Step 1: Send chart image with short caption
+    # Send chart with caption (+ buttons if no overflow)
+    _photo_reply_markup = reply_markup if not overflow_text else None
     for attempt in range(1, 6):
         try:
             with open(file_path, 'rb') as f:
@@ -198,11 +218,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                 data.add_field('chat_id', _send_chat_id)
                 data.add_field('caption', photo_caption)
                 data.add_field('parse_mode', 'Markdown')
+                if _photo_reply_markup:
+                    data.add_field('reply_markup', json.dumps(_photo_reply_markup))
                 data.add_field('photo', f, filename=f"{symbol}.png", content_type='image/png')
                 
                 async with session.post(photo_url, data=data, timeout=30) as resp:
                     if resp.status == 200:
-                        logging.info(f"✅ Chart sent to GROUP ({tf}): {symbol}")
+                        logging.info(f"✅ Signal sent to GROUP ({tf}): {symbol}")
                         send_success = True
                         try:
                             resp_json = await resp.json()
@@ -220,7 +242,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                         await asyncio.sleep(retry_after + 1)
                     else:
                         resp_text = await resp.text()
-                        logging.error(f"❌ Telegram photo error (Attempt {attempt}): {resp.status} - {resp_text}")
+                        logging.error(f"❌ Telegram send error (Attempt {attempt}): {resp.status} - {resp_text}")
                         await asyncio.sleep(3)
         except asyncio.TimeoutError:
             logging.error(f"❌ Timeout sending {symbol} (Attempt {attempt}).")
@@ -229,20 +251,20 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             logging.error(f"❌ System error sending {symbol} (Attempt {attempt}): {repr(e)}")
             await asyncio.sleep(2)
             
-    # Step 2: Send AI analysis text as a separate message (with buttons)
-    if send_success and ai_message_text:
-        await asyncio.sleep(0.5)  # small delay between messages
+    # Send overflow text as a separate message (with buttons)
+    if send_success and overflow_text:
+        await asyncio.sleep(0.5)
         for attempt in range(1, 4):
             try:
                 payload = {
                     'chat_id': _send_chat_id,
-                    'text': ai_message_text,
+                    'text': overflow_text,
                     'parse_mode': 'Markdown',
                     'reply_markup': json.dumps(reply_markup)
                 }
                 async with session.post(msg_url, json=payload, timeout=30) as resp:
                     if resp.status == 200:
-                        logging.info(f"✅ AI text sent to GROUP ({tf}): {symbol}")
+                        logging.info(f"✅ Overflow text sent ({tf}): {symbol}")
                         break
                     elif resp.status == 429:
                         retry_after = 5
@@ -253,17 +275,16 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                         await asyncio.sleep(retry_after + 1)
                     else:
                         resp_text = await resp.text()
-                        logging.error(f"❌ AI text send error (Attempt {attempt}): {resp.status} - {resp_text}")
-                        # If Markdown parse fails, retry without parse_mode
+                        logging.error(f"❌ Overflow text error (Attempt {attempt}): {resp.status} - {resp_text}")
                         if "can't parse entities" in resp_text.lower():
                             payload.pop('parse_mode', None)
                             async with session.post(msg_url, json=payload, timeout=30) as resp2:
                                 if resp2.status == 200:
-                                    logging.info(f"✅ AI text sent (plain) to GROUP ({tf}): {symbol}")
+                                    logging.info(f"✅ Overflow text sent plain ({tf}): {symbol}")
                                     break
                         await asyncio.sleep(2)
             except Exception as e:
-                logging.error(f"❌ Error sending AI text (Attempt {attempt}): {repr(e)}")
+                logging.error(f"❌ Error sending overflow (Attempt {attempt}): {repr(e)}")
                 await asyncio.sleep(2)
 
     try:
