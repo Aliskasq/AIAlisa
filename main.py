@@ -440,9 +440,8 @@ async def main():
                                 logging.error(f"❌ AI retry failed for {sym} ({error_type}), keeping error chart")
                                 ai_verdict = ""
                             else:
-                                logging.info(f"✅ AI retry succeeded for {sym}, replacing error chart")
-                                await delete_telegram_message(session, error_msg_id)
-                                error_msg_id = None
+                                logging.info(f"✅ AI retry succeeded for {sym}, will replace error chart after new one sent")
+                                # Don't delete error_msg_id here — delete AFTER new message is sent successfully
 
                         # === SIGNAL PIPELINE CLASSIFICATION ===
                         _ai_dir = ""
@@ -487,6 +486,10 @@ async def main():
                                     dynamic_trigger, _skip_caption
                                 )
                                 if _mon_sent:
+                                    # Delete old error chart after new monitor signal sent
+                                    if error_msg_id:
+                                        await delete_telegram_message(session, error_msg_id)
+                                        error_msg_id = None
                                     logging.info(f"📤 MONITOR signal sent to main group: {sym}")
                             except Exception as _me:
                                 logging.error(f"❌ Monitor send error for {sym}: {_me}")
@@ -534,6 +537,10 @@ async def main():
                                 sym, full_df, line_data, tf, alert_type, session,
                                 dynamic_trigger, ai_verdict or ""
                             )
+                            # Delete old error chart ONLY after new one sent successfully
+                            if is_sent and error_msg_id:
+                                await delete_telegram_message(session, error_msg_id)
+                                error_msg_id = None
                             logging.info(f"🟢 FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
 
                         if is_sent:

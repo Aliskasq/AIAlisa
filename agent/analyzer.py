@@ -34,8 +34,8 @@ Output format:
 VERDICT: LONG or SHORT or SKIP
 LONG: [number]% / SHORT: [number]%
 ENTRY: [current price]
-SL: [2×ATR from entry]
-TP: [3×ATR from entry]
+SL: [minimum 2% from entry, use 1.5×ATR if larger]
+TP: [minimum 2× SL distance — R:R must be ≥ 2:1]
 LOGIC: [2-3 sentences — key factors driving the verdict]
 RISK: [1 sentence — main risk to watch]
 
@@ -54,8 +54,8 @@ FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик.
 ВЕРДИКТ: ЛОНГ или ШОРТ или ПРОПУСК
 ЛОНГ: [число]% / ШОРТ: [число]%
 ВХОД: [текущая цена]
-СЛ: [2×ATR от входа]
-ТП: [3×ATR от входа]
+СЛ: [минимум 2% от входа, 1.5×ATR если больше]
+ТП: [минимум 2× расстояние СЛ — R:R должен быть ≥ 2:1]
 ЛОГИКА: [2-3 предложения — ключевые факторы вердикта]
 РИСК: [1 предложение — главный риск]
 
@@ -110,21 +110,42 @@ def _is_valid_analysis(text: str) -> bool:
 
 def _validate_sl_tp_in_text(text: str) -> str:
     """Post-validate SL/TP consistency in free-text AI response.
-    If LONG verdict has SL > Entry or SHORT has SL < Entry, add a warning."""
+    Checks: SL direction, minimum 2% SL distance, minimum 2:1 R:R ratio."""
     import re
     direction_m = re.search(r'VERDICT[:\s]*(LONG|SHORT)', text, re.IGNORECASE)
     entry_m = re.search(r'(?:Entry|Вход)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
-    sl_m = re.search(r'(?:SL|Стоп)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
+    sl_m = re.search(r'(?:SL|Стоп|🚫 SL)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
+    tp_m = re.search(r'(?:TP|Тейк|🎯 TP)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
     if direction_m and entry_m and sl_m:
         direction = direction_m.group(1).upper()
         entry = float(entry_m.group(1))
         sl = float(sl_m.group(1))
+        tp = float(tp_m.group(1)) if tp_m else 0
+        
+        # Check SL on wrong side
         if direction == "LONG" and sl > entry:
             logging.warning(f"⚠️ [SL WARN] LONG but SL({sl}) > Entry({entry}) in text response!")
             text += "\n\n⚠️ ВНИМАНИЕ: SL выше входа для LONG — проверьте уровни вручную!"
         elif direction == "SHORT" and sl < entry:
             logging.warning(f"⚠️ [SL WARN] SHORT but SL({sl}) < Entry({entry}) in text response!")
             text += "\n\n⚠️ ВНИМАНИЕ: SL ниже входа для SHORT — проверьте уровни вручную!"
+        
+        # Check minimum 2% SL distance
+        if entry > 0:
+            sl_pct = abs(sl - entry) / entry * 100
+            if sl_pct < 1.5:  # warn if SL is too tight (< 1.5%)
+                logging.warning(f"⚠️ [SL TIGHT] {direction} SL distance only {sl_pct:.1f}% (entry={entry}, sl={sl})")
+                text += f"\n\n⚠️ SL слишком близко ({sl_pct:.1f}%) — рекомендуется минимум 2%"
+        
+        # Check R:R ratio (minimum 2:1)
+        if entry > 0 and tp > 0 and sl > 0:
+            sl_dist = abs(entry - sl)
+            tp_dist = abs(tp - entry)
+            if sl_dist > 0:
+                rr = tp_dist / sl_dist
+                if rr < 1.8:  # warn if R:R is below 1.8 (some tolerance)
+                    logging.warning(f"⚠️ [R:R WARN] {direction} R:R={rr:.1f} (entry={entry}, sl={sl}, tp={tp})")
+                    text += f"\n\n⚠️ R:R = {rr:.1f}:1 — рекомендуется минимум 2:1"
     return text
 
 
@@ -408,7 +429,7 @@ CRITICAL RULES:
 3. Separate parts with exactly --- on its own line
 4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
-6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+6. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 7. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. These are FIXED. In REC always write: 1x | 2%
 8. DO NOT ADD HASHTAGS
 9. RSI RULES (MOMENTUM-AWARE):
@@ -490,7 +511,7 @@ ${base_coin} Analysis
 RULES:
 1. PLAIN TEXT ONLY — no bold, no markdown, no * or ** symbols. Binance Square does not render formatting.
 2. Entry = current price. Safe = better entry from support/OB
-3. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+3. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
@@ -558,7 +579,7 @@ ${base_coin} Analysis🤔
 
 RULES:
 1. Entry = current price. Safe = better entry from support/OB
-2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 2-10% from entry, must be < TP distance. CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+2. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 3. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 4. Each TF line: brief reason in parentheses
 5. Response MUST be 600-828 characters exactly

@@ -145,13 +145,29 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     
     # Обрезаем ИИ текст до 800 символов, чтобы не нарваться на ошибку Telegram!
     ai_text = ai_text or ""
-    safe_ai_text = ai_text if len(ai_text) < 800 else ai_text[:800] + "...\n*[Текст обрезан]*"
+    safe_ai_text = ai_text if len(ai_text) < 800 else ai_text[:800] + "..."
+    # Sanitize markdown: escape unpaired * and _ to prevent Telegram parse errors
+    import re as _re
+    def _sanitize_tg_markdown(txt):
+        # Remove ** (not supported in Telegram Markdown v1)
+        txt = txt.replace("**", "")
+        # Count * — if odd number, escape the last one
+        if txt.count("*") % 2 != 0:
+            # Find last * and escape it
+            idx = txt.rfind("*")
+            txt = txt[:idx] + txt[idx+1:]
+        # Same for _
+        if txt.count("_") % 2 != 0:
+            idx = txt.rfind("_")
+            txt = txt[:idx] + txt[idx+1:]
+        return txt
+    safe_ai_text = _sanitize_tg_markdown(safe_ai_text)
     
     caption = (
         f"${short_symbol} 🎯 TREND BREAKOUT\n"
         f"⏳ TF: {tf} | 💰 Current Price: {current_price:.6f}\n"
         f"💡 Price is above the trendline by {diff_pct:.2f}%\n\n"
-        f"🤖 **AI-Alisa-CopilotClow:**\n{safe_ai_text}"
+        f"🤖 AI-Alisa-CopilotClow:\n{safe_ai_text}"
     )
     
     app_link = f"https://app.binance.com/en/futures/{symbol.upper()}"

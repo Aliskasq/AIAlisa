@@ -90,12 +90,12 @@ def parse_confidence_from_ai(ai_text: str) -> tuple:
 
 def calculate_atr_sl_tp(indicators: dict, direction: str, entry_price: float) -> dict:
     """
-    Calculate SL/TP based on ATR (not SMC levels which can be too far).
+    Calculate SL/TP based on ATR with minimum floor and 2:1 R:R.
     
-    SL = 2 × ATR from entry (reasonable for 4H)
-    TP = 3 × ATR from entry (minimum 1:1.5 R:R)
+    SL = max(1.5 × ATR, 2% of price) — minimum 2% so SL is never too tight
+    TP = 2 × SL distance — guaranteed 2:1 reward-to-risk ratio
     
-    Returns dict with sl, tp, sl_pct, tp_pct
+    Returns dict with sl, tp, sl_pct, tp_pct, rr_ratio
     """
     # ATR14 from indicators
     atr = indicators.get("atr14_value", 0)
@@ -103,8 +103,13 @@ def calculate_atr_sl_tp(indicators: dict, direction: str, entry_price: float) ->
         # Fallback: estimate ATR as 2% of price
         atr = entry_price * 0.02
     
-    sl_distance = 2.0 * atr
-    tp_distance = 3.0 * atr  # 1:1.5 R:R minimum
+    # SL distance: 1.5 × ATR, but minimum 2% of price (never too tight)
+    sl_from_atr = 1.5 * atr
+    sl_min_floor = entry_price * 0.02  # 2% minimum
+    sl_distance = max(sl_from_atr, sl_min_floor)
+    
+    # TP distance: 2 × SL distance (guaranteed 2:1 R:R)
+    tp_distance = 2.0 * sl_distance
     
     if direction == "LONG":
         sl = entry_price - sl_distance
