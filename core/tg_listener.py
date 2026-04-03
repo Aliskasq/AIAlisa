@@ -1267,6 +1267,8 @@ async def telegram_polling_loop(app_session):
                                     "🧠 `/models` — AI engine\n"
                                     "🧠 `/models all` — all OpenRouter models\n"
                                     "🧠 `/models <id>` — switch to any model\n"
+                                    "🧠 `/model monitor` — monitor AI settings\n"
+                                    "🧠 `/model monitor <id>` — switch monitor model\n"
                                     "⏰ `/time 18:30` — scan schedule\n"
                                     "📢 `/autopost on/off` — auto Square\n"
                                     "🪙 `/autopost SOL BTC` — coins\n"
