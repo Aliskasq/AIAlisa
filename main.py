@@ -479,7 +479,47 @@ async def main():
                             try:
                                 _skip_caption = ai_verdict or ""
                                 if not _skip_caption:
-                                    _skip_caption = f"🔵 MONITOR: {sym} {tf} {direction}\nConf: {max(long_pct,short_pct):.0f}% | ADX: {adx_value:.0f}\nReason: {reason}"
+                                    # Build fallback with per-TF scorecard data
+                                    _fb_lines = []
+                                    _mtf = item.get("mtf_data", {})
+                                    for _tf_name in ["4H", "1H", "15m"]:
+                                        _tf_ind = _mtf.get(_tf_name, {})
+                                        if not _tf_ind:
+                                            if _tf_name == tf:
+                                                _tf_ind = last_indic_row
+                                            else:
+                                                continue
+                                        _rsi = _tf_ind.get("rsi14", 0)
+                                        _adx_tf = _tf_ind.get("adx", 0)
+                                        _macd_h = _tf_ind.get("macd_hist", 0)
+                                        _ema7 = _tf_ind.get("ema7", 0)
+                                        _ema25 = _tf_ind.get("ema25", 0)
+                                        _ema99 = _tf_ind.get("ema99", 0)
+                                        # Count bull/bear signals
+                                        _b, _r = 0, 0
+                                        if _ema7 > _ema25 > _ema99: _b += 1
+                                        elif _ema7 < _ema25 < _ema99: _r += 1
+                                        if _macd_h > 0: _b += 1
+                                        else: _r += 1
+                                        if _rsi > 55: _b += 1
+                                        elif _rsi < 45: _r += 1
+                                        if _adx_tf > 25:
+                                            if _tf_ind.get("di_plus", 0) > _tf_ind.get("di_minus", 0): _b += 1
+                                            else: _r += 1
+                                        _st = _tf_ind.get("supertrend", "")
+                                        if "Bullish" in str(_st): _b += 1
+                                        elif "Bearish" in str(_st): _r += 1
+                                        _total = _b + _r if (_b + _r) > 0 else 1
+                                        _lpct = round(_b / _total * 100)
+                                        _fb_lines.append(f"⏱ {_tf_name}: LONG {_lpct}% / SHORT {100-_lpct}% (RSI {_rsi:.0f}, ADX {_adx_tf:.0f})")
+                                    _fb_tf_text = "\n".join(_fb_lines)
+                                    _reason_ru = "флэт" if reason == "flat_market" else "низкая уверенность"
+                                    _skip_caption = (
+                                        f"🏆 ВЕРДИКТ: SKIP ({direction})\n"
+                                        f"📊 Общий: LONG {long_pct:.0f}% / SHORT {short_pct:.0f}%\n\n"
+                                        f"{_fb_tf_text}\n\n"
+                                        f"⚠️ {_reason_ru} | ADX: {adx_value:.0f}"
+                                    )
                                 _skip_caption = f"🔵 MONITOR (SKIP)\n{_skip_caption}"
                                 _mon_sent, _ = await send_breakout_notification(
                                     sym, item["full_df"], item["line_data"], tf, alert_type, session,
