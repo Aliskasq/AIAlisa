@@ -171,24 +171,22 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         f"🤖 AI-Alisa-CopilotClow:\n"
     )
 
-    # Telegram caption limit is 1024 chars
-    CAPTION_LIMIT = 1024
-    full_caption = header + safe_ai_text
+    # AI text limit for photo caption (header takes the rest of 1024)
+    AI_TEXT_LIMIT = 828
     overflow_text = ""
 
-    if len(full_caption) <= CAPTION_LIMIT:
+    if len(safe_ai_text) <= AI_TEXT_LIMIT:
         # Everything fits in caption
-        photo_caption = full_caption
+        photo_caption = header + safe_ai_text
     else:
-        # Split: fit as much AI text as possible into caption, rest goes to separate message
-        available = CAPTION_LIMIT - len(header)
-        # Try to split at last newline within limit for clean break
-        cut_text = safe_ai_text[:available]
+        # Split: first 828 chars of AI text in caption, rest as separate message
+        cut_text = safe_ai_text[:AI_TEXT_LIMIT]
+        # Try to split at last newline for clean break
         last_nl = cut_text.rfind('\n')
-        if last_nl > available // 2:
+        if last_nl > AI_TEXT_LIMIT // 2:
             cut_point = last_nl
         else:
-            cut_point = available
+            cut_point = AI_TEXT_LIMIT
         photo_caption = header + safe_ai_text[:cut_point]
         overflow_text = safe_ai_text[cut_point:].strip()
 
