@@ -7,7 +7,9 @@ import numpy as np
 from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
-from config import TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log, parse_ai_trade_params, GROUP_CHAT_ID
+from config import (TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log,
+                     parse_ai_trade_params, GROUP_CHAT_ID, MONITOR_GROUP_CHAT_ID,
+                     OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR)
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
@@ -467,12 +469,31 @@ async def main():
                                               adx_trend=adx_trend, adx_avg_50=adx_avg_50)
 
                         if tier == "monitor" and not ai_has_error:
-                            # 🔵 MONITOR — don't send as full signal, add to monitor queue
+                            # 🔵 MONITOR — add to monitor queue + send full signal to monitor group
                             reason = "flat_market" if adx_value < 20 else "low_confidence"
                             direction = "LONG" if long_pct > short_pct else "SHORT"
                             add_monitor(sym, tf, direction, long_pct, short_pct,
                                        item["current_price"], reason)
                             logging.info(f"🔵 MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
+
+                            # Send full breakout with SKIP verdict to monitor group (if configured)
+                            _monitor_target = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
+                            if _monitor_target:
+                                try:
+                                    _skip_caption = ai_verdict or ""
+                                    if not _skip_caption:
+                                        _skip_caption = f"🔵 MONITOR: {sym} {tf} {direction}\nConf: {max(long_pct,short_pct):.0f}% | ADX: {adx_value:.0f}\nReason: {reason}"
+                                    _skip_caption = f"🔵 MONITOR (SKIP)\n{_skip_caption}"
+                                    _mon_sent, _ = await send_breakout_notification(
+                                        sym, item["full_df"], item["line_data"], tf, alert_type, session,
+                                        dynamic_trigger, _skip_caption,
+                                        target_chat_id=_monitor_target
+                                    )
+                                    if _mon_sent:
+                                        logging.info(f"📤 MONITOR signal sent to {'monitor' if MONITOR_GROUP_CHAT_ID else 'main'} group: {sym}")
+                                except Exception as _me:
+                                    logging.error(f"❌ Monitor send error for {sym}: {_me}")
+
                             # Add to breakout log as info-only (no P&L impact)
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
                                                ai_direction="",  # empty = no trade

@@ -215,7 +215,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan") -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None) -> str:
     """
     OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
     and sends aggregated context to OpenRouter.
@@ -712,15 +712,17 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                 logging.info(f"⏳ AI queue: waiting {wait:.1f}s for rate limit cooldown...")
                 await asyncio.sleep(wait)
             logging.info("⚡ [OpenClaw] Executing AI inference via OpenRouter relay...")
+            _active_key = api_key_override or OPENROUTER_API_KEY
+            _active_model = model_override or OPENROUTER_MODEL
             headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Authorization": f"Bearer {_active_key}",
                 "Content-Type": "application/json"
             }
             # Mode-based payload: auto=fast/no reasoning, scan=full/no reasoning, extended=reasoning
             if mode == "auto":
                 # Fast verdict for breakout push / monitor recheck
                 payload = {
-                    "model": OPENROUTER_MODEL,
+                    "model": _active_model,
                     "messages": [
                         {"role": "system", "content": get_fast_verdict_prompt(lang)},
                         {"role": "user", "content": user_prompt}
@@ -732,7 +734,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             elif mode == "extended":
                 # Deep analysis — reasoning enabled
                 payload = {
-                    "model": OPENROUTER_MODEL,
+                    "model": _active_model,
                     "messages": [
                         {"role": "system", "content": system_instruction},
                         {"role": "user", "content": user_prompt}
@@ -745,7 +747,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
             else:
                 # scan (default) — full prompt, no reasoning
                 payload = {
-                    "model": OPENROUTER_MODEL,
+                    "model": _active_model,
                     "messages": [
                         {"role": "system", "content": system_instruction},
                         {"role": "user", "content": user_prompt}

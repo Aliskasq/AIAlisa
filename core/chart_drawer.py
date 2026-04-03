@@ -13,7 +13,7 @@ from config import BOT_TOKEN, GROUP_CHAT_ID
 
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
-async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text=""):
+async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None):
     # FIX: Sync view limit perfectly with scanner (199)
     view_limit = min(len(df), 199)
     custom_style = 'charles'
@@ -168,12 +168,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
     send_success = False
     sent_message_id = None
+    _send_chat_id = str(target_chat_id) if target_chat_id else str(GROUP_CHAT_ID)
 
     for attempt in range(1, 6):
         try:
             with open(file_path, 'rb') as f:
                 data = aiohttp.FormData()
-                data.add_field('chat_id', str(GROUP_CHAT_ID))
+                data.add_field('chat_id', _send_chat_id)
                 data.add_field('caption', caption)
                 data.add_field('parse_mode', 'Markdown')
                 data.add_field('reply_markup', json.dumps(reply_markup))

@@ -422,7 +422,9 @@ async def monitor_recheck_loop(session):
     from core.chart_drawer import send_breakout_notification
     from core.geometry_scanner import find_trend_line
     from core.chart_drawer import draw_scan_chart, draw_simple_chart
-    from config import BOT_TOKEN, GROUP_CHAT_ID, add_breakout_entry, parse_ai_trade_params
+    from config import (BOT_TOKEN, GROUP_CHAT_ID, MONITOR_GROUP_CHAT_ID,
+                         OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR,
+                         add_breakout_entry, parse_ai_trade_params)
 
     logging.info("🔄 Monitor recheck loop started (two-phase: indicators → AI)")
 
@@ -496,10 +498,13 @@ async def monitor_recheck_loop(session):
                         pass
 
                     from core.tg_listener import get_chat_lang
-                    from config import GROUP_CHAT_ID
                     _lang = get_chat_lang(GROUP_CHAT_ID)
+                    # Use separate monitor API key if configured (parallel AI, no rate conflict)
+                    _mon_key = OPENROUTER_API_KEY_MONITOR or None
+                    _mon_model = OPENROUTER_MODEL_MONITOR or None
                     ai_text = await ask_ai_analysis(
-                        sym, tf, indicators, mode="auto", lang=_lang, mtf_data=mtf_data
+                        sym, tf, indicators, mode="auto", lang=_lang, mtf_data=mtf_data,
+                        api_key_override=_mon_key, model_override=_mon_model
                     )
                     ai_calls += 1
 
@@ -537,7 +542,8 @@ async def monitor_recheck_loop(session):
 
                         ai_full = await ask_ai_analysis(
                             sym, tf, indicators, mode="extended",
-                            extended=True, lang=_lang, mtf_data=mtf_data
+                            extended=True, lang=_lang, mtf_data=mtf_data,
+                            api_key_override=_mon_key, model_override=_mon_model
                         )
                         ai_calls += 1
 

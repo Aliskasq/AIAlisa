@@ -17,6 +17,13 @@ GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
 
+# Monitor: separate API key + model (parallel AI calls, no rate limit conflict)
+OPENROUTER_API_KEY_MONITOR = os.getenv("OPENROUTER_API_KEY_MONITOR", "")
+OPENROUTER_MODEL_MONITOR = os.getenv("OPENROUTER_MODEL_MONITOR", "") or OPENROUTER_MODEL
+
+# Monitor group (separate from main signal group)
+MONITOR_GROUP_CHAT_ID = os.getenv("MONITOR_GROUP_CHAT_ID", "")
+
 
 
 # Binance Square

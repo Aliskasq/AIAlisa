@@ -8,7 +8,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from config import (BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID, load_breakout_log, load_price_alerts,
                      save_price_alerts, load_virtual_bank, save_virtual_bank, update_bank_with_trades,
-                     reset_virtual_bank, VIRTUAL_BANK_POSITION_SIZE)
+                     reset_virtual_bank, VIRTUAL_BANK_POSITION_SIZE,
+                     OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR, MONITOR_GROUP_CHAT_ID)
+import config as _cfg
 
 # --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
 PAPER_FILE = "data/paper_portfolio.json"
@@ -1088,6 +1090,30 @@ async def telegram_polling_loop(app_session):
                             parts = text.split(maxsplit=1)
                             sub_cmd = parts[1].strip() if len(parts) > 1 else ""
 
+                            # /model monitor <model-id> — switch monitor AI model
+                            # /models monitor — show current monitor model
+                            if sub_cmd.lower().startswith("monitor"):
+                                mon_parts = sub_cmd.split(maxsplit=1)
+                                if len(mon_parts) >= 2 and mon_parts[1].strip():
+                                    new_mon_model = mon_parts[1].strip()
+                                    _cfg.OPENROUTER_MODEL_MONITOR = new_mon_model
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Monitor AI model switched to:\n`{new_mon_model}`\n\n"
+                                        f"🔑 Monitor API key: {'✅ set' if _cfg.OPENROUTER_API_KEY_MONITOR else '❌ not set (using main key)'}",
+                                        msg_id, parse_mode="Markdown")
+                                else:
+                                    cur_mon = _cfg.OPENROUTER_MODEL_MONITOR or agent.analyzer.OPENROUTER_MODEL
+                                    has_key = "✅ отдельный ключ" if _cfg.OPENROUTER_API_KEY_MONITOR else "⚠️ основной ключ"
+                                    mon_group = _cfg.MONITOR_GROUP_CHAT_ID or "не задана (шлёт в основную)"
+                                    await send_response(app_session, chat_id,
+                                        f"🔵 *Monitor настройки:*\n\n"
+                                        f"🧠 Модель: `{cur_mon}`\n"
+                                        f"🔑 API ключ: {has_key}\n"
+                                        f"💬 Группа: `{mon_group}`\n\n"
+                                        f"Сменить модель: `/model monitor <model-id>`",
+                                        msg_id, parse_mode="Markdown")
+                                continue
+
                             # /models all — fetch full list from OpenRouter
                             if sub_cmd.lower() == "all":
                                 await send_response(app_session, chat_id, "⏳ Fetching all models from OpenRouter...", msg_id)
@@ -1134,7 +1160,6 @@ async def telegram_polling_loop(app_session):
                             # /models <model-name> — switch to specific model
                             if sub_cmd and sub_cmd.lower() != "all" and "/" in sub_cmd:
                                 new_model = sub_cmd.strip()
-                                import config as _cfg
                                 _cfg.OPENROUTER_MODEL = new_model
                                 agent.analyzer.OPENROUTER_MODEL = new_model
                                 await send_response(app_session, chat_id,
