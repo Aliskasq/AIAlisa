@@ -172,21 +172,26 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     )
 
     # AI text limit for photo caption (header takes the rest of 1024)
-    AI_TEXT_LIMIT = 828
+    AI_TEXT_LIMIT = 813
     overflow_text = ""
 
     if len(safe_ai_text) <= AI_TEXT_LIMIT:
         # Everything fits in caption
         photo_caption = header + safe_ai_text
     else:
-        # Split: first 828 chars of AI text in caption, rest as separate message
+        # Split: first 813 chars of AI text in caption, rest as separate message
         cut_text = safe_ai_text[:AI_TEXT_LIMIT]
         # Try to split at last newline for clean break
         last_nl = cut_text.rfind('\n')
         if last_nl > AI_TEXT_LIMIT // 2:
             cut_point = last_nl
         else:
-            cut_point = AI_TEXT_LIMIT
+            # No good newline — split at last space to avoid breaking words
+            last_space = cut_text.rfind(' ')
+            if last_space > AI_TEXT_LIMIT // 2:
+                cut_point = last_space
+            else:
+                cut_point = AI_TEXT_LIMIT
         photo_caption = header + safe_ai_text[:cut_point]
         overflow_text = safe_ai_text[cut_point:].strip()
 

@@ -565,14 +565,35 @@ async def monitor_recheck_loop(session):
                         if chart_path:
                             try:
                                 import os as _os
-                                safe_brief = ai_brief[:825] + "..." if len(ai_brief) > 828 else ai_brief
+                                _MON_AI_LIMIT = 813
+                                overflow_mon = ""
+                                if len(ai_brief) > _MON_AI_LIMIT:
+                                    _cut = ai_brief[:_MON_AI_LIMIT]
+                                    # Try newline first, then space — don't break words
+                                    _nl = _cut.rfind('\n')
+                                    if _nl > _MON_AI_LIMIT // 2:
+                                        _cp = _nl
+                                    else:
+                                        _sp = _cut.rfind(' ')
+                                        _cp = _sp if _sp > _MON_AI_LIMIT // 2 else _MON_AI_LIMIT
+                                    safe_brief = ai_brief[:_cp]
+                                    overflow_mon = ai_brief[_cp:].strip()
+                                else:
+                                    safe_brief = ai_brief
                                 photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+                                msg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                                 with open(chart_path, 'rb') as f:
                                     data = aiohttp.FormData()
                                     data.add_field('chat_id', str(_upgrade_chat))
                                     data.add_field('caption', f"🟢 UPGRADED from MONITOR\n{safe_brief}")
                                     data.add_field('photo', f, filename=f"{sym}.png", content_type='image/png')
                                     await session.post(photo_url, data=data, timeout=30)
+                                # Send overflow as second message
+                                if overflow_mon:
+                                    await session.post(msg_url, json={
+                                        "chat_id": str(_upgrade_chat),
+                                        "text": overflow_mon
+                                    }, timeout=10)
                                 _os.remove(chart_path)
                             except Exception as e:
                                 logging.error(f"❌ Monitor photo send: {e}")
