@@ -372,7 +372,7 @@ IMPORTANT DIRECTIONAL RULES:
 YOUR RESPONSE MUST CONTAIN TWO PARTS SEPARATED BY --- ON ITS OWN LINE.
 Do NOT write any headers like "PART 1", "PART 2", "=== PART ===", "Brief", "Extended" etc. Just the content.
 
-FIRST PART (chart caption, STRICT 600-828 characters including spaces):
+FIRST PART (brief chart caption — keep it concise):
 
 ${base_coin} Analysis🤔
 📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
@@ -393,7 +393,7 @@ ${base_coin} Analysis🤔
 
 ---
 
-SECOND PART (extended analysis, STRICT 2000-3800 characters — DO NOT EXCEED 3800):
+SECOND PART (extended analysis — detailed but compact):
 
 *🔬 ${base_coin} Extended Analysis*
 
@@ -421,11 +421,11 @@ FOR EACH TIMEFRAME (⏱ 1D, 4H, 1H, 15m) write ONE compact block:
 
 💰 Entry/SL/TP reasoning: [which indicators converge at these levels]{risk_prompt_rule}
 
-COMPACT FORMAT IS CRITICAL — use abbreviations, skip redundant details, keep each indicator to ONE short line. Total MUST be 2000-3800 characters.
+COMPACT FORMAT IS CRITICAL — use abbreviations, skip redundant details, keep each indicator to ONE short line.
 
 CRITICAL RULES:
-1. First part MUST be 600-828 characters (including spaces). Count carefully!
-2. Second part MUST be 2000-3800 characters. No more, no less.
+1. First part: brief signal summary following the template above. Do NOT count characters.
+2. Second part: detailed analysis, keep compact but thorough.
 3. Separate parts with exactly --- on its own line
 4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
@@ -478,7 +478,7 @@ IMPORTANT DIRECTIONAL RULES:
 - Each indicator has historical context showing dynamics over multiple candles
 
 THIS IS FOR BINANCE SQUARE POST — PLAIN TEXT ONLY, NO BOLD, NO MARKDOWN, NO * symbols.
-Your response MUST be between 1300 and 1900 characters (counting all characters, spaces, emoji). Count carefully!
+Keep response concise — aim for roughly 1300-1900 characters but do NOT count them manually.
 
 MANDATORY OUTPUT FORMAT:
 
@@ -513,7 +513,7 @@ RULES:
 2. Entry = current price. Safe = better entry from support/OB
 3. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
-5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
+5. Keep response concise. Do NOT count characters.
 6. DO NOT ADD HASHTAGS — they are added automatically
 7. RSI RULES (MOMENTUM-AWARE):
    - ALWAYS show RSI value when >70: "⚠️ RSI [value]" — MANDATORY.
@@ -558,7 +558,7 @@ IMPORTANT DIRECTIONAL RULES:
 - RSI PULLBACK HISTORY: The scorecard shows "PULLBACK HISTORY: last pullback started from RSI X". Use this! If current RSI is near that peak, warn: "⚠️ RSI [value], previous pullback from [peak]"
 - If ADX < 30 (weak trend) AND RSI > 82 on 4H: reduce confidence by 10%.
 
-MANDATORY OUTPUT FORMAT (Your response MUST be between 600 and 828 characters including spaces. Count carefully. Do NOT go under 600 or over 828.):
+MANDATORY OUTPUT FORMAT (follow this template, keep it concise, do NOT count characters):
 
 ${base_coin} Analysis🤔
 📊 Price: ${price:.6f} 24H {change_24h:+.0f}% 1H {change_1h:+.0f}%
@@ -582,7 +582,7 @@ RULES:
 2. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 3. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 4. Each TF line: brief reason in parentheses
-5. Response MUST be 600-828 characters exactly
+5. Keep response concise. Do NOT count characters.
 
 SKIP RULES:
 - If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
