@@ -502,8 +502,23 @@ async def monitor_recheck_loop(session):
                     # Use separate monitor API key if configured (parallel AI, no rate conflict)
                     _mon_key = OPENROUTER_API_KEY_MONITOR or None
                     _mon_model = OPENROUTER_MODEL_MONITOR or None
+
+                    # === 1D EMERGENCY CHECK (macro risk) ===
+                    emergency_warnings = []
+                    try:
+                        raw_1d = await fetch_klines(session, sym, "1d", 250)
+                        if raw_1d:
+                            indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
+                            emergency_warnings = get_1d_emergency_warnings(indic_1d)
+                            if emergency_warnings:
+                                logging.warning(f"⚠️ 1D EMERGENCY for {sym}: {emergency_warnings}")
+                                indicators["_1d_emergency_warnings"] = emergency_warnings
+                    except Exception as e:
+                        logging.error(f"❌ 1D emergency check failed for {sym}: {e}")
+
+                    # Single AI call: mode="scan" for full multi-TF verdict (no double call)
                     ai_text = await ask_ai_analysis(
-                        sym, tf, indicators, mode="auto", lang=_lang, mtf_data=mtf_data,
+                        sym, tf, indicators, mode="scan", lang=_lang, mtf_data=mtf_data,
                         api_key_override=_mon_key, model_override=_mon_model
                     )
                     ai_calls += 1
@@ -522,39 +537,12 @@ async def monitor_recheck_loop(session):
 
                         logging.info(f"🟢 UPGRADED: {sym} → {direction} {conf}% (was {m.get('reason','?')})")
 
-                        # === 1D EMERGENCY CHECK (macro risk for upgraded signals) ===
-                        emergency_warnings = []
-                        try:
-                            raw_1d = await fetch_klines(session, sym, "1d", 250)
-                            if raw_1d:
-                                indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
-                                emergency_warnings = get_1d_emergency_warnings(indic_1d)
-                                if emergency_warnings:
-                                    logging.warning(f"⚠️ 1D EMERGENCY for {sym}: {emergency_warnings}")
-                        except Exception as e:
-                            logging.error(f"❌ 1D emergency check failed for {sym}: {e}")
-
-                        # === FULL SIGNAL: chart + AI verdict (same as normal breakout) ===
-                        # Get extended AI analysis for the signal
-                        # Append 1D warnings to indicators so AI sees them
-                        if emergency_warnings:
-                            indicators["_1d_emergency_warnings"] = emergency_warnings
-
-                        ai_full = await ask_ai_analysis(
-                            sym, tf, indicators, mode="extended",
-                            extended=True, lang=_lang, mtf_data=mtf_data,
-                            api_key_override=_mon_key, model_override=_mon_model
-                        )
-                        ai_calls += 1
-
-                        # Extract brief part for caption
-                        if not ai_full or ai_full.startswith("❌"):
-                            ai_brief = f"⚠️ AI timeout — но сигнал апгрейднулся:\n{sym} {tf} {direction} {conf}%"
-                            logging.warning(f"⚠️ UPGRADED {sym} but AI returned: {ai_full}")
-                        else:
-                            ai_brief = ai_full
-                            if "---" in ai_full:
-                                ai_brief = ai_full.split("---", 1)[0].strip()
+                        # Use the full AI text we already have (no second call needed)
+                        ai_brief = ai_text or f"🟢 UPGRADED: {sym} {tf} {direction} {conf}%"
+                        if ai_brief and "---" in ai_brief:
+                            ai_brief = ai_brief.split("---", 1)[0].strip()
+                        if not ai_brief or ai_brief.startswith("❌"):
+                            ai_brief = f"🟢 UPGRADED: {sym} {tf} {direction} {conf}%"
 
                         # Draw chart
                         chart_path = None
@@ -608,7 +596,7 @@ async def monitor_recheck_loop(session):
                         update_monitor_checked(m["key"])
                         logging.info(f"🔵 MONITOR still: {sym} (AI: {max(long_pct,short_pct):.0f}%, ADX {adx_val:.0f})")
 
-                    await asyncio.sleep(10)  # rate limit between AI calls
+                    await asyncio.sleep(20)  # rate limit between AI calls (20s cooldown)
 
                 except Exception as e:
                     logging.error(f"❌ Monitor {m.get('symbol','?')}: {e}")
