@@ -393,7 +393,7 @@ ${base_coin} Analysis🤔
 
 ---
 
-SECOND PART (extended analysis — detailed but compact):
+SECOND PART (extended analysis, STRICT 2000-3800 characters — DO NOT EXCEED 3800):
 
 *🔬 ${base_coin} Extended Analysis*
 
@@ -421,11 +421,11 @@ FOR EACH TIMEFRAME (⏱ 1D, 4H, 1H, 15m) write ONE compact block:
 
 💰 Entry/SL/TP reasoning: [which indicators converge at these levels]{risk_prompt_rule}
 
-COMPACT FORMAT IS CRITICAL — use abbreviations, skip redundant details, keep each indicator to ONE short line.
+COMPACT FORMAT IS CRITICAL — use abbreviations, skip redundant details, keep each indicator to ONE short line. Total MUST be 2000-3800 characters.
 
 CRITICAL RULES:
 1. First part: brief signal summary following the template above. Do NOT count characters.
-2. Second part: detailed analysis, keep compact but thorough.
+2. Second part MUST be 2000-3800 characters. No more, no less.
 3. Separate parts with exactly --- on its own line
 4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
@@ -478,7 +478,7 @@ IMPORTANT DIRECTIONAL RULES:
 - Each indicator has historical context showing dynamics over multiple candles
 
 THIS IS FOR BINANCE SQUARE POST — PLAIN TEXT ONLY, NO BOLD, NO MARKDOWN, NO * symbols.
-Keep response concise — aim for roughly 1300-1900 characters but do NOT count them manually.
+Your response MUST be between 1300 and 1900 characters (counting all characters, spaces, emoji). Count carefully!
 
 MANDATORY OUTPUT FORMAT:
 
@@ -513,7 +513,7 @@ RULES:
 2. Entry = current price. Safe = better entry from support/OB
 3. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
-5. Keep response concise. Do NOT count characters.
+5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
 7. RSI RULES (MOMENTUM-AWARE):
    - ALWAYS show RSI value when >70: "⚠️ RSI [value]" — MANDATORY.
