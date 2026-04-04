@@ -608,25 +608,35 @@ async def monitor_recheck_loop(session):
                             except Exception as e:
                                 logging.error(f"❌ Monitor upgrade send: {e}")
 
-                        # Parse trade params and add to breakout log
+                        # Parse trade params from AI text
                         ai_params = parse_ai_trade_params(ai_brief) if ai_brief else {}
-                        add_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
-                                          "monitor_upgrade",
-                                          ai_direction=direction,
-                                          ai_entry=ai_params.get("ai_entry", current_price),
-                                          ai_sl=ai_params.get("ai_sl"),
-                                          ai_tp=ai_params.get("ai_tp"),
-                                          ai_leverage=FIXED_LEVERAGE,
-                                          ai_deposit_pct=FIXED_DEPOSIT_PCT)
-                        # Also add to separate monitor bank log
-                        add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
-                                          "monitor_upgrade",
-                                          ai_direction=direction,
-                                          ai_entry=ai_params.get("ai_entry", current_price),
-                                          ai_sl=ai_params.get("ai_sl"),
-                                          ai_tp=ai_params.get("ai_tp"),
-                                          ai_leverage=FIXED_LEVERAGE,
-                                          ai_deposit_pct=FIXED_DEPOSIT_PCT)
+
+                        # Add to MONITOR bank log FIRST (independent, own try/except)
+                        try:
+                            add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
+                                              "monitor_upgrade",
+                                              ai_direction=direction,
+                                              ai_entry=ai_params.get("ai_entry", current_price),
+                                              ai_sl=ai_params.get("ai_sl"),
+                                              ai_tp=ai_params.get("ai_tp"),
+                                              ai_leverage=FIXED_LEVERAGE,
+                                              ai_deposit_pct=FIXED_DEPOSIT_PCT)
+                            logging.info(f"✅ Monitor bank entry added: {sym} {tf} {direction} @ {ai_params.get('ai_entry', current_price)}")
+                        except Exception as e:
+                            logging.error(f"❌ Failed to add monitor bank entry for {sym}: {e}")
+
+                        # Add to main breakout log (separate)
+                        try:
+                            add_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
+                                              "monitor_upgrade",
+                                              ai_direction=direction,
+                                              ai_entry=ai_params.get("ai_entry", current_price),
+                                              ai_sl=ai_params.get("ai_sl"),
+                                              ai_tp=ai_params.get("ai_tp"),
+                                              ai_leverage=FIXED_LEVERAGE,
+                                              ai_deposit_pct=FIXED_DEPOSIT_PCT)
+                        except Exception as e:
+                            logging.error(f"❌ Failed to add breakout entry for {sym}: {e}")
                     else:
                         update_monitor_checked(m["key"])
                         logging.info(f"🔵 MONITOR still: {sym} (AI: {max(long_pct,short_pct):.0f}%, ADX {adx_val:.0f})")
