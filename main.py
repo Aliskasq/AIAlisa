@@ -37,34 +37,34 @@ logging.basicConfig(
 )
 
 async def log_cleanup_task():
-    """Background task: at 23:55 UTC daily, truncate bot.log and remove log files older than 3 days."""
+    """Background task: every 6 hours, remove log lines older than 3 days from bot.log."""
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            if now.hour == 23 and now.minute == 55:
-                # Truncate main bot.log (keep last 1000 lines)
-                log_file = "bot.log"
-                if os.path.exists(log_file):
-                    with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-                    if len(lines) > 1000:
-                        with open(log_file, "w", encoding="utf-8") as f:
-                            f.writelines(lines[-1000:])
-                        logging.info(f"🧹 Log cleanup: bot.log trimmed from {len(lines)} to 1000 lines")
+            await asyncio.sleep(6 * 3600)  # every 6 hours
 
-                # Remove old log files from logs/ directory (older than 3 days)
-                logs_dir = "logs"
-                if os.path.isdir(logs_dir):
-                    cutoff = now.timestamp() - (3 * 86400)
-                    for fname in os.listdir(logs_dir):
-                        fpath = os.path.join(logs_dir, fname)
-                        if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
-                            os.remove(fpath)
-                            logging.info(f"🧹 Log cleanup: removed old log {fname}")
+            log_file = "bot.log"
+            if not os.path.exists(log_file):
+                continue
 
-                await asyncio.sleep(120)  # Skip rest of this minute window
-            else:
-                await asyncio.sleep(30)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+            kept = []
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    # Parse timestamp from log line: "2026-04-04 16:00:00,123 - ..."
+                    try:
+                        ts_str = line[:23]  # "2026-04-04 16:00:00,123"
+                        ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S,%f").replace(tzinfo=timezone.utc)
+                        if ts >= cutoff:
+                            kept.append(line)
+                    except (ValueError, IndexError):
+                        # Can't parse timestamp — keep the line (continuation / traceback)
+                        kept.append(line)
+
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.writelines(kept)
+
+            logging.info(f"🧹 Log cleanup: bot.log trimmed to {len(kept)} lines (removed entries older than 3 days)")
+
         except Exception as e:
             logging.error(f"❌ Log cleanup error: {e}")
             await asyncio.sleep(60)
