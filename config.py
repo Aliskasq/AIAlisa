@@ -119,6 +119,31 @@ def update_bank_with_trades(trades_pnl):
     save_virtual_bank(bank)
     return bank
 
+def update_env_file(key: str, value: str):
+    """Update or add a key=value pair in the .env file (persists across restarts)."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    lines = []
+    found = False
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(f"{key}=") or stripped.startswith(f"{key} ="):
+            new_lines.append(f"{key}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append(f"{key}={value}\n")
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+    logging.info(f"💾 .env updated: {key}=...{value[-6:]}" if len(value) > 6 else f"💾 .env updated: {key}")
+
+
 def load_alerts():
     if os.path.exists(ALERTS_FILE):
         try:

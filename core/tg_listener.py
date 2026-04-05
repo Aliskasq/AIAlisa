@@ -1522,6 +1522,59 @@ async def telegram_polling_loop(app_session):
                             continue
 
                         # ==========================================
+                        # API KEY COMMANDS (/key)
+                        # ==========================================
+                        if text.startswith("/key"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
+
+                            parts = original_text.split(maxsplit=2)
+                            # /key — show current keys (masked)
+                            if len(parts) == 1:
+                                main_key = _cfg.OPENROUTER_API_KEY or ""
+                                mon_key = _cfg.OPENROUTER_API_KEY_MONITOR or ""
+                                main_masked = f"...{main_key[-8:]}" if len(main_key) > 8 else ("✅ set" if main_key else "❌ not set")
+                                mon_masked = f"...{mon_key[-8:]}" if len(mon_key) > 8 else ("❌ not set (using main)" if not mon_key else "✅ set")
+                                await send_response(app_session, chat_id,
+                                    f"🔑 *API Keys:*\n\n"
+                                    f"🧠 Main: `{main_masked}`\n"
+                                    f"🔵 Monitor: `{mon_masked}`\n\n"
+                                    f"Сменить: `/key <new-key>`\n"
+                                    f"Monitor: `/key monitor <new-key>`",
+                                    msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /key monitor <new-key> — switch monitor API key
+                            if parts[1].lower() == "monitor":
+                                if len(parts) >= 3 and parts[2].strip():
+                                    new_key = parts[2].strip()
+                                    _cfg.OPENROUTER_API_KEY_MONITOR = new_key
+                                    _cfg.update_env_file("OPENROUTER_API_KEY_MONITOR", new_key)
+                                    masked = f"...{new_key[-8:]}" if len(new_key) > 8 else new_key
+                                    await send_response(app_session, chat_id,
+                                        f"✅ Monitor API key updated & saved: `{masked}`",
+                                        msg_id, parse_mode="Markdown")
+                                    logging.info(f"🔑 Monitor API key changed by admin (persisted to .env)")
+                                else:
+                                    await send_response(app_session, chat_id,
+                                        "Usage: `/key monitor <new-api-key>`",
+                                        msg_id, parse_mode="Markdown")
+                                continue
+
+                            # /key <new-key> — switch main API key
+                            new_key = parts[1].strip()
+                            _cfg.OPENROUTER_API_KEY = new_key
+                            agent.analyzer.OPENROUTER_API_KEY = new_key
+                            _cfg.update_env_file("OPENROUTER_API_KEY", new_key)
+                            masked = f"...{new_key[-8:]}" if len(new_key) > 8 else new_key
+                            await send_response(app_session, chat_id,
+                                f"✅ Main API key updated & saved: `{masked}`",
+                                msg_id, parse_mode="Markdown")
+                            logging.info(f"🔑 Main API key changed by admin (persisted to .env)")
+                            continue
+
+                        # ==========================================
                         # BLOCK 1: AI MODEL COMMANDS (/models)
                         # ==========================================
                         if text.startswith("/models") or text.startswith("/model"):
