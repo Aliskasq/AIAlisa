@@ -502,7 +502,8 @@ async def main():
                         adx_trend = last_indic_row.get("adx_trend", "stable")
                         adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
                         tier = classify_signal(long_pct, short_pct, adx_value,
-                                              adx_trend=adx_trend, adx_avg_50=adx_avg_50)
+                                              adx_trend=adx_trend, adx_avg_50=adx_avg_50,
+                                              mtf_data=item.get("mtf_data"))
 
                         if tier == "monitor" and not ai_has_error:
                             # 🔵 MONITOR — add to monitor queue + send full signal to monitor group
@@ -572,9 +573,19 @@ async def main():
                                 logging.error(f"❌ Monitor send error for {sym}: {_me}")
 
                             # Add to breakout log as info-only (no P&L impact)
+                            # Save with ACTUAL AI verdict:
+                            # - "SKIP" if AI said SKIP → ⚪ white dot, no P&L
+                            # - "LONG"/"SHORT" if AI gave direction but low confidence → 🟢/🔴 dot, tracked in P&L
+                            # - "" if AI didn't respond → ⚫ black dot
+                            _monitor_save_dir = _ai_dir  # actual AI verdict (LONG/SHORT/SKIP/"")
+                            _monitor_entry = _ai_params.get("ai_entry") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
+                            _monitor_sl = _ai_params.get("ai_sl") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
+                            _monitor_tp = _ai_params.get("ai_tp") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
-                                               ai_direction="",  # empty = no trade
-                                               ai_entry=None, ai_sl=None, ai_tp=None,
+                                               ai_direction=_monitor_save_dir,
+                                               ai_entry=_monitor_entry,
+                                               ai_sl=_monitor_sl,
+                                               ai_tp=_monitor_tp,
                                                ai_leverage=1, ai_deposit_pct=2.0)
                             alerts_to_remove.append(item["alert"])
                             continue

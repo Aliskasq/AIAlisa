@@ -28,33 +28,84 @@ FIXED_DEPOSIT_PCT = 2  # 2% of bank per trade
 
 
 def classify_signal(long_pct: float, short_pct: float, adx: float,
-                    adx_trend: str = "stable", adx_avg_50: float = 0) -> str:
+                    adx_trend: str = "stable", adx_avg_50: float = 0,
+                    mtf_data: dict = None) -> str:
     """
     Classify signal tier based on confidence and market regime.
     
-    Uses ADX from 4H (primary breakout TF) + its 50-candle dynamics.
+    Uses ADX from 4H (primary breakout TF) + its 50-candle dynamics + MTF context.
     
-    MOMENTUM OVERRIDE: If ADX > 30 (strong trend), lower threshold to 55%.
-    RISING ADX BONUS: If ADX is rising (trend strengthening), treat ADX 25+ as strong.
-    This prevents missing +200% pumps where RSI is always overbought.
+    KEY INSIGHT: Low ADX on 4H doesn't always mean flat market.
+    - ADX low + RISING → trend just starting (breakout from consolidation) → DON'T penalize
+    - ADX low + FALLING → trend dying → penalize
+    - ADX low on 4H but HIGH on 1H/15m → early trend, 4H hasn't caught up yet → DON'T penalize
     
     Returns: "full" or "monitor"
     """
     confidence = max(long_pct, short_pct)
     
-    # Effective ADX: if trend is strengthening, give it a boost
-    effective_adx = adx
-    if adx_trend == "rising" and adx >= 20:
-        effective_adx = adx + 5  # rising trend is more significant
+    # === MULTI-TF ADX CONTEXT ===
+    # 4H ADX lags behind — check if lower TFs already show strong trend
+    mtf_adx_boost = False
+    if mtf_data:
+        adx_1h = mtf_data.get("1H", {}).get("adx", 0)
+        adx_15m = mtf_data.get("15m", {}).get("adx", 0)
+        # If 1H or 15m shows strong trend (ADX > 25), the 4H is just lagging
+        if adx_1h >= 25 or adx_15m >= 30:
+            mtf_adx_boost = True
     
-    # Momentum override: strong trend = lower threshold
+    # === EFFECTIVE ADX CALCULATION ===
+    effective_adx = adx
+    
+    # Rising ADX = trend is STARTING or STRENGTHENING
+    if adx_trend == "rising":
+        if adx >= 15:
+            effective_adx = adx + 8  # rising from 15+ = strong start signal
+        elif adx >= 10:
+            effective_adx = adx + 5  # rising from very low = early but promising
+    
+    # Lower TFs show trend that 4H hasn't caught up to yet
+    if mtf_adx_boost and effective_adx < ADX_TRENDING:
+        effective_adx = max(effective_adx, ADX_TRENDING)  # treat as trending
+    
+    # ADX was high recently (avg_50 > 25) but currently low = pullback, not dead market
+    if adx_avg_50 >= 25 and adx < ADX_TRENDING and adx_trend != "falling":
+        effective_adx = max(effective_adx, ADX_TRENDING)  # was trending recently
+    
+    # === CLASSIFICATION ===
+    # Momentum override: strong trend = lower confidence threshold
     if effective_adx >= 30 and confidence >= 55:
         return "full"  # Strong trend + decent confidence = go
     
+    # Standard: confidence ≥ 65% + trending market
     if confidence >= CONFIDENCE_FULL and effective_adx >= ADX_TRENDING:
         return "full"
-    else:
-        return "monitor"
+    
+    # Lowered threshold when ALL timeframes agree on direction
+    # Uses lightweight DI+/DI- check instead of full format_tf_summary
+    if mtf_data and confidence >= 55 and effective_adx >= 15:
+        direction = "LONG" if long_pct > short_pct else "SHORT"
+        all_agree = True
+        for tf_name in ["1H", "15m"]:
+            tf_indic = mtf_data.get(tf_name, {})
+            if tf_indic:
+                di_plus = tf_indic.get("di_plus", 0)
+                di_minus = tf_indic.get("di_minus", 0)
+                ema7 = tf_indic.get("ema7", 0)
+                ema25 = tf_indic.get("ema25", 0)
+                # Check if TF agrees with direction
+                if direction == "LONG":
+                    if di_minus > di_plus and ema7 < ema25:
+                        all_agree = False
+                        break
+                else:  # SHORT
+                    if di_plus > di_minus and ema7 > ema25:
+                        all_agree = False
+                        break
+        if all_agree:
+            return "full"  # All TFs agree + decent confidence = go
+    
+    return "monitor"
 
 
 def parse_confidence_from_ai(ai_text: str) -> tuple:
@@ -429,7 +480,7 @@ async def monitor_recheck_loop(session):
     from core.chart_drawer import draw_scan_chart, draw_simple_chart
     from config import (BOT_TOKEN, GROUP_CHAT_ID, MONITOR_GROUP_CHAT_ID,
                          OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR,
-                         add_breakout_entry, add_monitor_breakout_entry, parse_ai_trade_params)
+                         add_breakout_entry, upgrade_breakout_entry, add_monitor_breakout_entry, parse_ai_trade_params)
 
     logging.info("🔄 Monitor recheck loop started (two-phase: indicators → AI)")
 
@@ -532,7 +583,8 @@ async def monitor_recheck_loop(session):
                     adx_trend_val = indicators.get("adx_trend", "stable")
                     adx_avg_val = indicators.get("adx_avg_50", 0)
                     new_tier = classify_signal(long_pct, short_pct, adx_val,
-                                             adx_trend=adx_trend_val, adx_avg_50=adx_avg_val)
+                                             adx_trend=adx_trend_val, adx_avg_50=adx_avg_val,
+                                             mtf_data=mtf_data)
 
                     if new_tier == "full":
                         remove_monitor(m["key"])
@@ -625,10 +677,9 @@ async def monitor_recheck_loop(session):
                         except Exception as e:
                             logging.error(f"❌ Failed to add monitor bank entry for {sym}: {e}")
 
-                        # Add to main breakout log (separate)
+                        # Upgrade existing breakout entry (overwrites SKIP/LONG/SHORT from initial monitor)
                         try:
-                            add_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
-                                              "monitor_upgrade",
+                            upgrade_breakout_entry(sym, tf,
                                               ai_direction=direction,
                                               ai_entry=ai_params.get("ai_entry", current_price),
                                               ai_sl=ai_params.get("ai_sl"),
@@ -636,7 +687,7 @@ async def monitor_recheck_loop(session):
                                               ai_leverage=FIXED_LEVERAGE,
                                               ai_deposit_pct=FIXED_DEPOSIT_PCT)
                         except Exception as e:
-                            logging.error(f"❌ Failed to add breakout entry for {sym}: {e}")
+                            logging.error(f"❌ Failed to upgrade breakout entry for {sym}: {e}")
                     else:
                         update_monitor_checked(m["key"])
                         logging.info(f"🔵 MONITOR still: {sym} (AI: {max(long_pct,short_pct):.0f}%, ADX {adx_val:.0f})")

@@ -245,6 +245,36 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
         log.append(entry)
         save_breakout_log(log)
 
+def upgrade_breakout_entry(symbol, tf, ai_direction, ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
+    """Upgrade an existing SKIP entry to a real trade (called when monitor upgrades).
+    If no existing entry found, adds a new one."""
+    log = load_breakout_log()
+    found = False
+    for entry in log:
+        if entry["symbol"] == symbol and entry["tf"] == tf:
+            entry["ai_direction"] = ai_direction.upper() if ai_direction else ""
+            if ai_entry is not None:
+                entry["ai_entry"] = round(ai_entry, 8)
+                entry["current_price"] = round(ai_entry, 8)  # update price to upgrade moment
+            if ai_sl is not None:
+                entry["ai_sl"] = round(ai_sl, 8)
+            if ai_tp is not None:
+                entry["ai_tp"] = round(ai_tp, 8)
+            if ai_leverage is not None:
+                entry["ai_leverage"] = ai_leverage
+            if ai_deposit_pct is not None:
+                entry["ai_deposit_pct"] = ai_deposit_pct
+            entry["upgraded_at"] = datetime.now(timezone.utc).isoformat()
+            found = True
+            break
+    if found:
+        save_breakout_log(log)
+        logging.info(f"🔄 Breakout entry upgraded: {symbol} {tf} → {ai_direction}")
+    else:
+        # No existing entry — add new (shouldn't normally happen)
+        add_breakout_entry(symbol, tf, 0, ai_entry or 0, "monitor_upgrade",
+                          ai_direction, ai_entry, ai_sl, ai_tp, ai_leverage, ai_deposit_pct)
+
 def clear_breakout_log():
     save_breakout_log([])
 
