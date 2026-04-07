@@ -934,7 +934,39 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "rsi_mom_bear_div": rsi_mom_bear_div,
         "rsi_mom_bull_div_detail": rsi_mom_bull_div_detail,
         "rsi_mom_bear_div_detail": rsi_mom_bear_div_detail,
+
+        # ATR (Average True Range)
+        "atr14_value": round(float(last['atr14']), 8) if not pd.isna(last['atr14']) else 0,
     }
+
+    # --- ATR Historical Context ---
+    atr_pct = 0
+    atr_trend = "stable"
+    atr_expanding = False
+    atr_percentile_50 = 0.5
+
+    if len(df) >= 50:
+        atr_50 = df['atr14'].tail(50)
+        atr_current = float(last['atr14']) if not pd.isna(last['atr14']) else 0
+        if current_price > 0 and atr_current > 0:
+            atr_pct = (atr_current / current_price) * 100
+        # ATR trend: first 10 avg vs last 10 avg
+        atr_first_10 = atr_50.head(10).mean()
+        atr_last_10 = atr_50.tail(10).mean()
+        if atr_first_10 > 0:
+            atr_change = ((atr_last_10 - atr_first_10) / atr_first_10) * 100
+            if atr_change > 10:
+                atr_trend = "rising"
+                atr_expanding = True
+            elif atr_change < -10:
+                atr_trend = "falling"
+        # Percentile rank within 50 bars
+        atr_percentile_50 = float(atr_50.rank(pct=True).iloc[-1])
+
+    last_indic_row["atr_pct"] = round(atr_pct, 3)
+    last_indic_row["atr_trend"] = atr_trend
+    last_indic_row["atr_expanding"] = atr_expanding
+    last_indic_row["atr_percentile_50"] = round(atr_percentile_50, 2)
 
     return last_indic_row, df
 
@@ -1366,6 +1398,93 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
                        f"   → {rsi_mom_signal_txt}")
     raw_lines.append(rsi_mom_analysis)
 
+    # ── ATR VOLATILITY ANALYSIS ──
+    atr_val = indic.get('atr14_value', 0)
+    atr_pct_val = indic.get('atr_pct', 0)
+    atr_trend_val = indic.get('atr_trend', 'stable')
+    atr_expanding_val = indic.get('atr_expanding', False)
+    atr_percentile = indic.get('atr_percentile_50', 0.5)
+
+    if atr_expanding_val and adx_trend == "rising":
+        atr_signal = f"🟢 BREAKOUT CONDITIONS (ATR rising + ADX rising = volatility expansion with trend)"
+    elif atr_expanding_val:
+        atr_signal = f"⚠️ VOLATILITY EXPANDING (ATR rising but ADX not — choppy breakout or whipsaw?)"
+    elif atr_trend_val == "falling" and adx < 20:
+        atr_signal = f"🔴 FLAT MARKET (ATR falling + ADX weak = no volatility, no trend)"
+    elif atr_trend_val == "falling":
+        atr_signal = f"⚪ VOLATILITY CONTRACTING (potential squeeze building)"
+    else:
+        atr_signal = f"⚪ STABLE VOLATILITY"
+
+    idx += 1
+    atr_analysis = (f"{idx}. ATR: {atr_val:.8f} ({atr_pct_val:.2f}% of price) | Trend: {atr_trend_val} | "
+                   f"Percentile: {atr_percentile:.0%} of 50bar range\n"
+                   f"   {'EXPANDING ↑' if atr_expanding_val else ('CONTRACTING ↓' if atr_trend_val == 'falling' else 'STABLE →')}"
+                   f" | ADX {adx_trend}: {'BREAKOUT COMBO' if atr_expanding_val and adx_trend == 'rising' else 'normal'}\n"
+                   f"   → {atr_signal}")
+    raw_lines.append(atr_analysis)
+
+    # ── INTER-INDICATOR CONFLUENCES ──
+    # Detect powerful multi-indicator alignments that are stronger than sum of parts
+    confluences = []
+    confluence_bull_bonus = 0.0
+    confluence_bear_bonus = 0.0
+
+    # --- BULLISH CONFLUENCES ---
+    # 1. EMA golden cross + MACD turned positive + OBV rising = strong bull
+    ema_bull = (ema7 > ema25 > ema99)
+    macd_bull = ("BULLISH" in macd_signal and hist_direction in ["growing", "turned_positive"])
+    obv_bull = ("Accumulation" in obv_status)
+    if ema_bull and macd_bull and obv_bull:
+        confluences.append("🟢 BULL CONFLUENCE: EMA aligned + MACD growing + OBV accumulation")
+        confluence_bull_bonus += 0.5
+
+    # 2. SuperTrend bullish + ADX rising + ATR expanding = breakout confirmed
+    st_bull = ("BULLISH" in st_status)
+    adx_rising = (adx_trend == "rising" and adx > 20)
+    if st_bull and adx_rising and atr_expanding_val:
+        confluences.append("🟢 BREAKOUT CONFLUENCE: SuperTrend bull + ADX rising + ATR expanding")
+        confluence_bull_bonus += 0.5
+
+    # 3. Price above all EMAs + OBV rising + CMF positive = accumulation trend
+    price_above_emas = (price > ema7 and price > ema25 and price > ema99)
+    cmf_positive = (cmf > 0.05)
+    if price_above_emas and obv_bull and cmf_positive:
+        confluences.append("🟢 ACCUMULATION CONFLUENCE: Price>all EMAs + OBV rising + CMF buying")
+        confluence_bull_bonus += 0.3
+
+    # --- BEARISH CONFLUENCES ---
+    # 4. RSI overbought + OBV bearish divergence + MACD fading = reversal warning
+    rsi_ob = (rsi > 70)
+    obv_bear_div = (obv_divergence == "bearish")
+    macd_fading = (hist_direction == "fading_bullish")
+    if rsi_ob and obv_bear_div and macd_fading:
+        confluences.append("🔴 REVERSAL CONFLUENCE: RSI overbought + OBV bearish divergence + MACD fading")
+        confluence_bear_bonus += 0.5
+
+    # 5. EMA death cross + SuperTrend bearish + CMF negative = strong bear
+    ema_bear = (ema7 < ema25 < ema99)
+    st_bear = ("BEARISH" in st_status)
+    cmf_negative = (cmf < -0.05)
+    if ema_bear and st_bear and cmf_negative:
+        confluences.append("🔴 BEAR CONFLUENCE: EMA aligned down + SuperTrend bear + CMF selling")
+        confluence_bear_bonus += 0.5
+
+    # 6. RSI-Mom bearish divergence + MACD turning negative + ADX falling = trend exhaustion
+    rsi_mom_bear_div = indic.get('rsi_mom_bear_div', False)
+    macd_turning_neg = (hist_direction == "turned_negative")
+    adx_falling = (adx_trend == "falling")
+    if rsi_mom_bear_div and (macd_turning_neg or macd_fading) and adx_falling:
+        confluences.append("🔴 EXHAUSTION CONFLUENCE: RSI-Mom divergence + MACD weakening + ADX falling")
+        confluence_bear_bonus += 0.3
+
+    if confluences:
+        confluence_text = "\n".join(f"   {c}" for c in confluences)
+        idx += 1
+        confluence_analysis = (f"{idx}. CONFLUENCES DETECTED ({len(confluences)}):\n{confluence_text}\n"
+                              f"   → Bull bonus: +{confluence_bull_bonus:.1f} | Bear bonus: +{confluence_bear_bonus:.1f}")
+        raw_lines.append(confluence_analysis)
+
     # ── GROUPED VOTING SCORECARD WITH DYNAMIC ADX WEIGHTS ──
     # Each group votes as ONE unit (majority within group decides).
     # Dynamic weights: ADX>25 → trend/momentum ×1.5, oscillators ×0.5
@@ -1483,6 +1602,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
             bearish_weight += 0.5
             oi_impact = " +OI📉"
 
+    # --- Confluence bonuses ---
+    bullish_weight += confluence_bull_bonus
+    bearish_weight += confluence_bear_bonus
+
     # --- Final LONG/SHORT percentage ---
     total_weight = bullish_weight + bearish_weight
     if total_weight > 0:
@@ -1496,8 +1619,12 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
 
     adx_note = f"ADX={adx:.0f}({trend_strength.lower()}, DI+ {'dominant' if di_plus > di_minus else 'weak'})"
 
+    confluence_note = ""
+    if confluence_bull_bonus > 0 or confluence_bear_bonus > 0:
+        confluence_note = f" | Confluence: +{confluence_bull_bonus:.1f}🟢 +{confluence_bear_bonus:.1f}🔴"
+
     consensus_lines = [
-        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}",
+        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}",
         f"   Weights: Trend/Mom ×{w_mult['trend']:.1f} | Oscillators ×{w_mult['oscillator']:.1f} | Vol/Volat/Dir ×1.0",
         f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}",
     ] + group_details
