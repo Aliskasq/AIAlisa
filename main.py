@@ -25,7 +25,7 @@ from core.tg_listener import SCAN_SCHEDULE
 from core.signal_pipeline import (
     classify_signal, parse_confidence_from_ai,
     check_volume_filter, get_volume_12h,
-    add_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
+    add_monitor, add_volume_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
     get_1d_emergency_warnings
 )
 
@@ -106,6 +106,68 @@ async def log_cleanup_task():
             logging.error(f"❌ Log cleanup error: {e}")
             await asyncio.sleep(60)
 
+async def volume_recheck_loop(session):
+    """
+    Background loop: every 60s checks volume monitors ($1M-$2M coins).
+    If volume crosses $2M threshold → re-inject into breakout queue as full signal.
+    No AI call here — just volume check (free kline fetch).
+    """
+    from core.signal_pipeline import (
+        get_due_volume_monitors, update_volume_monitor_checked,
+        remove_volume_monitor, cleanup_expired_volume_monitors,
+        get_volume_12h, check_volume_filter
+    )
+    from config import SIGNAL_MIN_VOLUME_12H
+
+    logging.info("📊 Volume monitor loop started (recheck $1M-$2M coins every 30min)")
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            cleanup_expired_volume_monitors()
+            due = get_due_volume_monitors()
+            if not due:
+                continue
+
+            logging.info(f"📊 Volume monitor: {len(due)} due for recheck")
+
+            for m in due:
+                try:
+                    sym = m["symbol"]
+                    new_vol = await get_volume_12h(session, sym)
+                    vol_tier = check_volume_filter(new_vol)
+
+                    if vol_tier == "full":
+                        # Volume crossed $2M! Remove from volume monitor.
+                        # It will be picked up on the next scan cycle naturally.
+                        remove_volume_monitor(m["key"])
+                        logging.info(
+                            f"📊✅ VOL UPGRADED: {sym} vol ${new_vol:,.0f} crossed $2M "
+                            f"(was ${m.get('initial_volume_12h', 0):,.0f})"
+                        )
+                    elif vol_tier == "skip":
+                        # Volume dropped below $1M — remove
+                        remove_volume_monitor(m["key"])
+                        logging.info(f"📊❌ VOL DROPPED: {sym} vol ${new_vol:,.0f} < $1M, removed")
+                    else:
+                        # Still in $1M-$2M range — update and wait
+                        update_volume_monitor_checked(m["key"], new_vol)
+                        logging.info(
+                            f"📊 VOL STILL LOW: {sym} vol ${new_vol:,.0f} "
+                            f"(need ${SIGNAL_MIN_VOLUME_12H:,.0f})"
+                        )
+
+                    await asyncio.sleep(1)  # small delay between kline fetches
+
+                except Exception as e:
+                    logging.error(f"❌ Volume monitor {m.get('symbol', '?')}: {e}")
+                    update_volume_monitor_checked(m["key"], m.get("last_volume_12h", 0))
+
+        except Exception as e:
+            logging.error(f"❌ Volume monitor loop error: {e}")
+            await asyncio.sleep(60)
+
+
 async def main():
     # Ensure data directory exists on fresh installs
     os.makedirs("data", exist_ok=True)
@@ -146,6 +208,9 @@ async def main():
         # Start monitor recheck loop (re-evaluates MONITOR signals every 30 min)
         from core.signal_pipeline import monitor_recheck_loop
         asyncio.create_task(monitor_recheck_loop(session))
+
+        # Start volume monitor loop (rechecks $1M-$2M coins every 30 min)
+        asyncio.create_task(volume_recheck_loop(session))
 
 
         while True:
@@ -394,8 +459,17 @@ async def main():
                             continue
                         try:
                             volume_12h = await get_volume_12h(session, item["symbol"])
-                            if not check_volume_filter(volume_12h):
-                                logging.info(f"⏭ {item['symbol']}: 12h vol ${volume_12h:,.0f} < $500K, skip")
+                            vol_tier = check_volume_filter(volume_12h)
+                            if vol_tier == "skip":
+                                logging.info(f"⏭ {item['symbol']}: 12h vol ${volume_12h:,.0f} < $1M, skip")
+                                alerts_to_remove.append(item["alert"])
+                                continue
+                            elif vol_tier == "monitor":
+                                logging.info(f"📊 {item['symbol']}: 12h vol ${volume_12h:,.0f} ($1M-$2M), adding to volume monitor")
+                                add_volume_monitor(
+                                    item["symbol"], item.get("tf", "4H"), volume_12h,
+                                    item.get("price", 0), item.get("breakout_pct", 0)
+                                )
                                 alerts_to_remove.append(item["alert"])
                                 continue
                             item["volume_12h"] = volume_12h

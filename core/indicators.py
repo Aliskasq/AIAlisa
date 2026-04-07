@@ -1131,7 +1131,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     bb_width_pct = ((bb_upper - bb_lower) / bb_mid) * 100 if bb_mid > 0 else 0
     
     if price >= bb_upper * 0.998:
-        bb_signal = f"⚠️ BEARISH (at upper band, potential resistance)"
+        if bb_walk_upper > 5:
+            bb_signal = f"🟢 BULLISH (walking upper band {bb_walk_upper}/50 candles — strong trend, not resistance)"
+        else:
+            bb_signal = f"⚠️ INFO: at upper band — no vote, check walking band context"
     elif price <= bb_lower * 1.002:
         bb_signal = f"⚠️ BULLISH (at lower band, potential support)"
     elif bb_pctb > 0.5:
@@ -1220,9 +1223,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     stoch_crosses = indic.get('stoch_kd_crosses_15', 0)
     
     if stoch_k > 80:
-        stoch_signal = f"⚠️ BEARISH VOTE (overbought zone)"
+        stoch_signal = f"⚠️ INFO: OVERBOUGHT ({stoch_k:.0f}) — no vote, AI decides with ADX context"
     elif stoch_k < 20:
-        stoch_signal = f"⚠️ BULLISH VOTE (oversold zone)"
+        stoch_signal = f"⚠️ INFO: OVERSOLD ({stoch_k:.0f}) — no vote, AI decides with ADX context"
     elif stoch_k > stoch_d:
         stoch_signal = f"🟢 BULLISH (K>D cross)"
     else:
@@ -1244,9 +1247,9 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     mfi_os = indic.get('mfi_oversold_bars_20', 0)
     
     if mfi > 80:
-        mfi_signal = f"⚠️ BEARISH (overbought)"
+        mfi_signal = f"⚠️ INFO: OVERBOUGHT ({mfi:.0f}) — no vote, AI decides with ADX context"
     elif mfi < 20:
-        mfi_signal = f"⚠️ BULLISH (oversold)"
+        mfi_signal = f"⚠️ INFO: OVERSOLD ({mfi:.0f}) — no vote, AI decides with ADX context"
     elif mfi > 50:
         mfi_signal = f"🟢 BULLISH"
     else:
@@ -1363,108 +1366,143 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
                        f"   → {rsi_mom_signal_txt}")
     raw_lines.append(rsi_mom_analysis)
 
-    # ── WEIGHTED VOTING SCORECARD ──
-    bullish_votes = 0
-    bearish_votes = 0
-    neutral_votes = 0
+    # ── GROUPED VOTING SCORECARD WITH DYNAMIC ADX WEIGHTS ──
+    # Each group votes as ONE unit (majority within group decides).
+    # Dynamic weights: ADX>25 → trend/momentum ×1.5, oscillators ×0.5
+    #                  ADX<20 → oscillators ×1.5, trend/momentum ×0.5
+    # OB/OS "INFO" signals = neutral (don't vote, AI decides with context)
+
+    def _classify_vote(sig):
+        """Classify signal as bull/bear/neutral. INFO signals = neutral."""
+        if "INFO" in sig:
+            return "neutral"
+        if "🟢" in sig or "BULLISH" in sig:
+            return "bull"
+        if "🔴" in sig or "BEARISH" in sig:
+            return "bear"
+        return "neutral"
+
+    def _group_majority(members):
+        """Group vote = majority direction. Tie = neutral."""
+        bulls = sum(1 for _, v in members if v == "bull")
+        bears = sum(1 for _, v in members if v == "bear")
+        if bulls > bears:
+            return "bull", bulls, bears
+        elif bears > bulls:
+            return "bear", bulls, bears
+        return "neutral", bulls, bears
+
+    # --- Classify all individual indicators ---
+    ema_v = _classify_vote(ema_signal)
+    st_v = "bull" if "BULLISH" in st_status else ("bear" if "BEARISH" in st_status else "neutral")
+    ichi_v = _classify_vote(ichi_signal) if is_higher_tf else None
+
+    macd_v = _classify_vote(macd_signal)
+    ccmi_v = _classify_vote(ccmi_signal_txt)
+    rsi_mom_v = _classify_vote(rsi_mom_signal_txt)
+
+    rsi_v = _classify_vote(rsi_signal)
+    stoch_v = _classify_vote(stoch_signal)
+    mfi_v = _classify_vote(mfi_signal)
+    imi_v = _classify_vote(imi_signal_txt)
+
+    obv_v = _classify_vote(obv_signal)
+    cmf_v = _classify_vote(cmf_signal)
+
+    bb_v = _classify_vote(bb_signal)
+    adx_v = _classify_vote(adx_signal)
+
+    # --- Build groups ---
+    trend_members = [("EMA", ema_v), ("SuperTrend", st_v)]
+    if ichi_v is not None:
+        trend_members.append(("Ichimoku", ichi_v))
+
+    momentum_members = [("MACD", macd_v), ("CCMI", ccmi_v), ("RSI-Mom", rsi_mom_v)]
+    oscillator_members = [("RSI", rsi_v), ("StochRSI", stoch_v), ("MFI", mfi_v), ("IMI", imi_v)]
+    volume_members = [("OBV", obv_v), ("CMF", cmf_v)]
+    volatility_members = [("BB", bb_v)]
+    direction_members = [("ADX/DI", adx_v)]
+
+    groups = [
+        ("Trend",      trend_members,      "trend"),
+        ("Momentum",   momentum_members,   "trend"),       # trend-like behaviour
+        ("Oscillators", oscillator_members, "oscillator"),
+        ("Volume",     volume_members,     "volume"),
+        ("Volatility", volatility_members, "volatility"),
+        ("Direction",  direction_members,  "direction"),
+    ]
+
+    # --- Dynamic weight multipliers based on ADX regime ---
+    if adx > 25:
+        w_mult = {"trend": 1.5, "oscillator": 0.5, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
+        regime = "TRENDING"
+    elif adx < 20:
+        w_mult = {"trend": 0.5, "oscillator": 1.5, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
+        regime = "RANGING"
+    else:
+        w_mult = {"trend": 1.0, "oscillator": 1.0, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
+        regime = "TRANSITION"
+
+    # --- Compute grouped scorecard ---
     bullish_weight = 0.0
     bearish_weight = 0.0
-    indicator_votes = []
-    
-    # Count votes with weights
-    voting_indicators = [
-        ("EMA", ema_signal, 0.5 if ema7_slope < 0 and "BULLISH" in ema_signal else 1.0),
-        ("RSI", rsi_signal, 1.0),  # RSI penalty handled separately
-        ("MACD", macd_signal, macd_vote_weight),
-        ("OBV", obv_signal, obv_vote_weight),
-        ("BB", bb_signal, 1.0),
-    ]
-    
-    # SuperTrend votes on all TFs; reduced weight on 15m (noisy but catches early reversals)
-    _st_weight = st_vote_weight * (0.5 if tf_upper == "15M" else 1.0)
-    voting_indicators.append(("SuperTrend", st_status.split()[1], _st_weight))
-    
-    if is_higher_tf:
-        ichi_vote = "🟢" if "🟢" in ichi_signal else ("🔴" if "🔴" in ichi_signal else "⚪")
-        voting_indicators.append(("Ichimoku", ichi_vote, 1.0))
-    
-    # Add new voting indicators
-    voting_indicators.extend([
-        ("ADX", adx_signal, 1.0),
-        ("StochRSI", stoch_signal, 1.0),
-        ("MFI", mfi_signal, 1.0),
-        ("CMF", cmf_signal, 1.0),
-        ("CCMI", ccmi_signal_txt, 1.0),
-        ("IMI", imi_signal_txt, 1.0),
-        ("RSI-Mom", rsi_mom_signal_txt, 1.0 if (rsi_mom_bull or rsi_mom_bear) else 0.5),
-    ])
-    
-    for name, signal, weight in voting_indicators:
-        if "🟢" in signal or "BULLISH" in signal:
-            bullish_votes += 1
-            bullish_weight += weight
-            if weight != 1.0:
-                indicator_votes.append(f"{name}=🟢½")
-            else:
-                indicator_votes.append(f"{name}=🟢")
-        elif "🔴" in signal or "BEARISH" in signal:
-            bearish_votes += 1
-            bearish_weight += weight
-            if "⚠️" in signal and ("overbought" in signal.lower() or "oversold" in signal.lower()):
-                indicator_votes.append(f"{name}=⚠️{'OB' if 'overbought' in signal.lower() else 'OS'}")
-            else:
-                indicator_votes.append(f"{name}=🔴")
+    group_details = []
+    bull_groups = 0
+    bear_groups = 0
+    neutral_groups = 0
+
+    for grp_name, members, category in groups:
+        direction, bulls, bears = _group_majority(members)
+        w = w_mult[category]
+
+        member_icons = "/".join(
+            f"{n}{'🟢' if v == 'bull' else ('🔴' if v == 'bear' else '⚪')}" for n, v in members
+        )
+
+        if direction == "bull":
+            bullish_weight += w
+            bull_groups += 1
+            group_details.append(f"  {grp_name}=🟢(×{w:.1f}) [{member_icons}]")
+        elif direction == "bear":
+            bearish_weight += w
+            bear_groups += 1
+            group_details.append(f"  {grp_name}=🔴(×{w:.1f}) [{member_icons}]")
         else:
-            neutral_votes += 1
-            indicator_votes.append(f"{name}=⚪")
-    
-    # Calculate base percentages
+            neutral_groups += 1
+            group_details.append(f"  {grp_name}=⚪ [{member_icons}]")
+
+    # --- Open Interest bonus (if available) ---
+    oi_impact = ""
+    positioning = indic.get("positioning", {})
+    if positioning and "oi_change_pct" in positioning:
+        oi_change = positioning.get("oi_change_pct", 0)
+        if oi_change > 5:
+            bullish_weight += 0.5
+            oi_impact = " +OI📈"
+        elif oi_change < -5:
+            bearish_weight += 0.5
+            oi_impact = " +OI📉"
+
+    # --- Final LONG/SHORT percentage ---
     total_weight = bullish_weight + bearish_weight
     if total_weight > 0:
         bull_pct = bullish_weight / total_weight * 100
         bear_pct = bearish_weight / total_weight * 100
     else:
         bull_pct = bear_pct = 50
-    
-    # RSI penalty REMOVED — AI decides based on ADX context (momentum-aware)
-    # Strong trend (ADX>30) + high RSI = normal momentum, not a penalty
-    penalty_text = ""
-    
-    # Check for Open Interest impact (if positioning data available)
-    oi_impact = ""
-    positioning = indic.get("positioning", {})
-    if positioning and "oi_change_pct" in positioning:
-        oi_change = positioning.get("oi_change_pct", 0)
-        if oi_change > 5:
-            bullish_weight += 0.5  # OI rising = bullish vote
-            oi_impact = " +OI📈"
-        elif oi_change < -5:
-            bearish_weight += 0.5  # OI falling = bearish vote
-            oi_impact = " +OI📉"
-    
-    # Final percentage calculation with OI
-    if oi_impact:
-        total_weight = bullish_weight + bearish_weight
-        if total_weight > 0:
-            bull_pct = bullish_weight / total_weight * 100
-            bear_pct = bearish_weight / total_weight * 100
-    
+
     bull_pct = max(0, min(100, round(bull_pct)))
     bear_pct = 100 - bull_pct
-    
-    votes_str = " ".join(indicator_votes)
-    voting_count = len(voting_indicators)
-    
-    # ADX trend strength note
+
     adx_note = f"ADX={adx:.0f}({trend_strength.lower()}, DI+ {'dominant' if di_plus > di_minus else 'weak'})"
-    
-    consensus_line1 = (f"📊 SCORECARD ({voting_count} voting): {bullish_votes}🟢({bullish_weight:.1f} weighted) vs "
-                      f"{bearish_votes}🔴({bearish_weight:.1f} weighted) vs {neutral_votes}⚪{oi_impact}")
-    consensus_line2 = penalty_text if penalty_text else ""
-    consensus_line3 = f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}"
-    consensus_line4 = f"[{votes_str}]"
-    
-    consensus = "\n".join(filter(None, [consensus_line1, consensus_line2, consensus_line3, consensus_line4]))
+
+    consensus_lines = [
+        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}",
+        f"   Weights: Trend/Mom ×{w_mult['trend']:.1f} | Oscillators ×{w_mult['oscillator']:.1f} | Vol/Volat/Dir ×1.0",
+        f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}",
+    ] + group_details
+
+    consensus = "\n".join(consensus_lines)
 
     return (
         f"=== {tf_label} ===\n"

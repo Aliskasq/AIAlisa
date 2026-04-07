@@ -15,8 +15,10 @@ import time
 from datetime import datetime, timezone
 
 MONITOR_FILE = "data/signal_monitor.json"
+VOLUME_MONITOR_FILE = "data/volume_monitor.json"
 MAX_MONITOR_HOURS = 24  # expire after 24h — independent of 03:00 trendline redraw
 RECHECK_INTERVAL_SEC = 1800  # 30 minutes from each signal's OWN detection time
+VOLUME_RECHECK_SEC = 1800    # 30 min — recheck volume for $1M-$2M coins
 
 # --- Confidence threshold ---
 CONFIDENCE_FULL = 65      # % to issue full signal
@@ -183,17 +185,24 @@ def calculate_atr_sl_tp(indicators: dict, direction: str, entry_price: float) ->
     }
 
 
-def check_volume_filter(volume_12h: float) -> bool:
+def check_volume_filter(volume_12h: float) -> str:
     """
-    Check if coin has sufficient volume for trading.
+    Check coin volume tier for trading decisions.
     
     Uses 12-hour volume (sum of last 3 × 4H candle quoteVolumes).
-    This catches current activity, not inflated by old pumps.
     
-    Rule: 12h volume must be ≥ $500K
+    Returns:
+        "full"    — volume ≥ $2M → send full signal to group
+        "monitor" — volume $1M-$2M → don't send, add to volume monitor (may grow)
+        "skip"    — volume < $1M → reject entirely
     """
-    MIN_VOLUME_12H = 500_000  # $500K in 12 hours
-    return volume_12h >= MIN_VOLUME_12H
+    from config import SIGNAL_MIN_VOLUME_12H, SIGNAL_LOW_VOLUME_12H
+    if volume_12h >= SIGNAL_MIN_VOLUME_12H:
+        return "full"
+    elif volume_12h >= SIGNAL_LOW_VOLUME_12H:
+        return "monitor"
+    else:
+        return "skip"
 
 
 async def get_volume_12h(session, symbol: str) -> float:
@@ -220,6 +229,100 @@ async def get_volume_12h(session, symbol: str) -> float:
             return total
     except Exception:
         return 0
+
+
+# --- Volume Monitor file operations ---
+# Coins with $1M-$2M 12h volume: track them, recheck every 30 min,
+# upgrade to full signal if volume crosses $2M threshold.
+
+def load_volume_monitors() -> list:
+    try:
+        if os.path.exists(VOLUME_MONITOR_FILE):
+            with open(VOLUME_MONITOR_FILE, "r") as f:
+                return json.load(f)
+    except Exception as e:
+        logging.error(f"❌ load_volume_monitors: {e}")
+    return []
+
+
+def save_volume_monitors(monitors: list):
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(VOLUME_MONITOR_FILE, "w") as f:
+            json.dump(monitors, f, indent=2)
+    except Exception as e:
+        logging.error(f"❌ save_volume_monitors: {e}")
+
+
+def add_volume_monitor(symbol: str, tf: str, volume_12h: float,
+                       entry_price: float, breakout_pct: float):
+    """Add a low-volume coin to volume monitoring ($1M-$2M range)."""
+    monitors = load_volume_monitors()
+    key = f"{symbol}_{tf}"
+    monitors = [m for m in monitors if m.get("key") != key]
+
+    now = time.time()
+    monitors.append({
+        "key": key,
+        "symbol": symbol,
+        "tf": tf,
+        "initial_volume_12h": volume_12h,
+        "last_volume_12h": volume_12h,
+        "entry_price": entry_price,
+        "breakout_pct": breakout_pct,
+        "added_at": datetime.now(timezone.utc).isoformat(),
+        "added_ts": now,
+        "next_check_ts": now + VOLUME_RECHECK_SEC,
+        "check_count": 0
+    })
+    save_volume_monitors(monitors)
+    logging.info(f"📊 VOL MONITOR added: {symbol} {tf} vol=${volume_12h:,.0f} (need $2M+)")
+
+
+def get_due_volume_monitors() -> list:
+    """Get volume monitors due for recheck."""
+    monitors = load_volume_monitors()
+    now = time.time()
+    due = []
+    for m in monitors:
+        age_hours = (now - m["added_ts"]) / 3600
+        if age_hours > MAX_MONITOR_HOURS:
+            continue
+        if now >= m.get("next_check_ts", 0):
+            due.append(m)
+    return due
+
+
+def update_volume_monitor_checked(key: str, new_volume: float):
+    """Update volume monitor after recheck."""
+    monitors = load_volume_monitors()
+    now = time.time()
+    for m in monitors:
+        if m["key"] == key:
+            m["check_count"] = m.get("check_count", 0) + 1
+            m["last_volume_12h"] = new_volume
+            m["next_check_ts"] = now + VOLUME_RECHECK_SEC
+            m["last_checked_at"] = datetime.now(timezone.utc).isoformat()
+    save_volume_monitors(monitors)
+
+
+def remove_volume_monitor(key: str):
+    """Remove coin from volume monitoring (upgraded or expired)."""
+    monitors = load_volume_monitors()
+    monitors = [m for m in monitors if m["key"] != key]
+    save_volume_monitors(monitors)
+    logging.info(f"📊 VOL MONITOR removed: {key}")
+
+
+def cleanup_expired_volume_monitors():
+    """Remove volume monitors older than MAX_MONITOR_HOURS."""
+    monitors = load_volume_monitors()
+    now = time.time()
+    active = [m for m in monitors if (now - m["added_ts"]) / 3600 <= MAX_MONITOR_HOURS]
+    expired = len(monitors) - len(active)
+    if expired > 0:
+        logging.info(f"🕐 Cleaned {expired} expired volume monitors")
+        save_volume_monitors(active)
 
 
 # --- Monitor file operations ---
