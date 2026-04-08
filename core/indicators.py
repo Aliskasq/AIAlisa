@@ -1764,16 +1764,26 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
             ema_penalty = 5
             ema_penalty_reason = f"EMA7 slope down ({ema7_slope_val:+.1f}%) → LONG -{ema_penalty}%"
 
-        # Mirror: bullish EMA penalties on SHORT side
+        # Mirror: bullish EMA penalties on SHORT side (negative = penalizes SHORT)
         if ema_penalty == 0:
             if ema7_val > ema25_val > ema99_val:
-                if ema7_slope_val > 0.5:
-                    pass  # aligned bullish + slope up = no penalty
-                # No bear penalty for aligned bullish — that's normal
-            elif ema7_val > ema25_val and ema25_val > ema99_val:
-                pass  # bullish aligned, no SHORT penalty needed
+                # Full golden cross — worst for SHORT
+                ema_penalty = -15
+                ema_penalty_reason = f"EMA full golden cross (7>25>99) → SHORT -15%"
+            elif ema25_val > ema99_val and ema7_val < ema25_val:
+                # Golden cross EMA25 > EMA99 but EMA7 lagging
+                ema_penalty = -10
+                ema_penalty_reason = f"EMA golden cross (25>99) → SHORT -10%"
+            elif ema7_val > ema25_val:
+                # EMA7 crossed above EMA25
+                ema_penalty = -7
+                ema_penalty_reason = f"EMA7 > EMA25 → SHORT -7%"
+            elif ema7_slope_val > 0.5:
+                # EMA7 slope turning up
+                ema_penalty = -5
+                ema_penalty_reason = f"EMA7 slope up ({ema7_slope_val:+.1f}%) → SHORT -5%"
 
-    if ema_penalty > 0:
+    if ema_penalty != 0:
         penalties.append(ema_penalty_reason)
         penalty_pct += ema_penalty
 
