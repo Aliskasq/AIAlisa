@@ -171,11 +171,8 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         f"🤖 AI-Alisa-CopilotClow:\n"
     )
 
-    # Telegram photo caption limit = 1024 chars; reserve space for header
-    TG_CAPTION_LIMIT = 1024
-    AI_TEXT_LIMIT = TG_CAPTION_LIMIT - len(header) - 5  # small safety margin
-    if AI_TEXT_LIMIT < 400:
-        AI_TEXT_LIMIT = 400  # sane minimum
+    # AI text limit for photo caption (header + 813 ≈ 943, within Telegram's 1024 caption limit)
+    AI_TEXT_LIMIT = 813
     overflow_text = ""
 
     if len(safe_ai_text) <= AI_TEXT_LIMIT:
