@@ -1673,6 +1673,71 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     bullish_weight += confluence_bull_bonus
     bearish_weight += confluence_bear_bonus
 
+    # --- PENALTY SYSTEM: reality checks that cap unrealistic confidence ---
+    penalties = []
+    penalty_pct = 0  # total percentage points to subtract from bull_pct (or add if negative = bear penalties)
+
+    rsi = indic.get('rsi14', 50)
+    stoch_k = indic.get('stoch_k', 50)
+    macd_hist = indic.get('macd_hist', 0)
+    hist_direction = indic.get('hist_direction', 'stable')
+    rsi_mom_bear_div = indic.get('rsi_mom_bear_div', False)
+    rsi_mom_bull_div = indic.get('rsi_mom_bull_div', False)
+    stoch_k_trend = indic.get('stoch_k_trend', 'stable')
+
+    # 1. RSI extreme overbought → penalty on LONG
+    if rsi > 85:
+        p = 10
+        penalties.append(f"RSI {rsi:.0f} >85 → LONG -{p}%")
+        penalty_pct += p
+    elif rsi > 80:
+        p = 5
+        penalties.append(f"RSI {rsi:.0f} >80 → LONG -{p}%")
+        penalty_pct += p
+
+    # 2. RSI extreme oversold → penalty on SHORT
+    if rsi < 15:
+        p = -10
+        penalties.append(f"RSI {rsi:.0f} <15 → SHORT -10%")
+        penalty_pct += p
+    elif rsi < 20:
+        p = -5
+        penalties.append(f"RSI {rsi:.0f} <20 → SHORT -5%")
+        penalty_pct += p
+
+    # 3. RSI-Mom bearish divergence → penalty on LONG
+    if rsi_mom_bear_div:
+        p = 5
+        penalties.append(f"RSI-Mom bearish divergence → LONG -{p}%")
+        penalty_pct += p
+
+    # 4. RSI-Mom bullish divergence → penalty on SHORT
+    if rsi_mom_bull_div:
+        p = -5
+        penalties.append(f"RSI-Mom bullish divergence → SHORT -5%")
+        penalty_pct += p
+
+    # 5. MACD fading/weakening → penalty on dominant side
+    if hist_direction == "fading_bullish":
+        p = 5
+        penalties.append(f"MACD fading bullish → LONG -{p}%")
+        penalty_pct += p
+    elif hist_direction == "fading_bearish":
+        p = -5
+        penalties.append(f"MACD fading bearish → SHORT -5%")
+        penalty_pct += p
+
+    # 6. StochRSI bearish cross while overbought → penalty on LONG
+    if stoch_k > 70 and stoch_k_trend == 'falling':
+        p = 5
+        penalties.append(f"StochRSI bearish cross OB ({stoch_k:.0f}, falling) → LONG -{p}%")
+        penalty_pct += p
+    # StochRSI bullish cross while oversold → penalty on SHORT
+    elif stoch_k < 30 and stoch_k_trend == 'rising':
+        p = -5
+        penalties.append(f"StochRSI bullish cross OS ({stoch_k:.0f}, rising) → SHORT -5%")
+        penalty_pct += p
+
     # --- Final LONG/SHORT percentage ---
     total_weight = bullish_weight + bearish_weight
     if total_weight > 0:
@@ -1680,6 +1745,11 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         bear_pct = bearish_weight / total_weight * 100
     else:
         bull_pct = bear_pct = 50
+
+    # Apply penalties
+    if penalty_pct != 0:
+        bull_pct -= penalty_pct
+        bear_pct += penalty_pct
 
     bull_pct = max(0, min(100, round(bull_pct)))
     bear_pct = 100 - bull_pct
@@ -1690,8 +1760,12 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     if confluence_bull_bonus > 0 or confluence_bear_bonus > 0:
         confluence_note = f" | Confluence: +{confluence_bull_bonus:.1f}🟢 +{confluence_bear_bonus:.1f}🔴"
 
+    penalty_note = ""
+    if penalties:
+        penalty_note = f" | ⚠️ Penalties: {', '.join(penalties)}"
+
     consensus_lines = [
-        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}",
+        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}{penalty_note}",
         f"   Weights: Trend/Mom ×{w_mult['trend']:.1f} | Oscillators ×{w_mult['oscillator']:.1f} | Vol/Volat/Dir ×1.0",
         f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}",
     ] + group_details
