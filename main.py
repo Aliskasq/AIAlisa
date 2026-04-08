@@ -478,7 +478,10 @@ async def main():
                                 # $1.5M-$2M: check technicals — pass if breakout is strong
                                 _bp = item.get("breakout_pct", 0)
                                 _mtf = item.get("mtf_data", {})
-                                _adx_4h = _mtf.get("4H", {}).get("adx", 0) if _mtf.get("4H") else item.get("last_indic", {}).get("adx", 0)
+                                _break_tf = item.get("tf", "4H")
+                                # Check ADX on breakout TF first, fallback to 4H, then last_indic
+                                _adx_data = _mtf.get(_break_tf, {}) or _mtf.get("4H", {}) or item.get("last_indic", {})
+                                _adx_4h = _adx_data.get("adx", 0)
                                 _strong = _bp >= 2.0 or _adx_4h >= 25
                                 if _strong:
                                     logging.info(f"✅ {item['symbol']}: 12h vol ${volume_12h:,.0f} ($1.5M-$2M) — CONDITIONAL PASS (breakout {_bp:.1f}%, ADX {_adx_4h:.0f})")

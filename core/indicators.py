@@ -1810,11 +1810,11 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     rsi_pullback_drop = indic.get('rsi_pullback_drop', 0)
     if rsi_val > 70:
         if rsi_pullback_peak > 0:
-            rsi_pullback_line = f"   ⚠️ RSI PULLBACK HISTORY: last pullback from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
+            rsi_pullback_line = f"   ⚠️ ОТКАТ: предыдущий откат начинался с RSI {rsi_pullback_peak} (падение {rsi_pullback_drop} пунктов)"
             if rsi_val >= rsi_pullback_peak - 2:
-                rsi_pullback_line += f" — CURRENT {rsi_val:.0f} NEAR DANGER ZONE!"
+                rsi_pullback_line += f" — ТЕКУЩИЙ RSI {rsi_val:.0f} БЛИЗКО К ОПАСНОЙ ЗОНЕ!"
         else:
-            rsi_pullback_line = f"   ℹ️ RSI {rsi_val:.0f} >70 — no pullback history recorded"
+            rsi_pullback_line = f"   ℹ️ RSI {rsi_val:.0f} >70 — история откатов не зафиксирована"
 
     consensus_lines = [
         f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}{penalty_note}",
