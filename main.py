@@ -68,10 +68,12 @@ file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(mes
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[file_handler, console_handler]
-)
+# Don't use basicConfig — it's a no-op if any library already configured root logger.
+# Attach handlers directly to root logger instead.
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
 
 async def log_cleanup_task():
     """Background task: every 6 hours, remove log lines older than 3 days from bot.log."""
