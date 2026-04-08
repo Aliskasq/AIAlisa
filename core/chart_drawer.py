@@ -143,9 +143,9 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     # --- TELEGRAM MESSAGE DESIGN ---
     short_symbol = symbol.replace('USDT', '')
     
-    # Обрезаем ИИ текст до 800 символов, чтобы не нарваться на ошибку Telegram!
+    # AI text — no hard truncation here; the split logic below handles caption limits
     ai_text = ai_text or ""
-    safe_ai_text = ai_text if len(ai_text) < 800 else ai_text[:800] + "..."
+    safe_ai_text = ai_text
     # Sanitize markdown: escape unpaired * and _ to prevent Telegram parse errors
     import re as _re
     def _sanitize_tg_markdown(txt):
@@ -171,15 +171,18 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         f"🤖 AI-Alisa-CopilotClow:\n"
     )
 
-    # AI text limit for photo caption (header takes the rest of 1024)
-    AI_TEXT_LIMIT = 813
+    # Telegram photo caption limit = 1024 chars; reserve space for header
+    TG_CAPTION_LIMIT = 1024
+    AI_TEXT_LIMIT = TG_CAPTION_LIMIT - len(header) - 5  # small safety margin
+    if AI_TEXT_LIMIT < 400:
+        AI_TEXT_LIMIT = 400  # sane minimum
     overflow_text = ""
 
     if len(safe_ai_text) <= AI_TEXT_LIMIT:
         # Everything fits in caption
         photo_caption = header + safe_ai_text
     else:
-        # Split: first 813 chars of AI text in caption, rest as separate message
+        # Split: AI text that fits in caption, rest as separate message
         cut_text = safe_ai_text[:AI_TEXT_LIMIT]
         # Try to split at last newline for clean break
         last_nl = cut_text.rfind('\n')
