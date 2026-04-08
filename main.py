@@ -591,7 +591,7 @@ async def main():
 
                             # Send full breakout with SKIP verdict to MAIN group (all breakouts go to main)
                             try:
-                                _skip_caption = ai_verdict or ""
+                                _skip_caption = ai_verdict or ai_verdict_full or ""
                                 if not _skip_caption:
                                     # Build fallback with per-TF scorecard data
                                     _fb_lines = []
