@@ -191,7 +191,22 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['bb_lower'] = bb_sma - 2 * bb_std
     df['bb_mid'] = bb_sma
 
-    # 14. (VWAP removed — meaningless on 4H futures)
+    # 14. Keltner Channels + TTM Squeeze (20, ATR mult 1.5)
+    kc_mid = bb_sma  # same 20-period SMA as BB
+    kc_atr = rma(tr, 20)  # 20-period ATR for Keltner
+    kc_mult = 1.5
+    df['kc_upper'] = kc_mid + kc_mult * kc_atr
+    df['kc_lower'] = kc_mid - kc_mult * kc_atr
+
+    # TTM Squeeze: BB inside Keltner = squeeze ON, BB outside = squeeze OFF (fired)
+    df['ttm_squeeze_on'] = (df['bb_lower'] > df['kc_lower']) & (df['bb_upper'] < df['kc_upper'])
+
+    # TTM Squeeze Momentum histogram (close - midline of Donchian/KC blend)
+    highest_20 = df['high'].rolling(20).max()
+    lowest_20 = df['low'].rolling(20).min()
+    donchian_mid = (highest_20 + lowest_20) / 2
+    ttm_mom_raw = df['close'] - (donchian_mid + bb_sma) / 2
+    df['ttm_mom'] = ttm_mom_raw.ewm(span=5, adjust=False).mean()  # smoothed
 
     # 15. CMF (Chaikin Money Flow, 20)
     mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low']).replace(0, np.nan)
@@ -654,7 +669,38 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         last_50_bb = df.tail(50)
         bb_walking_upper = (last_50_bb['close'] > last_50_bb['bb_upper'] * 0.998).sum()
         bb_walking_lower = (last_50_bb['close'] < last_50_bb['bb_lower'] * 1.002).sum()
-    
+
+    # TTM Squeeze History
+    ttm_squeeze_on_now = False
+    ttm_squeeze_bars = 0       # how many consecutive bars squeeze has been ON
+    ttm_squeeze_fired = False  # squeeze just turned OFF (= fired/breakout)
+    ttm_mom_val = 0.0
+    ttm_mom_rising = False
+    ttm_mom_direction = "neutral"
+
+    if len(df) >= 20 and 'ttm_squeeze_on' in df.columns:
+        ttm_squeeze_on_now = bool(df['ttm_squeeze_on'].iloc[-1])
+        # Count consecutive squeeze bars
+        for i in range(1, min(51, len(df))):
+            if df['ttm_squeeze_on'].iloc[-i]:
+                ttm_squeeze_bars += 1
+            else:
+                break
+        # Squeeze just fired? (was ON, now OFF)
+        if len(df) >= 2:
+            was_on = bool(df['ttm_squeeze_on'].iloc[-2])
+            is_off = not ttm_squeeze_on_now
+            ttm_squeeze_fired = was_on and is_off
+
+        ttm_mom_val = float(df['ttm_mom'].iloc[-1]) if not pd.isna(df['ttm_mom'].iloc[-1]) else 0
+        if len(df) >= 3:
+            prev_mom = float(df['ttm_mom'].iloc[-2]) if not pd.isna(df['ttm_mom'].iloc[-2]) else 0
+            ttm_mom_rising = ttm_mom_val > prev_mom
+        if ttm_mom_val > 0:
+            ttm_mom_direction = "bullish"
+        elif ttm_mom_val < 0:
+            ttm_mom_direction = "bearish"
+
     # Ichimoku History
     tk_cross = "neutral"
     tk_cross_bars = None
@@ -889,6 +935,14 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "bb_expanding": bb_expanding,
         "bb_walking_upper": bb_walking_upper,
         "bb_walking_lower": bb_walking_lower,
+
+        # TTM Squeeze
+        "ttm_squeeze_on": ttm_squeeze_on_now,
+        "ttm_squeeze_bars": ttm_squeeze_bars,
+        "ttm_squeeze_fired": ttm_squeeze_fired,
+        "ttm_mom": round(ttm_mom_val, 8),
+        "ttm_mom_rising": ttm_mom_rising,
+        "ttm_mom_direction": ttm_mom_direction,
         
         # Ichimoku History
         "tk_cross": tk_cross,
@@ -1174,10 +1228,23 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     else:
         bb_signal = f"🔴 BEARISH (below mid)"
     
+    # TTM Squeeze analysis
+    ttm_squeeze_on = indic.get('ttm_squeeze_on', False)
+    ttm_squeeze_bars = indic.get('ttm_squeeze_bars', 0)
+    ttm_squeeze_fired = indic.get('ttm_squeeze_fired', False)
+
+    if ttm_squeeze_fired:
+        ttm_text = "🔥 FIRED — breakout initiated!"
+    elif ttm_squeeze_on:
+        ttm_text = f"⚠️ SQUEEZE ON ({ttm_squeeze_bars} bars) — compression building, breakout brewing"
+    else:
+        ttm_text = "No squeeze"
+
     idx += 1
     bb_analysis = (f"{idx}. BB: Upper={bb_upper:.6f} Mid={bb_mid:.6f} Lower={bb_lower:.6f} | %B={bb_pctb:.3f} | Width={bb_width_pct:.1f}%\n"
                   f"   Squeeze: {'YES' if bb_squeeze else 'NO'} | Expanding: {'YES' if bb_expanding else 'NO'} | "
                   f"Walking upper band: {bb_walk_upper}/50 candles\n"
+                  f"   TTM Squeeze: {ttm_text}\n"
                   f"   → {bb_signal}")
 
     # Build indicator lines based on timeframe
