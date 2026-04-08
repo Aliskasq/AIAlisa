@@ -192,13 +192,17 @@ def check_volume_filter(volume_12h: float) -> str:
     Uses 12-hour volume (sum of last 3 × 4H candle quoteVolumes).
     
     Returns:
-        "full"    — volume ≥ $2M → send full signal to group
-        "monitor" — volume $1M-$2M → don't send, add to volume monitor (may grow)
-        "skip"    — volume < $1M → reject entirely
+        "full"        — volume ≥ $2M → send full signal to group
+        "conditional" — volume $1.5M-$2M → send if strong technicals
+        "monitor"     — volume $1M-$1.5M → don't send, add to volume monitor (may grow)
+        "skip"        — volume < $1M → reject entirely
     """
     from config import SIGNAL_MIN_VOLUME_12H, SIGNAL_LOW_VOLUME_12H
+    CONDITIONAL_VOLUME = 1_500_000  # $1.5M — pass if technicals are strong
     if volume_12h >= SIGNAL_MIN_VOLUME_12H:
         return "full"
+    elif volume_12h >= CONDITIONAL_VOLUME:
+        return "conditional"
     elif volume_12h >= SIGNAL_LOW_VOLUME_12H:
         return "monitor"
     else:

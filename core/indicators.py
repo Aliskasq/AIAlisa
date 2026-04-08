@@ -1738,6 +1738,45 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
         penalties.append(f"StochRSI bullish cross OS ({stoch_k:.0f}, rising) → SHORT -5%")
         penalty_pct += p
 
+    # 7. EMA penalties (worst one wins, no stacking)
+    ema7_val = indic.get('ema7', 0)
+    ema25_val = indic.get('ema25', 0)
+    ema99_val = indic.get('ema99', 0)
+    ema7_slope_val = indic.get('ema7_slope_50', 0)
+
+    ema_penalty = 0
+    ema_penalty_reason = ""
+    if ema7_val > 0 and ema25_val > 0 and ema99_val > 0:
+        if ema7_val < ema25_val < ema99_val:
+            # Full death cross — worst case
+            ema_penalty = 15
+            ema_penalty_reason = f"EMA full death cross (7<25<99) → LONG -{ema_penalty}%"
+        elif ema25_val < ema99_val:
+            # Death cross EMA25 < EMA99
+            ema_penalty = 10
+            ema_penalty_reason = f"EMA death cross (25<99) → LONG -{ema_penalty}%"
+        elif ema7_val < ema25_val:
+            # EMA7 crossed below EMA25
+            ema_penalty = 7
+            ema_penalty_reason = f"EMA7 < EMA25 → LONG -{ema_penalty}%"
+        elif ema7_slope_val < -0.5:
+            # EMA7 slope turning down
+            ema_penalty = 5
+            ema_penalty_reason = f"EMA7 slope down ({ema7_slope_val:+.1f}%) → LONG -{ema_penalty}%"
+
+        # Mirror: bullish EMA penalties on SHORT side
+        if ema_penalty == 0:
+            if ema7_val > ema25_val > ema99_val:
+                if ema7_slope_val > 0.5:
+                    pass  # aligned bullish + slope up = no penalty
+                # No bear penalty for aligned bullish — that's normal
+            elif ema7_val > ema25_val and ema25_val > ema99_val:
+                pass  # bullish aligned, no SHORT penalty needed
+
+    if ema_penalty > 0:
+        penalties.append(ema_penalty_reason)
+        penalty_pct += ema_penalty
+
     # --- Final LONG/SHORT percentage ---
     total_weight = bullish_weight + bearish_weight
     if total_weight > 0:
@@ -1764,11 +1803,26 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     if penalties:
         penalty_note = f" | ⚠️ Penalties: {', '.join(penalties)}"
 
+    # RSI pullback history line (forced into scorecard, all TFs)
+    rsi_pullback_line = ""
+    rsi_val = indic.get('rsi14', 50)
+    rsi_pullback_peak = indic.get('rsi_pullback_peak', 0)
+    rsi_pullback_drop = indic.get('rsi_pullback_drop', 0)
+    if rsi_val > 70:
+        if rsi_pullback_peak > 0:
+            rsi_pullback_line = f"   ⚠️ RSI PULLBACK HISTORY: last pullback from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
+            if rsi_val >= rsi_pullback_peak - 2:
+                rsi_pullback_line += f" — CURRENT {rsi_val:.0f} NEAR DANGER ZONE!"
+        else:
+            rsi_pullback_line = f"   ℹ️ RSI {rsi_val:.0f} >70 — no pullback history recorded"
+
     consensus_lines = [
         f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}{penalty_note}",
         f"   Weights: Trend/Mom ×{w_mult['trend']:.1f} | Oscillators ×{w_mult['oscillator']:.1f} | Vol/Volat/Dir ×1.0",
         f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}",
     ] + group_details
+    if rsi_pullback_line:
+        consensus_lines.append(rsi_pullback_line)
 
     consensus = "\n".join(consensus_lines)
 
