@@ -833,7 +833,10 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
 
             # === Non-streaming fallback (automated signals, no Telegram edit) ===
             if not ai_response:
-                for attempt in range(2):  # retry once on failure
+                max_attempts = 4
+                rate_limit_extra = 0  # don't count 429s as wasted attempts
+                attempt = 0
+                while attempt < max_attempts + rate_limit_extra:
                     try:
                         payload.pop("stream", None)
                         # Keep reasoning: {enabled: true} — forces thinking tokens into
@@ -846,8 +849,8 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                     raw_content = data["choices"][0]["message"]["content"]
                                     if raw_content is None:
                                         logging.warning(f"⚠️ [OpenRouter Direct] content=null (attempt {attempt+1}), retrying...")
-                                        if attempt == 0:
-                                            await asyncio.sleep(3)
+                                        await asyncio.sleep(3)
+                                        attempt += 1
                                         continue
                                     candidate = raw_content.strip()
                                     if _is_valid_analysis(candidate):
@@ -855,12 +858,17 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                         logging.info("✅ [OpenRouter Direct] AI inference complete.")
                                     else:
                                         logging.warning(f"⚠️ [OpenRouter Direct] Response failed validation (attempt {attempt+1}). Preview: {candidate[:200]}")
-                                        if attempt == 1:
+                                        if attempt >= max_attempts - 1:
                                             ai_response = candidate  # accept on last attempt anyway
+                                        else:
+                                            attempt += 1
+                                            continue
                                 elif response.status == 429:
                                     retry_after = int(response.headers.get("Retry-After", "5"))
-                                    logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s...")
-                                    await asyncio.sleep(retry_after)
+                                    logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s (attempt {attempt+1})...")
+                                    await asyncio.sleep(retry_after + 1)
+                                    rate_limit_extra += 1  # 429 doesn't burn a real attempt
+                                    attempt += 1
                                     continue
                                 else:
                                     body = await response.text()
@@ -868,12 +876,15 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                     ai_response = f"❌ API Error: {response.status}"
                         if ai_response:
                             break
+                        attempt += 1
                     except Exception as e:
                         logging.warning(f"⚠️ [OpenRouter Direct] Network error (attempt {attempt+1}): {type(e).__name__}: {e}")
-                        if attempt == 0:
-                            await asyncio.sleep(3)  # wait before retry
+                        if attempt < max_attempts - 1:
+                            await asyncio.sleep(3)
+                            attempt += 1
                         else:
                             ai_response = f"❌ Network Error: {e}"
+                            break
         finally:
             _ai_last_request_time = _time.monotonic()
             _ai_request_lock.release()
