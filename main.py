@@ -32,16 +32,39 @@ from core.signal_pipeline import (
 # Setup logging
 # File handler: only coin/trade-related messages (no sleep, progress, loop noise)
 class TradeLogFilter(logging.Filter):
-    """Log everything except cycle noise (checking/sleeping)."""
+    """Pass only coin/trade-relevant lines to bot.log."""
+    KEYWORDS = (
+        "MONITOR", "UPGRADED", "FULL:", "SIGNAL", "ALERT",
+        "bank", "P&L", "breakout", "SKIP", "LONG", "SHORT",
+        "entry added", "entry failed",
+        "❌", "⚠️", "🟢", "🔵", "🔴", "🎯",
+        "close", "TP", "SL", "upgrade",
+        "EMERGENCY", "cleanup",
+        "USDT", "BTC", "ETH",
+        "PEAK-TO-PEAK", "geometry",
+        "Rate limited", "AI inference", "OpenRouter",
+        "volume", "Volume",
+    )
     NOISE = (
         "Sleeping", "💤", "Waiting list is empty", "👀 Checking",
+        "/signals", "/bankm", "bankm close", "signals close",
+        "Analysis progress", "Monitoring loop started",
+        "STARTING GLOBAL", "recalculation completed",
+        "Data ready", "After volume filter", "Starting AI queue",
+        "parallel data fetch", "price_alert_monitor",
+        "Monitor recheck loop started", "Monitor: 0 due",
     )
     def filter(self, record):
         msg = record.getMessage()
         for n in self.NOISE:
             if n in msg:
                 return False
-        return True
+        for kw in self.KEYWORDS:
+            if kw in msg:
+                return True
+        if record.levelno >= logging.WARNING:
+            return True
+        return False
 
 file_handler = logging.FileHandler("bot.log", mode='a', encoding='utf-8')
 file_handler.addFilter(TradeLogFilter())
