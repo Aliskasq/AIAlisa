@@ -867,7 +867,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                     retry_after = int(response.headers.get("Retry-After", "5"))
                                     logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s (attempt {attempt+1})...")
                                     await asyncio.sleep(retry_after + 1)
-                                    if rate_limit_extra < 6:  # max 6 extra 429 retries (total ~10 attempts)
+                                    if rate_limit_extra < 2:  # max 2 extra 429 retries (total ~6 attempts)
                                         rate_limit_extra += 1  # 429 doesn't burn a real attempt
                                     attempt += 1
                                     continue
