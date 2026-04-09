@@ -1453,7 +1453,7 @@ async def telegram_polling_loop(app_session):
                                 continue
 
                         # --- HANDLE REGULAR MESSAGES ---
-                        msg = update.get("message", {})
+                        msg = update.get("message") or {}
 
                         # --- NEW MEMBER WELCOME ---
                         new_members = msg.get("new_chat_members", [])
