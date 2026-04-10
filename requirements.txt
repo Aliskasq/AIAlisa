@@ -6,5 +6,4 @@ numpy
 mplfinance
 matplotlib
 beautifulsoup4
-openclaw
-cmdop
+

@@ -1,10 +1,10 @@
-# 🦞 AiAlisa Copilot: The Ultimate OpenClaw Trading & Influencer Agent
+# 🤖 AiAlisa Copilot: The Ultimate AI Trading & Influencer Agent
 
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)
-![OpenClaw](https://img.shields.io/badge/Powered_by-OpenClaw_SDK-F3BA2F.svg?logo=binance)
+![OpenRouter](https://img.shields.io/badge/Powered_by-OpenRouter-8B5CF6.svg)
 ![Binance API](https://img.shields.io/badge/Binance-Web3_Skills-F3BA2F.svg?logo=binance)
 
-**AiAlisa CopilotClaw** is a fully autonomous, enterprise-grade AI trading assistant and content publisher built natively on the **Binance OpenClaw Architecture**. 
+**AiAlisa Copilot** is a fully autonomous, enterprise-grade AI trading assistant and content publisher powered by **OpenRouter API**. 
 
 Designed to enhance the Binance ecosystem, Alisa solves four major challenges:
 1. **Trading Strategy:** Scans **540+ Binance Futures pairs** simultaneously using proprietary logarithmic geometry and Smart Money Concepts.
@@ -75,23 +75,16 @@ Commands:
 
 ---
 
-### 🦞 Deep OpenClaw SDK Integration (4 Services)
+### 🔌 OpenRouter API Integration
 
-| SDK Service | Purpose | Fallback |
-|---|---|---|
-| **`client.extract.run(model=TradeVerdict)`** | Returns **typed Pydantic models** (entry, SL, TP as floats) for programmatic signal validation | `agent.run()` → OpenRouter |
-| **`client.skills.run(skill_name, prompt)`** | All 7 Binance Web3 Skills routed through **OpenClaw Skills API** | Direct HTTP to Binance Web3 API |
-| **`client.agent.run(prompt)`** | Core AI inference for trading verdicts via CMDOP Cloud relay | OpenRouter aiohttp failsafe |
-| **SSE Streaming** | Real-time token-by-token streaming to Telegram via `stream=true` | Progressive display fallback |
-
-The 3-tier fallback chain (`Extract → Agent → OpenRouter`) ensures **zero downtime**.
+All AI inference requests go directly through **OpenRouter API** — no SDK middlemen. Supports multiple models with automatic fallback and real-time SSE streaming to Telegram.
 
 ---
 
 ## 📸 Proof of Concept & Killer Features
 
 ### 1. Autonomous Global Scanning & Safe 1-Click Publishing
-At the configured scan time, Alisa analyzes over 540 futures pairs. Using a custom logarithmic algorithm, she builds geometric trendlines. When a true breakout occurs, the OpenClaw Agent analyzes the chart with **SMC Indicator + 16+ technical indicators** and sends a fully generated push notification to the Telegram group.
+At the configured scan time, Alisa analyzes over 540 futures pairs. Using a custom logarithmic algorithm, she builds geometric trendlines. When a true breakout occurs, the AI agent analyzes the chart with **SMC Indicator + 16+ technical indicators** and sends a fully generated push notification to the Telegram group.
 
 <img width="1600" height="1327" alt="frames-export-1773344230773_edit_462820069716103" src="https://github.com/user-attachments/assets/bad291f2-d21c-44d6-97d7-e6b3611c3c3c" />
 
@@ -120,7 +113,7 @@ The Square Publisher generates and posts AI market updates to Binance Square aut
 ![Screenshot_20260312_221445_org_telegram_messenger_LaunchActivity](https://github.com/user-attachments/assets/d077ac2b-7295-438b-a960-9d1744dcd74a)
 
 <details>
-<summary><b>🔌 OpenClaw Web3 Skills Arsenal (Click to Expand)</b></summary>
+<summary><b>🔌 Binance Web3 Skills Arsenal (Click to Expand)</b></summary>
 <br>
 
 1. **🐋 Smart Money Signals** — whale wallet tracking via Binance DeFi API
@@ -173,9 +166,9 @@ The Square Publisher generates and posts AI market updates to Binance Square aut
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
-│        OPENCLAW SKILLS + EXTRACT + STREAMING          │
+│        AI ENGINE (OpenRouter API)                     │
 │  Web3 Skills │ TradeVerdict │ SSE Live Streaming      │
-│  3-tier fallback: Extract → Agent → OpenRouter        │
+│  Direct API calls with automatic failover             │
 └──────────────┬──────────────────────────────────────┘
                │
 ┌──────────────▼──────────────────────────────────────┐
@@ -235,11 +228,7 @@ cd AIAlisa
 python3.11 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
-pip install openclaw cmdop
 pip install -r requirements.txt
-
-# OpenClaw SDK hotfix
-echo "TimeoutError = TimeoutError" >> venv/lib/python3.11/site-packages/cmdop/exceptions.py
 
 # Configure
 cp .env.example .env
@@ -274,7 +263,6 @@ journalctl -u AI.service -f
 ### Verify
 ```bash
 source venv/bin/activate
-python -c 'import openclaw; print("✅ OPENCLAW SDK READY")'
 python -c 'from agent.analyzer import TradeVerdict; print("✅ TradeVerdict model:", TradeVerdict.model_fields.keys())'
 python -c 'from core.smc import analyze_smc; print("✅ SMC Indicator READY")'
 ```
@@ -288,7 +276,7 @@ AIAlisa/
 ├── main.py                  # Entry point: geometry scanner + breakout engine
 ├── config.py                # Virtual bank, breakout log, alerts, AI param parser
 ├── agent/
-│   ├── analyzer.py          # AI prompt builder + OpenClaw SDK integration
+│   ├── analyzer.py          # AI prompt builder + LLM integration
 │   └── square_publisher.py  # Binance Square auto-publisher
 ├── core/
 │   ├── smc.py               # SMC Indicator (BOS/CHoCH, OB, FVG, EQH/EQL)
@@ -302,4 +290,4 @@ AIAlisa/
 
 ---
 
-*Built with ❤️ on [OpenClaw](https://github.com/openclaw) for the Binance ecosystem.*
+*Built with ❤️ for the Binance ecosystem.*

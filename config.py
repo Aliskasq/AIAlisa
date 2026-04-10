@@ -24,6 +24,57 @@ OPENROUTER_MODEL_MONITOR = os.getenv("OPENROUTER_MODEL_MONITOR", "") or OPENROUT
 # Monitor group (separate from main signal group)
 MONITOR_GROUP_CHAT_ID = os.getenv("MONITOR_GROUP_CHAT_ID", "")
 
+# Groq API keys (3 accounts for rotation/fallback)
+GROQ_API_KEYS = [k for k in [
+    os.getenv("GROQ_API_KEY_1", ""),
+    os.getenv("GROQ_API_KEY_2", ""),
+    os.getenv("GROQ_API_KEY_3", ""),
+] if k]
+
+# Gemini API keys (3 accounts for rotation/fallback)
+GEMINI_API_KEYS = [k for k in [
+    os.getenv("GEMINI_API_KEY_1", ""),
+    os.getenv("GEMINI_API_KEY_2", ""),
+    os.getenv("GEMINI_API_KEY_3", ""),
+] if k]
+
+# Key account labels (for UI display)
+KEY_ACCOUNT_LABELS = {
+    0: "zhoriha",
+    1: "alisa",
+    2: "sudani",
+}
+
+# AI provider settings persistence
+AI_SETTINGS_FILE = "data/ai_settings.json"
+
+def load_ai_settings():
+    """Load persisted AI provider/model/key settings."""
+    defaults = {
+        "active_provider": "openrouter",
+        "active_key_index": 0,
+        "openrouter_model": OPENROUTER_MODEL or "stepfun/step-3.5-flash:free",
+        "gemini_model": "gemini-2.5-flash",
+        "groq_model": "llama-3.3-70b-versatile",
+    }
+    if os.path.exists(AI_SETTINGS_FILE):
+        try:
+            with open(AI_SETTINGS_FILE, "r") as f:
+                saved = json.load(f)
+                defaults.update(saved)
+        except Exception as e:
+            logging.error(f"Error reading AI settings: {e}")
+    return defaults
+
+def save_ai_settings(settings):
+    """Persist AI provider/model/key settings to disk."""
+    try:
+        os.makedirs(os.path.dirname(AI_SETTINGS_FILE), exist_ok=True)
+        with open(AI_SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing AI settings: {e}")
+
 
 
 # Binance Square

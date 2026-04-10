@@ -7,22 +7,211 @@ import os
 import time as _time
 from typing import Optional
 from pydantic import BaseModel
-from config import OPENROUTER_API_KEY, OPENROUTER_MODEL
+from config import (OPENROUTER_API_KEY, OPENROUTER_MODEL,
+                     GROQ_API_KEYS, GEMINI_API_KEYS, KEY_ACCOUNT_LABELS,
+                     load_ai_settings, save_ai_settings)
 
-# Import OpenClaw Architecture dependencies
-try:
-    import openclaw
-    import cmdop
-    openclaw_installed = True
-except ImportError:
-    openclaw = None
-    cmdop = None
-    openclaw_installed = False
+
 
 # Global lock — serializes ALL AI requests (auto-push + manual scan).
 # Whoever acquires first goes first; 15s cooldown between releases prevents 429.
 _ai_request_lock = asyncio.Lock()
 _ai_last_request_time = 0  # timestamp of last completed AI request
+
+# --- Multi-provider AI settings (loaded on first use) ---
+_ai_settings = None
+
+def _get_ai_settings():
+    """Get cached AI settings, loading from disk on first call."""
+    global _ai_settings
+    if _ai_settings is None:
+        _ai_settings = load_ai_settings()
+    return _ai_settings
+
+def _save_and_cache_settings(settings):
+    """Save settings to disk and update cache."""
+    global _ai_settings
+    _ai_settings = settings
+    save_ai_settings(settings)
+
+def get_active_provider_info():
+    """Return (provider, model, key_index) for external use (e.g. tg_listener)."""
+    s = _get_ai_settings()
+    provider = s["active_provider"]
+    if provider == "openrouter":
+        return provider, s["openrouter_model"], 0
+    elif provider == "gemini":
+        return provider, s["gemini_model"], s["active_key_index"]
+    elif provider == "groq":
+        return provider, s["groq_model"], s["active_key_index"]
+    return provider, s.get("openrouter_model", ""), 0
+
+def set_active_provider(provider, model=None, key_index=None):
+    """Switch active provider/model/key and persist."""
+    s = _get_ai_settings()
+    s["active_provider"] = provider
+    if model:
+        s[f"{provider}_model"] = model
+    if key_index is not None:
+        s["active_key_index"] = key_index
+    _save_and_cache_settings(s)
+
+# --- Provider API call helpers ---
+
+async def _call_openrouter(messages, api_key, model, timeout_sec=240):
+    """Call OpenRouter API. Returns response text or None on failure."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": messages, "temperature": 0.15}
+    req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://openrouter.ai/api/v1/chat/completions",
+                                    headers=headers, json=payload, timeout=req_timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        return content.strip()
+                elif resp.status == 429:
+                    retry = int(resp.headers.get("Retry-After", "5"))
+                    logging.warning(f"⚠️ OpenRouter 429, waiting {retry}s")
+                    await asyncio.sleep(retry + 1)
+                else:
+                    body = await resp.text()
+                    logging.warning(f"⚠️ OpenRouter HTTP {resp.status}: {body[:200]}")
+    except Exception as e:
+        logging.warning(f"⚠️ OpenRouter error: {type(e).__name__}: {e}")
+    return None
+
+async def _call_gemini(messages, api_key, model, timeout_sec=240):
+    """Call Gemini REST API. Converts OpenAI-style messages to Gemini format."""
+    # Extract system instruction and user messages
+    system_text = ""
+    contents = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text = msg["content"]
+        elif msg["role"] == "user":
+            contents.append({"role": "user", "parts": [{"text": msg["content"]}]})
+        elif msg["role"] == "assistant":
+            contents.append({"role": "model", "parts": [{"text": msg["content"]}]})
+
+    payload = {"contents": contents}
+    if system_text:
+        payload["system_instruction"] = {"parts": [{"text": system_text}]}
+    payload["generationConfig"] = {"temperature": 0.15}
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=req_timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        text = "".join(p.get("text", "") for p in parts)
+                        if text.strip():
+                            return text.strip()
+                else:
+                    body = await resp.text()
+                    logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
+    except Exception as e:
+        logging.warning(f"⚠️ Gemini error: {type(e).__name__}: {e}")
+    return None
+
+async def _call_groq(messages, api_key, model, timeout_sec=240):
+    """Call Groq API (OpenAI-compatible). Returns response text or None."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": messages, "temperature": 0.15}
+    req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://api.groq.com/openai/v1/chat/completions",
+                                    headers=headers, json=payload, timeout=req_timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                    if content and content.strip():
+                        return content.strip()
+                elif resp.status == 429:
+                    logging.warning(f"⚠️ Groq 429 rate limited")
+                else:
+                    body = await resp.text()
+                    logging.warning(f"⚠️ Groq HTTP {resp.status}: {body[:200]}")
+    except Exception as e:
+        logging.warning(f"⚠️ Groq error: {type(e).__name__}: {e}")
+    return None
+
+async def _call_provider(provider, messages, api_key, model, timeout_sec=240):
+    """Dispatch to the right provider call function."""
+    if provider == "openrouter":
+        return await _call_openrouter(messages, api_key, model, timeout_sec)
+    elif provider == "gemini":
+        return await _call_gemini(messages, api_key, model, timeout_sec)
+    elif provider == "groq":
+        return await _call_groq(messages, api_key, model, timeout_sec)
+    return None
+
+def _get_keys_for_provider(provider):
+    """Return list of API keys for the given provider."""
+    if provider == "openrouter":
+        return [OPENROUTER_API_KEY] if OPENROUTER_API_KEY else []
+    elif provider == "gemini":
+        return GEMINI_API_KEYS
+    elif provider == "groq":
+        return GROQ_API_KEYS
+    return []
+
+async def call_ai_with_fallback(messages, timeout_sec=240):
+    """Main AI call with full fallback chain.
+    
+    Chain: active_provider keys (rotating) → groq keys → None
+    If a different key works, saves it as active for future calls.
+    Returns (response_text, provider_used, model_used) or (None, None, None).
+    """
+    s = _get_ai_settings()
+    provider = s["active_provider"]
+    model = s.get(f"{provider}_model", "")
+    key_index = s.get("active_key_index", 0)
+    keys = _get_keys_for_provider(provider)
+
+    # Try all keys for active provider
+    if keys:
+        for i in range(len(keys)):
+            idx = (key_index + i) % len(keys)
+            logging.info(f"🔄 Trying {provider} key #{idx+1} model={model}")
+            result = await _call_provider(provider, messages, keys[idx], model, timeout_sec)
+            if result:
+                # Save working key if different from starting key
+                if idx != key_index:
+                    s["active_key_index"] = idx
+                    _save_and_cache_settings(s)
+                    logging.info(f"🔑 Switched {provider} to key #{idx+1} (was #{key_index+1})")
+                return result, provider, model
+
+    # Fallback to groq (unless already groq)
+    if provider != "groq" and GROQ_API_KEYS:
+        groq_model = s.get("groq_model", "llama-3.3-70b-versatile")
+        for i, key in enumerate(GROQ_API_KEYS):
+            logging.info(f"🔄 Fallback: groq key #{i+1} model={groq_model}")
+            result = await _call_groq(messages, key, groq_model, timeout_sec)
+            if result:
+                logging.info(f"✅ Groq fallback succeeded (key #{i+1})")
+                return result, "groq", groq_model
+
+    logging.warning("❌ All AI providers failed — sending without AI verdict")
+    return None, None, None
+
+async def test_provider_key(provider, api_key, model):
+    """Test a single provider key with a tiny prompt. Returns True/False."""
+    messages = [{"role": "user", "content": "Say OK"}]
+    try:
+        result = await _call_provider(provider, messages, api_key, model, timeout_sec=15)
+        return result is not None
+    except Exception:
+        return False
 
 # Fast verdict prompt for auto/monitor modes — concise but complete
 FAST_VERDICT_PROMPT_EN = """You are a crypto trading analyst. Analyze the scorecard data and give a verdict.
@@ -70,14 +259,10 @@ def get_fast_verdict_prompt(lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------
-# OPENCLAW STRUCTURED OUTPUT: AI TRADING VERDICT MODEL
+# STRUCTURED OUTPUT: AI TRADING VERDICT MODEL
 # ---------------------------------------------------------
 class TradeVerdict(BaseModel):
-    """OpenClaw Structured Trading Verdict — Binance AI Analysis.
-    
-    Used with cmdop ExtractService to return typed, validated
-    trading signals instead of raw unstructured text.
-    """
+    """Structured Trading Verdict — Binance AI Analysis."""
     direction: str          # "LONG" or "SHORT"
     entry_price: float      # Recommended entry price
     stop_loss: float        # Stop-loss price level
@@ -164,7 +349,7 @@ def _format_verdict(v: TradeVerdict, base_coin: str, price: float, dynamics_text
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# OPENCLAW AGENT STREAMING: LIVE AI IN TELEGRAM
+# LIVE AI STREAMING IN TELEGRAM
 # ---------------------------------------------------------
 async def _edit_telegram_msg(session, chat_id, message_id, text, bot_token, parse_mode=None):
     """Edit a Telegram message. Used for real-time streaming updates."""
@@ -183,8 +368,7 @@ async def _progressive_display(text, telegram_stream):
     """Progressively reveal AI text in Telegram via editMessageText.
     
     Takes already-obtained AI response and reveals it word-by-word
-    with a typing cursor effect. Works regardless of text source
-    (OpenClaw SDK, OpenRouter, or any other provider).
+    with a typing cursor effect.
     """
     session = telegram_stream["session"]
     chat_id = telegram_stream["chat_id"]
@@ -196,7 +380,7 @@ async def _progressive_display(text, telegram_stream):
         if len(words) < 5:
             # Too short for progressive display
             await _edit_telegram_msg(session, chat_id, message_id,
-                f"⚡ *OpenClaw AI Complete* ✅\n\n{text}",
+                f"⚡ *AiAlisa AI Complete* ✅\n\n{text}",
                 bot_token, parse_mode="Markdown")
             return
 
@@ -208,7 +392,7 @@ async def _progressive_display(text, telegram_stream):
             if len(display) > 4000:
                 display = display[:4000]
             await _edit_telegram_msg(session, chat_id, message_id,
-                f"⚡ *OpenClaw Live* ({i}/{len(words)})\n\n{display}",
+                f"⚡ *AiAlisa Live* ({i}/{len(words)})\n\n{display}",
                 bot_token)
             await asyncio.sleep(0.7)
 
@@ -217,10 +401,10 @@ async def _progressive_display(text, telegram_stream):
         if len(final_display) > 3900:
             final_display = final_display[:3900] + "..."
         await _edit_telegram_msg(session, chat_id, message_id,
-            f"⚡ *OpenClaw AI Complete* ✅\n\n{final_display}",
+            f"⚡ *AiAlisa AI Complete* ✅\n\n{final_display}",
             bot_token, parse_mode="Markdown")
 
-        logging.info(f"✅ OpenClaw Progressive Stream: {len(words)} words → Telegram")
+        logging.info(f"✅ AiAlisa Progressive Stream: {len(words)} words → Telegram")
 
     except Exception as e:
         logging.info(f"⚙️ Progressive display error ({e}), skipping...")
@@ -238,7 +422,7 @@ from agent.skills import (
 
 async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None) -> str:
     """
-    OpenClaw Architectural Agent: Executes Binance Market Intelligence Skills natively
+    AI Agent: Executes Binance Market Intelligence Skills
     and sends aggregated context to OpenRouter.
     
     Args:
@@ -304,7 +488,7 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     # =========================================================
     # Forced initialization logs for Architectural visibility
     logging.info(f"🤖 AiAlisa Agent initialized for {symbol}...")
-    logging.info(f"⚙️ [OpenClaw Architecture] Executing Agentic Binance Skills...")
+    logging.info(f"⚙️ [AiAlisa] Executing Agentic Binance Skills...")
 
     smart_money_context = await get_smart_money_signals(symbol)
     hype_context = await get_social_hype_leaderboard()
@@ -337,7 +521,7 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     tf_format_lines_short = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (brief reason)" for t in available_tfs])
 
     if extended:
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
+        system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
 {skills_note}
 You receive MULTI-TIMEFRAME data: {tf_list_str}. You MUST analyze EVERY indicator on EVERY timeframe.
@@ -446,7 +630,7 @@ SKIP RULES:
 - SKIP signals go to hourly monitoring and may upgrade later
 """
     elif square:
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
+        system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
 {skills_note}
 You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
@@ -528,7 +712,7 @@ SKIP RULES:
 - SKIP signals go to hourly monitoring and may upgrade later
 """
     else:
-        system_instruction = f"""You are AiAlisa, an advanced OpenClaw AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
+        system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
 {skills_note}
 You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
@@ -702,85 +886,50 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
         tg_msg = telegram_stream["message_id"]
         tg_token = telegram_stream["bot_token"]
         await _edit_telegram_msg(tg_session, tg_chat, tg_msg,
-            "⚡ OpenClaw AI Agent connected...\n🔍 Executing Binance Web3 Skills...", tg_token)
+            "⚡ AiAlisa AI connected...\n🔍 Executing Binance Web3 Skills...", tg_token)
         await asyncio.sleep(0.5)
         await _edit_telegram_msg(tg_session, tg_chat, tg_msg,
-            "⚡ OpenClaw AI Agent connected...\n🧠 AI reasoning in progress...", tg_token)
+            "⚡ AiAlisa AI connected...\n🧠 AI reasoning in progress...", tg_token)
 
     # ---------------------------------------------------------
-    # PHASE 2: GET AI RESPONSE (try all sources)
+    # PHASE 2: GET AI RESPONSE (multi-provider with fallback)
     # ---------------------------------------------------------
     ai_response = None
-    full_prompt = f"{system_instruction}\n\n{user_prompt}"
 
-    # --- STEP 1: OpenClaw SDK (presence logging only — no real API calls) ---
-    # Real SDK calls (extract.run / agent.run) consume rate limit via OpenClaw backend proxy,
-    # causing 429 on subsequent OpenRouter Direct requests. Log only for visibility.
-    if openclaw_installed and openclaw:
-        logging.info("🧠 [OpenClaw SDK] Available. Routing through OpenRouter relay...")
+    # Build messages array based on mode
+    if mode == "auto":
+        messages = [
+            {"role": "system", "content": get_fast_verdict_prompt(lang)},
+            {"role": "user", "content": user_prompt}
+        ]
     else:
-        logging.info("🔄 [OpenClaw] Routing through OpenRouter relay...")
+        messages = [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt}
+        ]
 
-    # --- STEP 2: OpenRouter (with real-time streaming if Telegram active) ---
     global _ai_last_request_time
-    if not ai_response:
-        # Serialize AI requests: wait for lock + rate limit cooldown
-        await _ai_request_lock.acquire()
-        try:
-            elapsed = _time.monotonic() - _ai_last_request_time
-            if elapsed < 10 and _ai_last_request_time > 0:
-                wait = 10 - elapsed
-                logging.info(f"⏳ AI queue: waiting {wait:.1f}s for rate limit cooldown...")
-                await asyncio.sleep(wait)
-            logging.info("⚡ [OpenClaw] Executing AI inference via OpenRouter relay...")
+    await _ai_request_lock.acquire()
+    try:
+        elapsed = _time.monotonic() - _ai_last_request_time
+        if elapsed < 10 and _ai_last_request_time > 0:
+            wait = 10 - elapsed
+            logging.info(f"⏳ AI queue: waiting {wait:.1f}s for rate limit cooldown...")
+            await asyncio.sleep(wait)
+
+        # Determine provider/model (override params take priority for monitor pipeline)
+        if api_key_override or model_override:
+            # Monitor pipeline or manual override — use OpenRouter directly
             _active_key = api_key_override or OPENROUTER_API_KEY
             _active_model = model_override or OPENROUTER_MODEL
-            headers = {
-                "Authorization": f"Bearer {_active_key}",
-                "Content-Type": "application/json"
-            }
-            # Mode-based payload: auto=fast/no reasoning, scan=full/no reasoning, extended=reasoning
-            if mode == "auto":
-                # Fast verdict for breakout push / monitor recheck
-                payload = {
-                    "model": _active_model,
-                    "messages": [
-                        {"role": "system", "content": get_fast_verdict_prompt(lang)},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.1,
-                    # No max_tokens limit — prompt instructs concise output
-                }
-                request_timeout = aiohttp.ClientTimeout(total=240)
-            elif mode == "extended":
-                # Deep analysis — reasoning enabled
-                payload = {
-                    "model": _active_model,
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.15,
-                    "reasoning": {"enabled": True},
-                    # No max_tokens limit — prompt instructs concise output
-                }
-                request_timeout = aiohttp.ClientTimeout(total=240)
-            else:
-                # scan (default) — full prompt, no reasoning
-                payload = {
-                    "model": _active_model,
-                    "messages": [
-                        {"role": "system", "content": system_instruction},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": 0.15,
-                    # No max_tokens limit — prompt instructs concise output
-                }
-                request_timeout = aiohttp.ClientTimeout(total=240)
+            logging.info(f"⚡ [AiAlisa] AI inference via OpenRouter (override) model={_active_model}")
 
-            # === REAL-TIME SSE STREAMING to Telegram ===
+            # === REAL-TIME SSE STREAMING to Telegram (OpenRouter only) ===
             if telegram_stream:
-                payload["stream"] = True
+                headers = {"Authorization": f"Bearer {_active_key}", "Content-Type": "application/json"}
+                payload = {"model": _active_model, "messages": messages, "temperature": 0.15, "stream": True}
+                if mode == "extended":
+                    payload["reasoning"] = {"enabled": True}
                 tg_s = telegram_stream["session"]
                 tg_c = telegram_stream["chat_id"]
                 tg_m = telegram_stream["message_id"]
@@ -789,6 +938,7 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                     accumulated = ""
                     last_edit = 0
                     token_count = 0
+                    request_timeout = aiohttp.ClientTimeout(total=240)
                     async with aiohttp.ClientSession() as sess:
                         async with sess.post("https://openrouter.ai/api/v1/chat/completions",
                                              headers=headers, json=payload, timeout=request_timeout) as resp:
@@ -813,79 +963,110 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
                                                 if len(display) > 4000:
                                                     display = "..." + display[-3997:]
                                                 await _edit_telegram_msg(tg_s, tg_c, tg_m,
-                                                    f"⚡ *OpenClaw AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
+                                                    f"⚡ *AiAlisa AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
                                                 last_edit = now
                                     except (json.JSONDecodeError, KeyError, IndexError):
                                         continue
-
                                 if accumulated.strip():
                                     final = accumulated.strip()
                                     if len(final) > 3900:
                                         final = final[:3900] + "..."
                                     await _edit_telegram_msg(tg_s, tg_c, tg_m,
-                                        f"⚡ *OpenClaw AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
+                                        f"⚡ *AiAlisa AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
                                     ai_response = accumulated.strip()
-                                    logging.info(f"✅ OpenClaw Live Stream: {token_count} tokens → Telegram (real-time)")
+                                    logging.info(f"✅ AiAlisa Live Stream: {token_count} tokens → Telegram (real-time)")
                             else:
                                 logging.warning(f"⚠️ OpenRouter stream error: {resp.status}")
                 except Exception as e:
                     logging.warning(f"⚠️ OpenRouter streaming error ({e}), trying non-stream...")
 
-            # === Non-streaming fallback (automated signals, no Telegram edit) ===
+            # Non-streaming fallback for override mode
             if not ai_response:
-                max_attempts = 2
-                attempt = 0
-                while attempt < max_attempts:
-                    try:
-                        payload.pop("stream", None)
-                        # Keep reasoning: {enabled: true} — forces thinking tokens into
-                        # separate field, prevents 15-27k hidden completion token bloat
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post("https://openrouter.ai/api/v1/chat/completions",
-                                                    headers=headers, json=payload, timeout=request_timeout) as response:
-                                if response.status == 200:
-                                    data = await response.json()
-                                    raw_content = data["choices"][0]["message"]["content"]
-                                    if raw_content is None:
-                                        logging.warning(f"⚠️ [OpenRouter Direct] content=null (attempt {attempt+1}), retrying...")
-                                        await asyncio.sleep(3)
-                                        attempt += 1
+                ai_response = await _call_openrouter(messages, _active_key, _active_model)
+
+        else:
+            # === MULTI-PROVIDER FALLBACK CHAIN ===
+            s = _get_ai_settings()
+            provider = s["active_provider"]
+            logging.info(f"⚡ [AiAlisa] AI inference via {provider} (fallback chain)")
+
+            # Streaming for OpenRouter manual scans
+            if telegram_stream and provider == "openrouter":
+                _or_key = OPENROUTER_API_KEY
+                _or_model = s.get("openrouter_model", OPENROUTER_MODEL)
+                headers = {"Authorization": f"Bearer {_or_key}", "Content-Type": "application/json"}
+                payload = {"model": _or_model, "messages": messages, "temperature": 0.15, "stream": True}
+                if mode == "extended":
+                    payload["reasoning"] = {"enabled": True}
+                tg_s = telegram_stream["session"]
+                tg_c = telegram_stream["chat_id"]
+                tg_m = telegram_stream["message_id"]
+                tg_t = telegram_stream["bot_token"]
+                try:
+                    accumulated = ""
+                    last_edit = 0
+                    token_count = 0
+                    request_timeout = aiohttp.ClientTimeout(total=240)
+                    async with aiohttp.ClientSession() as sess:
+                        async with sess.post("https://openrouter.ai/api/v1/chat/completions",
+                                             headers=headers, json=payload, timeout=request_timeout) as resp:
+                            if resp.status == 200:
+                                async for line in resp.content:
+                                    line = line.decode("utf-8").strip()
+                                    if not line.startswith("data: "):
                                         continue
-                                    candidate = raw_content.strip()
-                                    if _is_valid_analysis(candidate):
-                                        ai_response = candidate
-                                        logging.info("✅ [OpenRouter Direct] AI inference complete.")
-                                    else:
-                                        logging.warning(f"⚠️ [OpenRouter Direct] Response failed validation (attempt {attempt+1}). Preview: {candidate[:200]}")
-                                        if attempt >= max_attempts - 1:
-                                            ai_response = candidate  # accept on last attempt anyway
-                                        else:
-                                            attempt += 1
-                                            continue
-                                elif response.status == 429:
-                                    retry_after = int(response.headers.get("Retry-After", "5"))
-                                    logging.warning(f"⚠️ [OpenRouter Direct] Rate limited, waiting {retry_after}s (attempt {attempt+1})...")
-                                    await asyncio.sleep(retry_after + 1)
-                                    attempt += 1
-                                    continue
-                                else:
-                                    body = await response.text()
-                                    logging.warning(f"⚠️ [OpenRouter Direct] HTTP {response.status}: {body[:300]}")
-                                    ai_response = f"❌ API Error: {response.status}"
-                        if ai_response:
-                            break
-                        attempt += 1
-                    except Exception as e:
-                        logging.warning(f"⚠️ [OpenRouter Direct] Network error (attempt {attempt+1}): {type(e).__name__}: {e}")
-                        if attempt < max_attempts - 1:
-                            await asyncio.sleep(3)
-                            attempt += 1
-                        else:
-                            ai_response = f"❌ Network Error: {e}"
-                            break
-        finally:
-            _ai_last_request_time = _time.monotonic()
-            _ai_request_lock.release()
+                                    data_str = line[6:]
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        chunk = json.loads(data_str)
+                                        delta = chunk["choices"][0].get("delta", {})
+                                        token = delta.get("content", "")
+                                        if token:
+                                            accumulated += token
+                                            token_count += 1
+                                            now = _time.monotonic()
+                                            if now - last_edit >= 1.5 and len(accumulated.strip()) > 10:
+                                                display = accumulated.strip() + " ▌"
+                                                if len(display) > 4000:
+                                                    display = "..." + display[-3997:]
+                                                await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                                    f"⚡ *AiAlisa AI Streaming* 🔴 LIVE\n\n{display}", tg_t)
+                                                last_edit = now
+                                    except (json.JSONDecodeError, KeyError, IndexError):
+                                        continue
+                                if accumulated.strip():
+                                    final = accumulated.strip()
+                                    if len(final) > 3900:
+                                        final = final[:3900] + "..."
+                                    await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                                        f"⚡ *AiAlisa AI Complete* ✅\n\n{final}", tg_t, parse_mode="Markdown")
+                                    ai_response = accumulated.strip()
+                                    logging.info(f"✅ AiAlisa Live Stream: {token_count} tokens → Telegram (real-time)")
+                            else:
+                                logging.warning(f"⚠️ OpenRouter stream error: {resp.status}")
+                except Exception as e:
+                    logging.warning(f"⚠️ OpenRouter streaming error ({e}), trying fallback chain...")
+
+            # Non-streaming: full fallback chain
+            if not ai_response:
+                result, used_provider, used_model = await call_ai_with_fallback(messages)
+                if result:
+                    ai_response = result
+                    logging.info(f"✅ AI response via {used_provider}/{used_model}")
+                    # Update telegram status if streaming was attempted
+                    if telegram_stream:
+                        tg_s = telegram_stream["session"]
+                        tg_c = telegram_stream["chat_id"]
+                        tg_m = telegram_stream["message_id"]
+                        tg_t = telegram_stream["bot_token"]
+                        final = ai_response[:3900] + "..." if len(ai_response) > 3900 else ai_response
+                        await _edit_telegram_msg(tg_s, tg_c, tg_m,
+                            f"⚡ *AiAlisa AI Complete* ✅ ({used_provider})\n\n{final}", tg_t, parse_mode="Markdown")
+
+    finally:
+        _ai_last_request_time = _time.monotonic()
+        _ai_request_lock.release()
 
     # ---------------------------------------------------------
     # PHASE 3: PROGRESSIVE DISPLAY (only if text obtained without streaming)
