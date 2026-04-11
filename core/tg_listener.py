@@ -342,13 +342,15 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+        is_monitor = entry.get("is_monitor", False)
 
         # SKIP signals — show in list but don't count in P&L/stats
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
+            marker = "⚪Ⓜ️" if is_monitor else "⚪"
             trade_lines.append(
-                f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+                f"{marker} `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
             )
             continue
 
@@ -357,8 +359,21 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            marker = "⚫Ⓜ️" if is_monitor else "⚫"
             trade_lines.append(
-                f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{marker} `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # Monitor signals with LONG/SHORT — show but don't count in main P&L
+        if is_monitor:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            trade_lines.append(
+                f"🔵Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -543,13 +558,15 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+        is_monitor = entry.get("is_monitor", False)
 
         # SKIP signals — show in list but don't count in P&L/stats
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
+            marker = "⚪Ⓜ️" if is_monitor else "⚪"
             trade_lines.append(
-                f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+                f"{marker} `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
             )
             continue
 
@@ -558,8 +575,21 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            marker = "⚫Ⓜ️" if is_monitor else "⚫"
             trade_lines.append(
-                f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{marker} `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # Monitor signals with LONG/SHORT — show but don't count in main P&L
+        if is_monitor:
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            trade_lines.append(
+                f"🔵Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -758,6 +788,7 @@ async def build_signals_text_monitor(session: aiohttp.ClientSession, lang: str =
         entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+        is_monitor = entry.get("is_monitor", False)
 
         if ai_dir == "SKIP":
             day_skipped += 1
@@ -937,6 +968,7 @@ async def build_signals_close_text_monitor(session: aiohttp.ClientSession, lang:
         entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
         short_sym = sym.replace("USDT", "")
         dir_tag = f" {ai_dir}" if ai_dir else ""
+        is_monitor = entry.get("is_monitor", False)
 
         if ai_dir == "SKIP":
             day_skipped += 1
@@ -1122,8 +1154,8 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
                 tf = entry.get("tf", "?")
                 ai_dir = entry.get("ai_direction", "")
 
-                # Skip signals without AI direction or SKIP — they don't affect the bank
-                if not ai_dir or ai_dir == "SKIP":
+                # Skip signals without AI direction, SKIP, or monitor — they don't affect the bank
+                if not ai_dir or ai_dir == "SKIP" or entry.get("is_monitor", False):
                     continue
 
                 ai_sl = entry.get("ai_sl")

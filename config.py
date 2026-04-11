@@ -274,7 +274,7 @@ def parse_ai_trade_params(ai_text: str) -> dict:
     return result
 
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_monitor=False):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
     # Don't duplicate same symbol+tf
@@ -298,6 +298,8 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             entry["ai_leverage"] = ai_leverage
         if ai_deposit_pct is not None:
             entry["ai_deposit_pct"] = ai_deposit_pct
+        if is_monitor:
+            entry["is_monitor"] = True
         log.append(entry)
         save_breakout_log(log)
 

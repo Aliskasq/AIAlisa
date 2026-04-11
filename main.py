@@ -687,7 +687,8 @@ async def main():
                                                ai_entry=_monitor_entry,
                                                ai_sl=_monitor_sl,
                                                ai_tp=_monitor_tp,
-                                               ai_leverage=1, ai_deposit_pct=2.0)
+                                               ai_leverage=1, ai_deposit_pct=2.0,
+                                               is_monitor=True)
                             alerts_to_remove.append(item["alert"])
                             continue
 
