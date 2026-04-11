@@ -1469,9 +1469,14 @@ async def telegram_polling_loop(app_session):
                                     txt = f"🌐 *OpenRouter Free Models*\nCurrent: `{cur}`"
                                     kb = {"inline_keyboard": [
                                         [{"text": "── FREE MODELS ──", "callback_data": "noop"}],
-                                        [{"text": "⚡ StepFun 3.5 Flash", "callback_data": "or_md_stepfun/step-3.5-flash:free"}],
-                                        [{"text": "🦙 Llama 4 Maverick", "callback_data": "or_md_meta-llama/llama-4-maverick:free"}],
-                                        [{"text": "🔮 Mistral Small 3.1", "callback_data": "or_md_mistralai/mistral-small-3.1-24b-instruct:free"}],
+                                        [{"text": "🦙 Llama 3.3 70B", "callback_data": "or_md_meta-llama/llama-3.3-70b-instruct:free"},
+                                         {"text": "🔮 Qwen3 Coder", "callback_data": "or_md_qwen/qwen3-coder:free"}],
+                                        [{"text": "💎 Gemma 4 31B", "callback_data": "or_md_google/gemma-4-31b-it:free"},
+                                         {"text": "🌐 GPT-OSS 120B", "callback_data": "or_md_openai/gpt-oss-120b:free"}],
+                                        [{"text": "🧠 Nemotron Super 120B", "callback_data": "or_md_nvidia/nemotron-3-super-120b-a12b:free"},
+                                         {"text": "🐬 Hermes 3 405B", "callback_data": "or_md_nousresearch/hermes-3-llama-3.1-405b:free"}],
+                                        [{"text": "🤖 MiniMax M2.5", "callback_data": "or_md_minimax/minimax-m2.5:free"},
+                                         {"text": "🏔️ Gemma 3 27B", "callback_data": "or_md_google/gemma-3-27b-it:free"}],
                                         [{"text": "🧪 Test All Free Models", "callback_data": "test_or"}],
                                         [{"text": "⬅️ Back", "callback_data": "back_models"}]
                                     ]}
@@ -1612,9 +1617,14 @@ async def telegram_polling_loop(app_session):
                                         json={"callback_query_id": cq_id, "text": "🧪 Testing free models..."})
                                     await send_response(app_session, chat_id, "🧪 Testing OpenRouter free models...")
                                     free_models = [
-                                        "stepfun/step-3.5-flash:free",
-                                        "meta-llama/llama-4-maverick:free",
-                                        "mistralai/mistral-small-3.1-24b-instruct:free",
+                                        "meta-llama/llama-3.3-70b-instruct:free",
+                                        "qwen/qwen3-coder:free",
+                                        "google/gemma-4-31b-it:free",
+                                        "openai/gpt-oss-120b:free",
+                                        "nvidia/nemotron-3-super-120b-a12b:free",
+                                        "nousresearch/hermes-3-llama-3.1-405b:free",
+                                        "minimax/minimax-m2.5:free",
+                                        "google/gemma-3-27b-it:free",
                                     ]
                                     results = []
                                     for fm in free_models:
