@@ -1564,10 +1564,12 @@ async def telegram_polling_loop(app_session):
                                     kb = {"inline_keyboard": [
                                         key_row,
                                         [{"text": "── Models ──", "callback_data": "noop"}],
+                                        [{"text": "⭐ Gemini 3.1 Pro", "callback_data": "gm_md_3.1pro"},
+                                         {"text": "Gemini 3 Pro", "callback_data": "gm_md_3pro"}],
                                         [{"text": "Gemini 2.5 Pro", "callback_data": "gm_md_2.5pro"},
                                          {"text": "Gemini 2.5 Flash", "callback_data": "gm_md_2.5flash"}],
-                                        [{"text": "Gemini 2.0 Flash", "callback_data": "gm_md_2.0flash"},
-                                         {"text": "Gemini 1.5 Flash", "callback_data": "gm_md_1.5flash"}],
+                                        [{"text": "Gemini 2.5 Flash Lite", "callback_data": "gm_md_2.5flashlite"},
+                                         {"text": "Gemini 2.0 Flash", "callback_data": "gm_md_2.0flash"}],
                                         [{"text": "🧪 Test All Keys", "callback_data": "test_gm"}],
                                         [{"text": "⬅️ Back", "callback_data": "back_models"}]
                                     ]}
@@ -1631,10 +1633,12 @@ async def telegram_polling_loop(app_session):
 
                                 # --- Gemini model select ---
                                 _gm_model_map = {
-                                    "gm_md_2.5pro": "gemini-2.5-pro-preview-06-05",
+                                    "gm_md_3.1pro": "gemini-3.1-pro-preview",
+                                    "gm_md_3pro": "gemini-3-pro-preview",
+                                    "gm_md_2.5pro": "gemini-2.5-pro",
                                     "gm_md_2.5flash": "gemini-2.5-flash",
+                                    "gm_md_2.5flashlite": "gemini-2.5-flash-lite",
                                     "gm_md_2.0flash": "gemini-2.0-flash",
-                                    "gm_md_1.5flash": "gemini-1.5-flash",
                                 }
                                 if cb_data in _gm_model_map:
                                     new_model = _gm_model_map[cb_data]

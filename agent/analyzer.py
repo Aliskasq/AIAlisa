@@ -114,6 +114,27 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
                         text = "".join(p.get("text", "") for p in parts)
                         if text.strip():
                             return text.strip()
+                elif resp.status == 429:
+                    body = await resp.text()
+                    # Extract retry delay from response
+                    import re as _re
+                    retry_match = _re.search(r'retry in (\d+)', body)
+                    wait_sec = int(retry_match.group(1)) + 2 if retry_match else 30
+                    logging.warning(f"⚠️ Gemini 429 rate limited, waiting {wait_sec}s...")
+                    await asyncio.sleep(wait_sec)
+                    # Retry once after waiting
+                    async with session.post(url, json=payload, timeout=req_timeout) as resp2:
+                        if resp2.status == 200:
+                            data = await resp2.json(content_type=None)
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                text = "".join(p.get("text", "") for p in parts)
+                                if text.strip():
+                                    return text.strip()
+                        else:
+                            body2 = await resp2.text()
+                            logging.warning(f"⚠️ Gemini retry HTTP {resp2.status}: {body2[:200]}")
                 else:
                     body = await resp.text()
                     logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
