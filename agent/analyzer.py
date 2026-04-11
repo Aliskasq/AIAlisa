@@ -101,7 +101,7 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
         payload["system_instruction"] = {"parts": [{"text": system_text}]}
     payload["generationConfig"] = {"temperature": 0.15}
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    url = f"https://botgem.zhoriha.workers.dev/v1beta/models/{model}:generateContent?key={api_key}"
     req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
     try:
         async with aiohttp.ClientSession() as session:
