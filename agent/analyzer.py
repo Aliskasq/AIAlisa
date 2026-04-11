@@ -167,8 +167,13 @@ def _get_keys_for_provider(provider):
 async def call_ai_with_fallback(messages, timeout_sec=240):
     """Main AI call with full fallback chain.
     
-    Chain: active_provider keys (rotating) → groq keys → None
-    If a different key works, saves it as active for future calls.
+    Chain (each key tried ONCE, then next):
+    1. Gemini key#1 → key#2 → key#3 (starting from saved active key)
+    2. Groq key#1 → key#2 → key#3 (model: llama-3.3-70b-versatile)
+    3. OpenRouter openai/gpt-oss-120b:free
+    4. OpenRouter openrouter/free
+    
+    If a provider/key works — save it for next time.
     Returns (response_text, provider_used, model_used) or (None, None, None).
     """
     s = _get_ai_settings()
@@ -177,42 +182,68 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
     key_index = s.get("active_key_index", 0)
     keys = _get_keys_for_provider(provider)
 
-    # Try all keys for active provider
+    # === STEP 1: Try all keys for active provider (one attempt each) ===
     if keys:
         for i in range(len(keys)):
             idx = (key_index + i) % len(keys)
             logging.info(f"🔄 Trying {provider} key #{idx+1} model={model}")
             result = await _call_provider(provider, messages, keys[idx], model, timeout_sec)
             if result:
-                # Save working key if different from starting key
                 if idx != key_index:
                     s["active_key_index"] = idx
                     _save_and_cache_settings(s)
-                    logging.info(f"🔑 Switched {provider} to key #{idx+1} (was #{key_index+1})")
+                    logging.info(f"🔑 Saved {provider} key #{idx+1}")
                 return result, provider, model
 
-    # Fallback to groq (unless already groq)
-    if provider != "groq" and GROQ_API_KEYS:
-        groq_model = s.get("groq_model", "llama-3.3-70b-versatile")
+    # === STEP 2: Gemini (if not already active) ===
+    if provider != "gemini" and GEMINI_API_KEYS:
+        gemini_model = s.get("gemini_model", "gemini-2.5-flash")
+        for i, key in enumerate(GEMINI_API_KEYS):
+            logging.info(f"🔄 Fallback: gemini key #{i+1} model={gemini_model}")
+            result = await _call_gemini(messages, key, gemini_model, timeout_sec)
+            if result:
+                s["active_provider"] = "gemini"
+                s["active_key_index"] = i
+                _save_and_cache_settings(s)
+                logging.info(f"✅ Gemini fallback succeeded (key #{i+1}), saved as active")
+                return result, "gemini", gemini_model
+
+    # === STEP 3: Groq (always use llama-3.3-70b-versatile, ignore stale saved model) ===
+    if GROQ_API_KEYS:
+        groq_model = "llama-3.3-70b-versatile"
         for i, key in enumerate(GROQ_API_KEYS):
             logging.info(f"🔄 Fallback: groq key #{i+1} model={groq_model}")
             result = await _call_groq(messages, key, groq_model, timeout_sec)
             if result:
-                logging.info(f"✅ Groq fallback succeeded (key #{i+1})")
+                s["active_provider"] = "groq"
+                s["groq_model"] = groq_model
+                s["active_key_index"] = i
+                _save_and_cache_settings(s)
+                logging.info(f"✅ Groq fallback succeeded (key #{i+1}), saved as active")
                 return result, "groq", groq_model
 
-    # Fallback to OpenRouter openrouter/free (last resort)
-    if provider != "openrouter" and OPENROUTER_API_KEY:
-        or_model = "openrouter/free"
+    # === STEP 4: OpenRouter openai/gpt-oss-120b:free ===
+    if OPENROUTER_API_KEY:
+        or_model = "openai/gpt-oss-120b:free"
         logging.info(f"🔄 Fallback: OpenRouter model={or_model}")
         result = await _call_openrouter(messages, OPENROUTER_API_KEY, or_model, timeout_sec)
         if result:
-            logging.info(f"✅ OpenRouter fallback succeeded ({or_model})")
-            # Save openrouter/free as active so next call uses it directly
             s["active_provider"] = "openrouter"
             s["openrouter_model"] = or_model
             _save_and_cache_settings(s)
-            logging.info(f"🔑 Switched active provider to openrouter/{or_model}")
+            logging.info(f"✅ OpenRouter fallback succeeded ({or_model}), saved as active")
+            return result, "openrouter", or_model
+
+    # === STEP 5: OpenRouter openrouter/free (last resort) ===
+    if OPENROUTER_API_KEY:
+        or_model = "openrouter/free"
+        logging.info(f"🔄 Last resort: OpenRouter model={or_model}")
+        result = await _call_openrouter(messages, OPENROUTER_API_KEY, or_model, timeout_sec)
+        if result:
+            s["active_provider"] = "openrouter"
+            s["openrouter_model"] = or_model
+            _save_and_cache_settings(s)
+            logging.info(f"✅ OpenRouter last resort succeeded ({or_model}), saved as active")
             return result, "openrouter", or_model
 
     logging.warning("❌ All AI providers failed — sending without AI verdict")
