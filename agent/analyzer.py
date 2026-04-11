@@ -114,27 +114,6 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
                         text = "".join(p.get("text", "") for p in parts)
                         if text.strip():
                             return text.strip()
-                elif resp.status == 429:
-                    body = await resp.text()
-                    # Extract retry delay from response
-                    import re as _re
-                    retry_match = _re.search(r'retry in (\d+)', body)
-                    wait_sec = int(retry_match.group(1)) + 2 if retry_match else 30
-                    logging.warning(f"⚠️ Gemini 429 rate limited, waiting {wait_sec}s...")
-                    await asyncio.sleep(wait_sec)
-                    # Retry once after waiting
-                    async with session.post(url, json=payload, timeout=req_timeout) as resp2:
-                        if resp2.status == 200:
-                            data = await resp2.json(content_type=None)
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                text = "".join(p.get("text", "") for p in parts)
-                                if text.strip():
-                                    return text.strip()
-                        else:
-                            body2 = await resp2.text()
-                            logging.warning(f"⚠️ Gemini retry HTTP {resp2.status}: {body2[:200]}")
                 else:
                     body = await resp.text()
                     logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
@@ -221,6 +200,20 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
             if result:
                 logging.info(f"✅ Groq fallback succeeded (key #{i+1})")
                 return result, "groq", groq_model
+
+    # Fallback to OpenRouter openrouter/free (last resort)
+    if provider != "openrouter" and OPENROUTER_API_KEY:
+        or_model = "openrouter/free"
+        logging.info(f"🔄 Fallback: OpenRouter model={or_model}")
+        result = await _call_openrouter(messages, OPENROUTER_API_KEY, or_model, timeout_sec)
+        if result:
+            logging.info(f"✅ OpenRouter fallback succeeded ({or_model})")
+            # Save openrouter/free as active so next call uses it directly
+            s["active_provider"] = "openrouter"
+            s["openrouter_model"] = or_model
+            _save_and_cache_settings(s)
+            logging.info(f"🔑 Switched active provider to openrouter/{or_model}")
+            return result, "openrouter", or_model
 
     logging.warning("❌ All AI providers failed — sending without AI verdict")
     return None, None, None
