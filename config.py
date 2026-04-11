@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (use explicit path so it works regardless of CWD)
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # Telegram Bot configuration
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
