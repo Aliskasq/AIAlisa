@@ -107,7 +107,7 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=req_timeout) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
+                    data = await resp.json(content_type=None)
                     candidates = data.get("candidates", [])
                     if candidates:
                         parts = candidates[0].get("content", {}).get("parts", [])
