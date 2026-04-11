@@ -30,8 +30,9 @@ async def _fetch_or_free_models(force=False):
                 if resp.status == 200:
                     data = await resp.json()
                     free = sorted(
-                        [m["id"] for m in data.get("data", []) if ":free" in m.get("id", "")],
-                        key=lambda x: x.split("/")[-1]
+                        [m["id"] for m in data.get("data", [])
+                         if ":free" in m.get("id", "") or (m.get("id") == "openrouter/free")],
+                        key=lambda x: (0 if x == "openrouter/free" else 1, x.split("/")[-1])
                     )
                     if free:
                         _or_free_models_cache["models"] = free
