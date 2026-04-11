@@ -15,7 +15,7 @@ GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID")
 
 # AI Service configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "stepfun/step-3.5-flash:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 
 # Monitor: separate API key + model (parallel AI calls, no rate limit conflict)
 OPENROUTER_API_KEY_MONITOR = os.getenv("OPENROUTER_API_KEY_MONITOR", "")
@@ -53,9 +53,10 @@ def load_ai_settings():
     defaults = {
         "active_provider": "openrouter",
         "active_key_index": 0,
-        "openrouter_model": OPENROUTER_MODEL or "stepfun/step-3.5-flash:free",
+        "openrouter_model": OPENROUTER_MODEL or "openrouter/free",
         "gemini_model": "gemini-2.5-flash",
         "groq_model": "llama-3.3-70b-versatile",
+        "monitor_model": OPENROUTER_MODEL_MONITOR or OPENROUTER_MODEL or "openrouter/free",
     }
     if os.path.exists(AI_SETTINGS_FILE):
         try:
@@ -75,7 +76,10 @@ def save_ai_settings(settings):
     except Exception as e:
         logging.error(f"Error writing AI settings: {e}")
 
-
+# Restore monitor model from saved settings on startup
+_startup_settings = load_ai_settings()
+if _startup_settings.get("monitor_model"):
+    OPENROUTER_MODEL_MONITOR = _startup_settings["monitor_model"]
 
 # Binance Square
 SQUARE_OPENAPI_KEY = os.getenv("SQUARE_OPENAPI_KEY")

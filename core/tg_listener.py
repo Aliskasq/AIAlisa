@@ -1843,6 +1843,10 @@ async def telegram_polling_loop(app_session):
                                 if len(mon_parts) >= 2 and mon_parts[1].strip():
                                     new_mon_model = mon_parts[1].strip()
                                     _cfg.OPENROUTER_MODEL_MONITOR = new_mon_model
+                                    # Persist monitor model to ai_settings.json
+                                    _s = agent.analyzer._get_ai_settings()
+                                    _s["monitor_model"] = new_mon_model
+                                    agent.analyzer._save_and_cache_settings(_s)
                                     await send_response(app_session, chat_id,
                                         f"✅ Monitor AI model switched to:\n`{new_mon_model}`\n\n"
                                         f"🔑 Monitor API key: {'✅ set' if _cfg.OPENROUTER_API_KEY_MONITOR else '❌ not set (using main key)'}",
