@@ -42,7 +42,7 @@ GEMINI_API_KEYS = [k for k in [
 KEY_ACCOUNT_LABELS = {
     0: "zhoriha",
     1: "alisa",
-    2: "sudani",
+    2: "alisasudani210",
 }
 
 # AI provider settings persistence
