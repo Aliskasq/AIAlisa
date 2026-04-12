@@ -334,6 +334,91 @@ def _is_valid_analysis(text: str) -> bool:
     return True
 
 
+def _has_placeholder_percentages(text: str) -> bool:
+    """Check if AI response contains literal X%/Y% placeholder patterns instead of real numbers."""
+    import re
+    # Match patterns like "LONG X%" or "SHORT Y%" or "ДЛГО X%" or "КОРОТКО Y%"
+    placeholder_patterns = [
+        r'LONG\s+X%',
+        r'SHORT\s+Y%',
+        r'ДЛГО\s+X%',
+        r'КОРОТКО\s+Y%',
+        r'ЛОНГ\s+X%',
+        r'ШОРТ\s+Y%',
+        r'LONG\s+\[calculated_number\]%',
+        r'SHORT\s+\[calculated_number\]%',
+    ]
+    for pattern in placeholder_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: dict = None, tf_key: str = "4H") -> str:
+    """Replace literal X%/Y% placeholders in AI response with real scorecard percentages.
+    
+    Extracts LONG/SHORT % from format_tf_summary scorecard for each TF,
+    then substitutes them into the AI text.
+    """
+    import re
+    from core.indicators import format_tf_summary
+
+    if not _has_placeholder_percentages(text):
+        return text
+
+    logging.warning("⚠️ AI returned literal X%/Y% placeholders — substituting from scorecard")
+
+    # Collect scorecard percentages per TF
+    tf_pcts = {}
+
+    # Primary TF
+    if indicators:
+        summary = format_tf_summary(indicators, tf_key)
+        match = re.search(r'LONG\s+(\d+)%\s*/\s*SHORT\s+(\d+)%', summary)
+        if match:
+            tf_pcts[tf_key] = (int(match.group(1)), int(match.group(2)))
+
+    # MTF data
+    if mtf_data:
+        for tf_label, tf_indic in mtf_data.items():
+            summary = format_tf_summary(tf_indic, tf_label)
+            match = re.search(r'LONG\s+(\d+)%\s*/\s*SHORT\s+(\d+)%', summary)
+            if match:
+                tf_pcts[tf_label] = (int(match.group(1)), int(match.group(2)))
+
+    if not tf_pcts:
+        return text
+
+    # Replace per-TF placeholders: "⏱ 4H: LONG X% / SHORT Y%" → "⏱ 4H: LONG 72% / SHORT 28%"
+    # Also handle Russian variants: ДЛГО/КОРОТКО, ЛОНГ/ШОРТ
+    for tf_label, (long_pct, short_pct) in tf_pcts.items():
+        for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
+            # Pattern: TF label followed by LONG X% / SHORT Y%
+            pattern = rf'(⏱\s*{re.escape(tf_label)}[:\s]*){long_word}\s+X%\s*/\s*{short_word}\s+Y%'
+            replacement = rf'\g<1>{long_word} {long_pct}% / {short_word} {short_pct}%'
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    # Replace "Overall" / "Общий" line placeholder
+    if tf_pcts:
+        # Weighted average: 4H=50%, 1H=30%, 15m=10%, 1D=10%
+        weights = {"4H": 0.50, "1H": 0.30, "15m": 0.10, "1D": 0.10}
+        total_w = 0
+        weighted_long = 0
+        for tf_label, (long_pct, short_pct) in tf_pcts.items():
+            w = weights.get(tf_label, 0.1)
+            weighted_long += long_pct * w
+            total_w += w
+        if total_w > 0:
+            overall_long = round(weighted_long / total_w)
+            overall_short = 100 - overall_long
+            for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
+                pattern = rf'((?:Overall|Общий)[:\s]*){long_word}\s+X%\s*/\s*{short_word}\s+Y%'
+                replacement = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    return text
+
+
 def _validate_sl_tp_in_text(text: str) -> str:
     """Post-validate SL/TP consistency in free-text AI response.
     Checks: SL direction, minimum 2% SL distance, minimum 2:1 R:R ratio."""
@@ -557,9 +642,9 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     available_tfs = [t for t in tf_order if t in available_tfs]
     tf_list_str = " + ".join(available_tfs)
 
-    # TF lines for output format
-    tf_format_lines = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (key reasons)" for t in available_tfs])
-    tf_format_lines_short = "\n".join([f"⏱ {t}: LONG X% / SHORT Y% (brief reason)" for t in available_tfs])
+    # TF lines for output format — use [number] to make it clear AI must calculate real %
+    tf_format_lines = "\n".join([f"⏱ {t}: LONG [calculated_number]% / SHORT [calculated_number]% (key reasons)" for t in available_tfs])
+    tf_format_lines_short = "\n".join([f"⏱ {t}: LONG [calculated_number]% / SHORT [calculated_number]% (brief reason)" for t in available_tfs])
 
     if extended:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -665,6 +750,11 @@ CRITICAL RULES:
    - 15m RSI spikes are normal in breakouts — never penalize 15m RSI alone.
 10. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
 11. You MUST always output BOTH parts. Never skip the second part.
+CRITICAL — REAL NUMBERS ONLY:
+- NEVER output literal "X%" or "Y%" in your response. Every percentage MUST be a real calculated number (e.g. "LONG 72%" not "LONG X%").
+- Use the SCORECARD at the bottom of each TF data block — it already shows "LONG XX% / SHORT YY%" with real numbers. Use those as your starting point.
+- If you output "X%" or "Y%" literally, your response will be REJECTED.
+
 SKIP RULES:
 - If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
 - If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
@@ -747,6 +837,11 @@ RULES:
    - ADX < 30: RSI > 82 on 4H = reduce 10%.
    - 15m RSI spikes = normal in breakouts, never penalize alone.
 8. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
+CRITICAL — REAL NUMBERS ONLY:
+- NEVER output literal "X%" or "Y%" in your response. Every percentage MUST be a real calculated number (e.g. "LONG 72%" not "LONG X%").
+- Use the SCORECARD at the bottom of each TF data block — it already shows "LONG XX% / SHORT YY%" with real numbers. Use those as your starting point.
+- If you output "X%" or "Y%" literally, your response will be REJECTED.
+
 SKIP RULES:
 - If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
 - If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
@@ -808,6 +903,11 @@ RULES:
 3. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 4. Each TF line: brief reason in parentheses
 5. Keep response concise. Do NOT count characters.
+
+CRITICAL — REAL NUMBERS ONLY:
+- NEVER output literal "X%" or "Y%" in your response. Every percentage MUST be a real calculated number (e.g. "LONG 72%" not "LONG X%").
+- Use the SCORECARD at the bottom of each TF data block — it already shows "LONG XX% / SHORT YY%" with real numbers. Use those as your starting point.
+- If you output "X%" or "Y%" literally, your response will be REJECTED.
 
 SKIP RULES:
 - If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
@@ -1116,6 +1216,10 @@ For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluen
         # Only do progressive display if we didn't already stream live
         # (Check: if streaming happened, the message already shows "AI Complete")
         pass  # Live streaming already handled above
+
+    # Post-validate: fix literal X%/Y% placeholders from weak models
+    if ai_response:
+        ai_response = _fix_placeholder_percentages(ai_response, mtf_data=mtf_data, indicators=clean_indic, tf_key=tf_key)
 
     # Post-validate SL/TP direction in free-text responses
     if ai_response:
