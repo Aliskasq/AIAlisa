@@ -335,10 +335,13 @@ async def main():
                         trigger_hit = False
                         
                         if alert_type in ["GROWING-CANDLE-MODE", "DROP-ONGOING", "DROP-FLAT-HORIZ"]:
-                            dynamic_trigger = alert['trigger_price']
+                            # Ensure minimum 2% above trendline for all alert types
+                            raw_trigger = alert['trigger_price']
+                            min_trigger = dynamic_line_price * 1.02 if dynamic_line_price > 0 else raw_trigger
+                            dynamic_trigger = max(raw_trigger, min_trigger)
                         else:
                             if status == "WAITING_RED_CLOSE":
-                                dynamic_trigger = dynamic_line_price * 1.0001
+                                dynamic_trigger = dynamic_line_price * 1.02
                             else:
                                 dynamic_trigger = dynamic_line_price * 1.02
                                 
@@ -604,7 +607,8 @@ async def main():
                         adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
                         tier = classify_signal(long_pct, short_pct, adx_value,
                                               adx_trend=adx_trend, adx_avg_50=adx_avg_50,
-                                              mtf_data=item.get("mtf_data"))
+                                              mtf_data=item.get("mtf_data"),
+                                              indicators=last_indic_row)
 
                         if tier == "monitor" and not ai_has_error:
                             # 🔵 MONITOR — add to monitor queue + send full signal to monitor group

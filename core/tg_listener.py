@@ -1593,10 +1593,10 @@ async def telegram_polling_loop(app_session):
                                     kb = {"inline_keyboard": [
                                         key_row,
                                         [{"text": "── Models ──", "callback_data": "noop"}],
-                                        [{"text": "Llama 3.3 70B", "callback_data": "gq_md_l3.3-70b"},
-                                         {"text": "Llama 3.1 8B", "callback_data": "gq_md_l3.1-8b"}],
-                                        [{"text": "Mixtral 8x7B", "callback_data": "gq_md_mixtral"},
-                                         {"text": "Gemma 2 9B", "callback_data": "gq_md_gemma2"}],
+                                        [{"text": "🦙 Llama 3.3 70B", "callback_data": "gq_md_l3.3-70b"},
+                                         {"text": "🦙 Llama 3.1 70B", "callback_data": "gq_md_l3.1-70b"}],
+                                        [{"text": "💎 Gemma2 27B", "callback_data": "gq_md_gemma2-27b"},
+                                         {"text": "🔮 Qwen QWQ 32B", "callback_data": "gq_md_qwq32b"}],
                                         [{"text": "🧪 Test All Keys", "callback_data": "test_gq"}],
                                         [{"text": "⬅️ Back", "callback_data": "back_models"}]
                                     ]}
@@ -1665,9 +1665,9 @@ async def telegram_polling_loop(app_session):
                                 # --- Groq model select ---
                                 _gq_model_map = {
                                     "gq_md_l3.3-70b": "llama-3.3-70b-versatile",
-                                    "gq_md_l3.1-8b": "llama-3.1-8b-instant",
-                                    "gq_md_mixtral": "mixtral-8x7b-32768",
-                                    "gq_md_gemma2": "gemma2-9b-it",
+                                    "gq_md_l3.1-70b": "llama-3.1-70b-versatile",
+                                    "gq_md_gemma2-27b": "gemma2-27b-it",
+                                    "gq_md_qwq32b": "qwen-qwq-32b",
                                 }
                                 if cb_data in _gq_model_map:
                                     new_model = _gq_model_map[cb_data]

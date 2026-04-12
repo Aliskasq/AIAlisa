@@ -197,7 +197,7 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
 
     # === STEP 2: Gemini (if not already active) ===
     if provider != "gemini" and GEMINI_API_KEYS:
-        gemini_model = s.get("gemini_model", "gemini-2.5-flash")
+        gemini_model = "gemini-2.5-flash"  # always use flash (cheapest free tier quota)
         for i, key in enumerate(GEMINI_API_KEYS):
             logging.info(f"🔄 Fallback: gemini key #{i+1} model={gemini_model}")
             result = await _call_gemini(messages, key, gemini_model, timeout_sec)

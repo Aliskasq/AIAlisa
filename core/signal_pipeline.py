@@ -31,7 +31,7 @@ FIXED_DEPOSIT_PCT = 2  # 2% of bank per trade
 
 def classify_signal(long_pct: float, short_pct: float, adx: float,
                     adx_trend: str = "stable", adx_avg_50: float = 0,
-                    mtf_data: dict = None) -> str:
+                    mtf_data: dict = None, indicators: dict = None) -> str:
     """
     Classify signal tier based on confidence and market regime.
     
@@ -42,9 +42,35 @@ def classify_signal(long_pct: float, short_pct: float, adx: float,
     - ADX low + FALLING → trend dying → penalize
     - ADX low on 4H but HIGH on 1H/15m → early trend, 4H hasn't caught up yet → DON'T penalize
     
+    PENALTIES (force monitor even with high confidence):
+    - RSI > 75 on 4H = overbought → monitor (risky LONG entry)
+    - RSI < 20 on 4H = oversold → monitor (risky SHORT entry)
+    - 15m candle pump > 10% = too volatile → monitor
+    
     Returns: "full" or "monitor"
     """
     confidence = max(long_pct, short_pct)
+    direction = "LONG" if long_pct > short_pct else "SHORT"
+    
+    # === RSI PENALTY (applied even without AI response) ===
+    if indicators:
+        rsi_4h = indicators.get("rsi14", 50)
+        # RSI > 75 = overbought — penalize LONG entries
+        if rsi_4h > 75 and direction == "LONG":
+            logging.info(f"⚠️ RSI penalty: 4H RSI={rsi_4h:.1f} > 75 (overbought) — forcing monitor for LONG")
+            return "monitor"
+        # RSI < 20 = oversold — penalize SHORT entries
+        if rsi_4h < 20 and direction == "SHORT":
+            logging.info(f"⚠️ RSI penalty: 4H RSI={rsi_4h:.1f} < 20 (oversold) — forcing monitor for SHORT")
+            return "monitor"
+    
+    # === 15m PUMP PENALTY ===
+    if mtf_data:
+        indic_15m = mtf_data.get("15m", {})
+        change_15m = indic_15m.get("change_recent", 0)
+        if abs(change_15m) > 10:
+            logging.info(f"⚠️ Pump penalty: 15m candle moved {change_15m:+.1f}% (>10%) — forcing monitor")
+            return "monitor"
     
     # === MULTI-TF ADX CONTEXT ===
     # 4H ADX lags behind — check if lower TFs already show strong trend
@@ -691,7 +717,7 @@ async def monitor_recheck_loop(session):
                     adx_avg_val = indicators.get("adx_avg_50", 0)
                     new_tier = classify_signal(long_pct, short_pct, adx_val,
                                              adx_trend=adx_trend_val, adx_avg_50=adx_avg_val,
-                                             mtf_data=mtf_data)
+                                             mtf_data=mtf_data, indicators=indicators)
 
                     if new_tier == "full":
                         remove_monitor(m["key"])
