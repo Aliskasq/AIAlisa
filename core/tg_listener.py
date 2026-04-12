@@ -2033,8 +2033,7 @@ async def telegram_polling_loop(app_session):
                                 "🔔 `/alert list` — _active / активные_\n"
                                 "🔔 `/alert clear` — _remove all / удалить все_\n\n"
                                 "🌐 `/lang en` — English\n"
-                                "🌐 `/lang ru` — Русский\n\n"
-                                "🔑 `/testapi AIzaSy...` — _test Gemini API key_"
+                                "🌐 `/lang ru` — Русский"
                             )
                             if is_admin(msg):
                                 welcome_text += (
@@ -2061,7 +2060,8 @@ async def telegram_polling_loop(app_session):
                                     "💼 `/paper` — portfolio + live P&L\n"
                                     "💼 `/paper close 1` — close position\n"
                                     "💼 `/paper history` — trade history + winrate\n"
-                                    "💼 `/paper clear` — reset all"
+                                    "💼 `/paper clear` — reset all\n"
+                                    "🔑 `/testapi AIzaSy...` — test Gemini key"
                                 )
                             await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
                             continue
@@ -2070,46 +2070,76 @@ async def telegram_polling_loop(app_session):
                         # TEST GEMINI API KEY (/testapi <key>)
                         # ==========================================
                         if text.startswith("/testapi"):
+                            if not is_admin(msg):
+                                await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+                                continue
                             parts = text.split(maxsplit=1)
                             if len(parts) < 2 or not parts[1].strip():
                                 await send_response(app_session, chat_id,
                                     "🔑 *Test Gemini API Key*\n\n"
                                     "Usage: `/testapi AIzaSy...`\n\n"
-                                    "Checks if the key is valid via Cloudflare proxy.",
+                                    "Tests key against all Gemini models via proxy.",
                                     msg_id, parse_mode="Markdown")
                                 continue
                             test_key = parts[1].strip()
-                            await send_response(app_session, chat_id, "🔑 Testing key...", msg_id)
-                            try:
-                                test_url = f"https://botgem.zhoriha.workers.dev/v1beta/models/gemini-2.0-flash:generateContent?key={test_key}"
-                                test_payload = {"contents": [{"parts": [{"text": "Say OK"}]}]}
-                                req_timeout = aiohttp.ClientTimeout(total=15)
-                                async with aiohttp.ClientSession() as test_session:
-                                    async with test_session.post(test_url, json=test_payload, timeout=req_timeout) as resp:
-                                        if resp.status == 200:
-                                            data = await resp.json(content_type=None)
-                                            candidates = data.get("candidates", [])
-                                            if candidates:
-                                                result_text = "✅ *Key is valid!* Model responded successfully."
+                            _test_models = [
+                                "gemini-2.5-flash",
+                                "gemini-2.5-pro",
+                                "gemini-2.0-flash",
+                                "gemini-2.0-flash-lite",
+                                "gemini-1.5-flash",
+                                "gemini-1.5-pro",
+                            ]
+                            await send_response(app_session, chat_id,
+                                f"🔑 Testing key against {len(_test_models)} models...", msg_id)
+                            _test_results = []
+                            _any_ok = False
+                            _key_invalid = False
+                            req_timeout = aiohttp.ClientTimeout(total=15)
+                            test_payload = {"contents": [{"parts": [{"text": "Say OK"}]}]}
+                            async with aiohttp.ClientSession() as test_session:
+                                for _tm in _test_models:
+                                    try:
+                                        test_url = f"https://botgem.zhoriha.workers.dev/v1beta/models/{_tm}:generateContent?key={test_key}"
+                                        async with test_session.post(test_url, json=test_payload, timeout=req_timeout) as resp:
+                                            if resp.status == 200:
+                                                data = await resp.json(content_type=None)
+                                                candidates = data.get("candidates", [])
+                                                if candidates:
+                                                    _test_results.append(f"✅ `{_tm}`")
+                                                    _any_ok = True
+                                                else:
+                                                    _test_results.append(f"⚠️ `{_tm}` — empty response")
+                                            elif resp.status == 400:
+                                                body = await resp.text()
+                                                if "API_KEY_INVALID" in body:
+                                                    _key_invalid = True
+                                                    break
+                                                _test_results.append(f"❌ `{_tm}` — 400")
+                                            elif resp.status == 403:
+                                                _test_results.append(f"🚫 `{_tm}` — forbidden")
+                                            elif resp.status == 429:
+                                                body = await resp.text()
+                                                if "limit: 0" in body:
+                                                    _test_results.append(f"⚠️ `{_tm}` — quota=0")
+                                                else:
+                                                    _test_results.append(f"⏳ `{_tm}` — rate limited")
+                                                    _any_ok = True  # key works, just throttled
+                                            elif resp.status == 404:
+                                                _test_results.append(f"➖ `{_tm}` — not available")
                                             else:
-                                                result_text = "⚠️ Key accepted but no response from model (empty candidates)."
-                                        elif resp.status == 400:
-                                            result_text = "❌ *Invalid API key.* Key does not exist or was deleted."
-                                        elif resp.status == 403:
-                                            result_text = "❌ *Access denied.* Key is disabled or account is banned."
-                                        elif resp.status == 429:
-                                            body = await resp.text()
-                                            if "limit: 0" in body:
-                                                result_text = "⚠️ *Quota = 0.* Free tier blocked (IP/region restriction or account issue)."
-                                            else:
-                                                result_text = "⚠️ *Rate limited (429).* Key is valid but quota temporarily exhausted."
-                                        else:
-                                            body = await resp.text()
-                                            result_text = f"❓ *HTTP {resp.status}*\n`{body[:200]}`"
-                            except asyncio.TimeoutError:
-                                result_text = "⚠️ *Timeout.* Cloudflare proxy or Google API did not respond in 15s."
-                            except Exception as e:
-                                result_text = f"❌ *Error:* `{str(e)[:200]}`"
+                                                _test_results.append(f"❓ `{_tm}` — HTTP {resp.status}")
+                                    except asyncio.TimeoutError:
+                                        _test_results.append(f"⏰ `{_tm}` — timeout")
+                                    except Exception as e:
+                                        _test_results.append(f"❌ `{_tm}` — {str(e)[:50]}")
+                                    await asyncio.sleep(0.5)
+
+                            if _key_invalid:
+                                result_text = "❌ *Invalid API key.* Key does not exist or was deleted."
+                            else:
+                                header = "✅ *Key works!*" if _any_ok else "⚠️ *Key valid but no model responded*"
+                                result_text = f"🔑 {header}\n\n" + "\n".join(_test_results)
                             await send_response(app_session, chat_id, result_text, msg_id, parse_mode="Markdown")
                             continue
 
