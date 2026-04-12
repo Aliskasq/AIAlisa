@@ -2073,7 +2073,7 @@ async def telegram_polling_loop(app_session):
                             if not is_admin(msg):
                                 await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
                                 continue
-                            parts = text.split(maxsplit=1)
+                            parts = original_text.split(maxsplit=1)
                             if len(parts) < 2 or not parts[1].strip():
                                 await send_response(app_session, chat_id,
                                     "🔑 *Test Gemini API Key*\n\n"
