@@ -35,3 +35,4 @@ Thumbs.db
 *.png
 error.txt
 pending_alerts.json
+.env.new

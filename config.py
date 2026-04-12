@@ -31,19 +31,27 @@ GROQ_API_KEYS = [k for k in [
     os.getenv("GROQ_API_KEY_3", ""),
 ] if k]
 
-# Gemini API keys (3 accounts for rotation/fallback)
-GEMINI_API_KEYS = [k for k in [
-    os.getenv("GEMINI_API_KEY_1", ""),
-    os.getenv("GEMINI_API_KEY_2", ""),
-    os.getenv("GEMINI_API_KEY_3", ""),
-] if k]
+# Gemini API keys (21 keys across 3 accounts for rotation/fallback)
+# Account 1: zhoriha@gmail.com (10 keys)
+_account1_keys = [os.getenv(f"GEMINI_KEY_1_{i}", "") for i in range(1, 11)]
+# Account 2: alisasudani@gmail.com (10 keys)
+_account2_keys = [os.getenv(f"GEMINI_KEY_2_{i}", "") for i in range(1, 11)]
+# Account 3: alisasudani210@gmail.com (1 key)
+_account3_keys = [os.getenv("GEMINI_KEY_3_1", "")]
 
-# Key account labels (for UI display)
-KEY_ACCOUNT_LABELS = {
-    0: "zhoriha",
-    1: "alisa",
-    2: "alisasudani210",
-}
+# Build flat list: account1 keys 1-10, then account2 keys 1-10, then account3 key 1
+GEMINI_API_KEYS = [k for k in (_account1_keys + _account2_keys + _account3_keys) if k]
+
+# Key account labels (for UI display) - maps each index 0-20 to account label
+KEY_ACCOUNT_LABELS = {}
+# Indices 0-9: zhoriha #1 through #10
+for i in range(10):
+    KEY_ACCOUNT_LABELS[i] = f"zhoriha #{i+1}"
+# Indices 10-19: alisa #1 through #10
+for i in range(10, 20):
+    KEY_ACCOUNT_LABELS[i] = f"alisa #{i-9}"
+# Index 20: alisasudani210
+KEY_ACCOUNT_LABELS[20] = "alisasudani210"
 
 # AI provider settings persistence
 AI_SETTINGS_FILE = "data/ai_settings.json"

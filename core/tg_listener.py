@@ -1556,13 +1556,13 @@ async def telegram_polling_loop(app_session):
                                     ki = s.get("active_key_index", 0) if s.get("active_provider") == "gemini" else 0
                                     gm_model = s.get("gemini_model", "gemini-2.5-flash")
                                     lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
-                                    txt = f"💎 *Gemini*\nActive key: #{ki+1} ({lbl})\nModel: `{gm_model}`"
-                                    key_row = []
-                                    for i in range(min(3, len(GEMINI_API_KEYS))):
-                                        marker = "✅ " if i == ki else ""
-                                        key_row.append({"text": f"{marker}🔑 {KEY_ACCOUNT_LABELS.get(i, f'#{i+1}')}", "callback_data": f"gm_k{i}"})
+                                    txt = f"💎 *Gemini* (21 keys)\nActive key: #{ki+1} ({lbl})\nModel: `{gm_model}`"
+                                    
+                                    # Show accounts as groups instead of individual keys
                                     kb = {"inline_keyboard": [
-                                        key_row,
+                                        [{"text": "🔑 zhoriha (10)", "callback_data": "gm_acc0"}],
+                                        [{"text": "🔑 alisa (10)", "callback_data": "gm_acc1"}],
+                                        [{"text": "🔑 sudani210 (1)", "callback_data": "gm_acc2"}],
                                         [{"text": "── Models ──", "callback_data": "noop"}],
                                         [{"text": "⭐ Gemini 3.1 Pro", "callback_data": "gm_md_3.1pro"},
                                          {"text": "Gemini 3 Pro", "callback_data": "gm_md_3pro"}],
@@ -1619,16 +1619,58 @@ async def telegram_polling_loop(app_session):
                                     await send_response(app_session, chat_id, f"✅ Provider: *OpenRouter*\nModel: `{new_model}`", parse_mode="Markdown")
                                     continue
 
-                                # --- Gemini key select ---
-                                if cb_data.startswith("gm_k") and len(cb_data) == 4:
-                                    ki = int(cb_data[3])
+                                # --- Gemini account group select ---
+                                if cb_data in ["gm_acc0", "gm_acc1", "gm_acc2"]:
+                                    acc_num = int(cb_data[-1])
                                     s = agent.analyzer._get_ai_settings()
+                                    active_ki = s.get("active_key_index", 0) if s.get("active_provider") == "gemini" else 0
                                     gm_model = s.get("gemini_model", "gemini-2.5-flash")
-                                    set_active_provider("gemini", model=gm_model, key_index=ki)
-                                    lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
+                                    
+                                    if acc_num == 0:  # zhoriha account (keys 0-9)
+                                        txt = f"💎 *zhoriha@gmail.com* (10 keys)\nModel: `{gm_model}`"
+                                        key_buttons = []
+                                        for i in range(10):
+                                            marker = "✅ " if i == active_ki else ""
+                                            key_buttons.append({"text": f"{marker}Key #{i+1}", "callback_data": f"gm_k{i}"})
+                                        # Split into rows of 5
+                                        kb_rows = [key_buttons[i:i+5] for i in range(0, len(key_buttons), 5)]
+                                    elif acc_num == 1:  # alisa account (keys 10-19)
+                                        txt = f"💎 *alisasudani@gmail.com* (10 keys)\nModel: `{gm_model}`"
+                                        key_buttons = []
+                                        for i in range(10, 20):
+                                            marker = "✅ " if i == active_ki else ""
+                                            key_buttons.append({"text": f"{marker}Key #{i-9}", "callback_data": f"gm_k{i}"})
+                                        # Split into rows of 5
+                                        kb_rows = [key_buttons[i:i+5] for i in range(0, len(key_buttons), 5)]
+                                    else:  # acc_num == 2, sudani210 account (key 20)
+                                        txt = f"💎 *alisasudani210@gmail.com* (1 key)\nModel: `{gm_model}`"
+                                        marker = "✅ " if 20 == active_ki else ""
+                                        kb_rows = [[{"text": f"{marker}Key #1", "callback_data": "gm_k20"}]]
+                                    
+                                    kb_rows.append([{"text": "⬅️ Back to Accounts", "callback_data": "prov_gm"}])
+                                    kb = {"inline_keyboard": kb_rows}
+                                    
+                                    await app_session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+                                        json={"chat_id": chat_id, "message_id": cq.get("message",{}).get("message_id"),
+                                              "text": txt, "parse_mode": "Markdown", "reply_markup": kb})
                                     await app_session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                                        json={"callback_query_id": cq_id, "text": f"✅ Gemini key #{ki+1} ({lbl})"})
-                                    await send_response(app_session, chat_id, f"✅ Provider: *Gemini*\nKey: #{ki+1} ({lbl})\nModel: `{gm_model}`", parse_mode="Markdown")
+                                        json={"callback_query_id": cq_id})
+                                    continue
+
+                                # --- Gemini key select (updated to handle indices 0-20) ---
+                                if cb_data.startswith("gm_k"):
+                                    try:
+                                        ki = int(cb_data[3:])  # Support multi-digit indices
+                                        if 0 <= ki < len(GEMINI_API_KEYS):
+                                            s = agent.analyzer._get_ai_settings()
+                                            gm_model = s.get("gemini_model", "gemini-2.5-flash")
+                                            set_active_provider("gemini", model=gm_model, key_index=ki)
+                                            lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
+                                            await app_session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                                                json={"callback_query_id": cq_id, "text": f"✅ Gemini key #{ki+1} ({lbl})"})
+                                            await send_response(app_session, chat_id, f"✅ Provider: *Gemini*\nKey: #{ki+1} ({lbl})\nModel: `{gm_model}`", parse_mode="Markdown")
+                                    except (ValueError, IndexError):
+                                        pass
                                     continue
 
                                 # --- Gemini model select ---
@@ -1696,16 +1738,41 @@ async def telegram_polling_loop(app_session):
 
                                 if cb_data == "test_gm":
                                     await app_session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                                        json={"callback_query_id": cq_id, "text": "🧪 Testing Gemini keys..."})
+                                        json={"callback_query_id": cq_id, "text": "🧪 Testing all 21 Gemini keys..."})
                                     s = agent.analyzer._get_ai_settings()
                                     gm_model = s.get("gemini_model", "gemini-2.5-flash")
-                                    await send_response(app_session, chat_id, f"🧪 Testing Gemini keys (model: `{gm_model}`)...", parse_mode="Markdown")
+                                    await send_response(app_session, chat_id, f"🧪 Testing all 21 Gemini keys (model: `{gm_model}`)...", parse_mode="Markdown")
+                                    
                                     results = []
-                                    for i, key in enumerate(GEMINI_API_KEYS):
-                                        ok = await test_provider_key("gemini", key, gm_model)
+                                    # Account 1: zhoriha (keys 0-9)
+                                    results.append("*zhoriha@gmail.com:*")
+                                    for i in range(10):
+                                        if i < len(GEMINI_API_KEYS):
+                                            ok = await test_provider_key("gemini", GEMINI_API_KEYS[i], gm_model)
+                                            status = "✅" if ok else "❌"
+                                            results.append(f"{status} Key #{i+1}")
+                                        else:
+                                            results.append(f"❌ Key #{i+1} (missing)")
+                                    
+                                    # Account 2: alisasudani (keys 10-19)
+                                    results.append("\n*alisasudani@gmail.com:*")
+                                    for i in range(10, 20):
+                                        if i < len(GEMINI_API_KEYS):
+                                            ok = await test_provider_key("gemini", GEMINI_API_KEYS[i], gm_model)
+                                            status = "✅" if ok else "❌"
+                                            results.append(f"{status} Key #{i-9}")
+                                        else:
+                                            results.append(f"❌ Key #{i-9} (missing)")
+                                    
+                                    # Account 3: alisasudani210 (key 20)
+                                    results.append("\n*alisasudani210@gmail.com:*")
+                                    if 20 < len(GEMINI_API_KEYS):
+                                        ok = await test_provider_key("gemini", GEMINI_API_KEYS[20], gm_model)
                                         status = "✅" if ok else "❌"
-                                        lbl = KEY_ACCOUNT_LABELS.get(i, f"#{i+1}")
-                                        results.append(f"{status} Key #{i+1} ({lbl})")
+                                        results.append(f"{status} Key #1")
+                                    else:
+                                        results.append(f"❌ Key #1 (missing)")
+                                    
                                     await send_response(app_session, chat_id, "🧪 *Gemini Test Results:*\n\n" + "\n".join(results), parse_mode="Markdown")
                                     continue
 
