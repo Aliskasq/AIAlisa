@@ -15,10 +15,9 @@ import time
 from datetime import datetime, timezone
 
 MONITOR_FILE = "data/signal_monitor.json"
-VOLUME_MONITOR_FILE = "data/volume_monitor.json"
-MAX_MONITOR_HOURS = 24  # expire after 24h — independent of 03:00 trendline redraw
+VOLUME_WAITLIST_FILE = "data/volume_waitlist.json"
 RECHECK_INTERVAL_SEC = 1800  # 30 minutes from each signal's OWN detection time
-VOLUME_RECHECK_SEC = 1800    # 30 min — recheck volume for $1M-$2M coins
+MAX_MONITOR_HOURS = 24  # expire signal monitors after 24h
 
 # --- Confidence threshold ---
 CONFIDENCE_FULL = 65      # % to issue full signal
@@ -211,28 +210,68 @@ def calculate_atr_sl_tp(indicators: dict, direction: str, entry_price: float) ->
     }
 
 
-def check_volume_filter(volume_12h: float) -> str:
+async def get_current_1h_candle(session, symbol: str) -> dict:
     """
-    Check coin volume tier for trading decisions.
-    
-    Uses 12-hour volume (sum of last 3 × 4H candle quoteVolumes).
-    
-    Returns:
-        "full"        — volume ≥ $2M → send full signal to group
-        "conditional" — volume $1.5M-$2M → send if strong technicals
-        "monitor"     — volume $1M-$1.5M → don't send, add to volume monitor (may grow)
-        "skip"        — volume < $1M → reject entirely
+    Fetch the CURRENT OPEN 1h candle from Binance Futures.
+    Returns: {"volume": float, "is_green": bool, "open": float, "close": float}
+
+    Uses limit=1 to get the currently forming candle.
+    Binance kline: [openTime, open, high, low, close, volume, closeTime, quoteVolume, ...]
+    quoteVolume (index 7) is in USDT.
+    is_green = float(close) > float(open)
     """
-    from config import SIGNAL_MIN_VOLUME_12H, SIGNAL_LOW_VOLUME_12H
-    CONDITIONAL_VOLUME = 1_500_000  # $1.5M — pass if technicals are strong
-    if volume_12h >= SIGNAL_MIN_VOLUME_12H:
-        return "full"
-    elif volume_12h >= CONDITIONAL_VOLUME:
-        return "conditional"
-    elif volume_12h >= SIGNAL_LOW_VOLUME_12H:
-        return "monitor"
-    else:
-        return "skip"
+    import aiohttp
+    try:
+        url = (f"https://fapi.binance.com/fapi/v1/klines"
+               f"?symbol={symbol}&interval=1h&limit=1")
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                return {"volume": 0, "is_green": False, "open": 0, "close": 0}
+            candles = await resp.json()
+            if not candles:
+                return {"volume": 0, "is_green": False, "open": 0, "close": 0}
+            c = candles[0]
+            open_price = float(c[1])
+            close_price = float(c[4])
+            quote_volume = float(c[7])
+            return {
+                "volume": quote_volume,
+                "is_green": close_price > open_price,
+                "open": open_price,
+                "close": close_price
+            }
+    except Exception:
+        return {"volume": 0, "is_green": False, "open": 0, "close": 0}
+
+
+async def check_volume_pass(session, symbol: str) -> dict:
+    """
+    Check if coin passes volume filter.
+    Returns: {"pass": bool, "vol_12h": float, "vol_1h": float, "candle_green": bool}
+
+    Pass conditions (OR):
+    1. 12h volume >= $2M
+    2. Current open 1h candle: volume >= $170K AND green (close > open)
+    """
+    from config import SIGNAL_MIN_VOLUME_12H, SIGNAL_MIN_VOLUME_1H
+
+    vol_12h = await get_volume_12h(session, symbol)
+    candle_1h = await get_current_1h_candle(session, symbol)
+    vol_1h = candle_1h["volume"]
+    candle_green = candle_1h["is_green"]
+
+    passed = False
+    if vol_12h >= SIGNAL_MIN_VOLUME_12H:
+        passed = True
+    elif vol_1h >= SIGNAL_MIN_VOLUME_1H and candle_green:
+        passed = True
+
+    return {
+        "pass": passed,
+        "vol_12h": vol_12h,
+        "vol_1h": vol_1h,
+        "candle_green": candle_green
+    }
 
 
 async def get_volume_12h(session, symbol: str) -> float:
@@ -261,98 +300,66 @@ async def get_volume_12h(session, symbol: str) -> float:
         return 0
 
 
-# --- Volume Monitor file operations ---
-# Coins with $1M-$2M 12h volume: track them, recheck every 30 min,
-# upgrade to full signal if volume crosses $2M threshold.
+# --- Volume Waitlist file operations ---
+# Coins that failed volume check: recheck every 5 min in main loop.
+# Clear at 23:58 UTC (00:00 = full rescan).
 
-def load_volume_monitors() -> list:
+def load_volume_waitlist() -> list:
     try:
-        if os.path.exists(VOLUME_MONITOR_FILE):
-            with open(VOLUME_MONITOR_FILE, "r") as f:
+        if os.path.exists(VOLUME_WAITLIST_FILE):
+            with open(VOLUME_WAITLIST_FILE, "r") as f:
                 return json.load(f)
     except Exception as e:
-        logging.error(f"❌ load_volume_monitors: {e}")
+        logging.error(f"❌ load_volume_waitlist: {e}")
     return []
 
 
-def save_volume_monitors(monitors: list):
+def save_volume_waitlist(waitlist: list):
     try:
         os.makedirs("data", exist_ok=True)
-        with open(VOLUME_MONITOR_FILE, "w") as f:
-            json.dump(monitors, f, indent=2)
+        with open(VOLUME_WAITLIST_FILE, "w") as f:
+            json.dump(waitlist, f, indent=2)
     except Exception as e:
-        logging.error(f"❌ save_volume_monitors: {e}")
+        logging.error(f"❌ save_volume_waitlist: {e}")
 
 
-def add_volume_monitor(symbol: str, tf: str, volume_12h: float,
-                       entry_price: float, breakout_pct: float):
-    """Add a low-volume coin to volume monitoring ($1M-$2M range)."""
-    monitors = load_volume_monitors()
+def add_to_volume_waitlist(symbol, tf, alert_data, vol_12h, vol_1h, candle_green):
+    """Add coin that failed volume check. Store breakout data so we can process it when volume arrives."""
+    waitlist = load_volume_waitlist()
     key = f"{symbol}_{tf}"
-    monitors = [m for m in monitors if m.get("key") != key]
-
-    now = time.time()
-    monitors.append({
+    # No duplicates — replace existing
+    waitlist = [w for w in waitlist if w.get("key") != key]
+    waitlist.append({
         "key": key,
         "symbol": symbol,
         "tf": tf,
-        "initial_volume_12h": volume_12h,
-        "last_volume_12h": volume_12h,
-        "entry_price": entry_price,
-        "breakout_pct": breakout_pct,
-        "added_at": datetime.now(timezone.utc).isoformat(),
-        "added_ts": now,
-        "next_check_ts": now + VOLUME_RECHECK_SEC,
-        "check_count": 0
+        "alert": alert_data,
+        "vol_12h": vol_12h,
+        "vol_1h": vol_1h,
+        "candle_green": candle_green,
+        "added_at": datetime.now(timezone.utc).isoformat()
     })
-    save_volume_monitors(monitors)
-    logging.info(f"📊 VOL MONITOR added: {symbol} {tf} vol=${volume_12h:,.0f} (need $2M+)")
+    save_volume_waitlist(waitlist)
+    logging.info(f"📊 VOL WAITLIST added: {symbol} {tf} (12h=${vol_12h:,.0f}, 1h=${vol_1h:,.0f})")
 
 
-def get_due_volume_monitors() -> list:
-    """Get volume monitors due for recheck."""
-    monitors = load_volume_monitors()
-    now = time.time()
-    due = []
-    for m in monitors:
-        age_hours = (now - m["added_ts"]) / 3600
-        if age_hours > MAX_MONITOR_HOURS:
-            continue
-        if now >= m.get("next_check_ts", 0):
-            due.append(m)
-    return due
+def remove_from_volume_waitlist(key: str):
+    """Remove coin from volume waitlist (passed volume check)."""
+    waitlist = load_volume_waitlist()
+    waitlist = [w for w in waitlist if w.get("key") != key]
+    save_volume_waitlist(waitlist)
+    logging.info(f"📊 VOL WAITLIST removed: {key}")
 
 
-def update_volume_monitor_checked(key: str, new_volume: float):
-    """Update volume monitor after recheck."""
-    monitors = load_volume_monitors()
-    now = time.time()
-    for m in monitors:
-        if m["key"] == key:
-            m["check_count"] = m.get("check_count", 0) + 1
-            m["last_volume_12h"] = new_volume
-            m["next_check_ts"] = now + VOLUME_RECHECK_SEC
-            m["last_checked_at"] = datetime.now(timezone.utc).isoformat()
-    save_volume_monitors(monitors)
+def clear_volume_waitlist():
+    """Clear all — called at 23:58 UTC."""
+    save_volume_waitlist([])
+    logging.info("🧹 Volume waitlist cleared")
 
 
-def remove_volume_monitor(key: str):
-    """Remove coin from volume monitoring (upgraded or expired)."""
-    monitors = load_volume_monitors()
-    monitors = [m for m in monitors if m["key"] != key]
-    save_volume_monitors(monitors)
-    logging.info(f"📊 VOL MONITOR removed: {key}")
-
-
-def cleanup_expired_volume_monitors():
-    """Remove volume monitors older than MAX_MONITOR_HOURS."""
-    monitors = load_volume_monitors()
-    now = time.time()
-    active = [m for m in monitors if (now - m["added_ts"]) / 3600 <= MAX_MONITOR_HOURS]
-    expired = len(monitors) - len(active)
-    if expired > 0:
-        logging.info(f"🕐 Cleaned {expired} expired volume monitors")
-        save_volume_monitors(active)
+def get_volume_waitlist() -> list:
+    """Return full waitlist for display and recheck."""
+    return load_volume_waitlist()
 
 
 # --- Monitor file operations ---

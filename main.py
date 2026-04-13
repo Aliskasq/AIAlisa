@@ -24,8 +24,8 @@ from agent.square_publisher import auto_square_poster
 from core.tg_listener import SCAN_SCHEDULE
 from core.signal_pipeline import (
     classify_signal, parse_confidence_from_ai,
-    check_volume_filter, get_volume_12h,
-    add_monitor, add_volume_monitor, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
+    check_volume_pass, get_volume_12h,
+    add_monitor, add_to_volume_waitlist, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
     get_1d_emergency_warnings
 )
 
@@ -113,67 +113,6 @@ async def log_cleanup_task():
             logging.error(f"❌ Log cleanup error: {e}")
             await asyncio.sleep(60)
 
-async def volume_recheck_loop(session):
-    """
-    Background loop: every 60s checks volume monitors ($1M-$2M coins).
-    If volume crosses $2M threshold → re-inject into breakout queue as full signal.
-    No AI call here — just volume check (free kline fetch).
-    """
-    from core.signal_pipeline import (
-        get_due_volume_monitors, update_volume_monitor_checked,
-        remove_volume_monitor, cleanup_expired_volume_monitors,
-        get_volume_12h, check_volume_filter
-    )
-    from config import SIGNAL_MIN_VOLUME_12H
-
-    logging.info("📊 Volume monitor loop started (recheck $1M-$2M coins every 30min)")
-
-    while True:
-        try:
-            await asyncio.sleep(60)
-            cleanup_expired_volume_monitors()
-            due = get_due_volume_monitors()
-            if not due:
-                continue
-
-            logging.info(f"📊 Volume monitor: {len(due)} due for recheck")
-
-            for m in due:
-                try:
-                    sym = m["symbol"]
-                    new_vol = await get_volume_12h(session, sym)
-                    vol_tier = check_volume_filter(new_vol)
-
-                    if vol_tier == "full":
-                        # Volume crossed $2M! Remove from volume monitor.
-                        # It will be picked up on the next scan cycle naturally.
-                        remove_volume_monitor(m["key"])
-                        logging.info(
-                            f"📊✅ VOL UPGRADED: {sym} vol ${new_vol:,.0f} crossed $2M "
-                            f"(was ${m.get('initial_volume_12h', 0):,.0f})"
-                        )
-                    elif vol_tier == "skip":
-                        # Volume dropped below $1M — remove
-                        remove_volume_monitor(m["key"])
-                        logging.info(f"📊❌ VOL DROPPED: {sym} vol ${new_vol:,.0f} < $1M, removed")
-                    else:
-                        # Still in $1M-$2M range — update and wait
-                        update_volume_monitor_checked(m["key"], new_vol)
-                        logging.info(
-                            f"📊 VOL STILL LOW: {sym} vol ${new_vol:,.0f} "
-                            f"(need ${SIGNAL_MIN_VOLUME_12H:,.0f})"
-                        )
-
-                    await asyncio.sleep(1)  # small delay between kline fetches
-
-                except Exception as e:
-                    logging.error(f"❌ Volume monitor {m.get('symbol', '?')}: {e}")
-                    update_volume_monitor_checked(m["key"], m.get("last_volume_12h", 0))
-
-        except Exception as e:
-            logging.error(f"❌ Volume monitor loop error: {e}")
-            await asyncio.sleep(60)
-
 
 async def main():
     # Ensure data directory exists on fresh installs
@@ -215,10 +154,6 @@ async def main():
         # Start monitor recheck loop (re-evaluates MONITOR signals every 30 min)
         from core.signal_pipeline import monitor_recheck_loop
         asyncio.create_task(monitor_recheck_loop(session))
-
-        # Start volume monitor loop (rechecks $1M-$2M coins every 30 min)
-        asyncio.create_task(volume_recheck_loop(session))
-
 
         while True:
             now_utc = datetime.now(timezone.utc)
@@ -461,51 +396,34 @@ async def main():
                     ready_count = sum(1 for item in breakout_queue if item.get("ready"))
                     logging.info(f"✅ Data ready for {ready_count}/{len(breakout_queue)} breakouts.")
 
-                    # Phase 1.5: Volume filter — skip low-volume coins before wasting AI calls
+                    # Phase 1.5: Volume filter — $2M/12h OR $170K/1h green candle
                     filtered_queue = []
                     for item in breakout_queue:
                         if not item.get("ready"):
                             filtered_queue.append(item)  # keep for error handling
                             continue
                         try:
-                            volume_12h = await get_volume_12h(session, item["symbol"])
-                            vol_tier = check_volume_filter(volume_12h)
-                            if vol_tier == "skip":
-                                logging.info(f"⏭ {item['symbol']}: 12h vol ${volume_12h:,.0f} < $1M, skip")
-                                alerts_to_remove.append(item["alert"])
-                                continue
-                            elif vol_tier == "monitor":
-                                logging.info(f"📊 {item['symbol']}: 12h vol ${volume_12h:,.0f} ($1M-$1.5M), adding to volume monitor")
-                                add_volume_monitor(
-                                    item["symbol"], item.get("tf", "4H"), volume_12h,
-                                    item.get("price", 0), item.get("breakout_pct", 0)
+                            vol_result = await check_volume_pass(session, item["symbol"])
+                            if vol_result["pass"]:
+                                item["volume_12h"] = vol_result["vol_12h"]
+                                item["volume_1h"] = vol_result["vol_1h"]
+                                filtered_queue.append(item)
+                                logging.info(f"✅ {item['symbol']}: vol OK (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
+                            else:
+                                # Failed volume — add to waitlist, remove alert
+                                add_to_volume_waitlist(
+                                    item["symbol"], item.get("tf", "4H"), item["alert"],
+                                    vol_result["vol_12h"], vol_result["vol_1h"], vol_result["candle_green"]
                                 )
+                                if not vol_result["candle_green"]:
+                                    logging.info(f"🔴 {item['symbol']}: 1h candle RED, vol waitlist (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
+                                else:
+                                    logging.info(f"📊 {item['symbol']}: vol too low, waitlist (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
                                 alerts_to_remove.append(item["alert"])
                                 continue
-                            elif vol_tier == "conditional":
-                                # $1.5M-$2M: check technicals — pass if breakout is strong
-                                _bp = item.get("breakout_pct", 0)
-                                _mtf = item.get("mtf_data", {})
-                                _break_tf = item.get("tf", "4H")
-                                # Check ADX on breakout TF first, fallback to 4H, then last_indic
-                                _adx_data = _mtf.get(_break_tf, {}) or _mtf.get("4H", {}) or item.get("last_indic", {})
-                                _adx_4h = _adx_data.get("adx", 0)
-                                _strong = _bp >= 2.0 or _adx_4h >= 25
-                                if _strong:
-                                    logging.info(f"✅ {item['symbol']}: 12h vol ${volume_12h:,.0f} ($1.5M-$2M) — CONDITIONAL PASS (breakout {_bp:.1f}%, ADX {_adx_4h:.0f})")
-                                    item["vol_conditional"] = True
-                                else:
-                                    logging.info(f"📊 {item['symbol']}: 12h vol ${volume_12h:,.0f} ($1.5M-$2M) weak technicals (breakout {_bp:.1f}%, ADX {_adx_4h:.0f}), volume monitor")
-                                    add_volume_monitor(
-                                        item["symbol"], item.get("tf", "4H"), volume_12h,
-                                        item.get("price", 0), item.get("breakout_pct", 0)
-                                    )
-                                    alerts_to_remove.append(item["alert"])
-                                    continue
-                            item["volume_12h"] = volume_12h
                         except Exception as e:
                             logging.warning(f"⚠️ Volume check failed for {item['symbol']}: {e}, allowing through")
-                        filtered_queue.append(item)
+                            filtered_queue.append(item)
                     breakout_queue = filtered_queue
                     logging.info(f"📋 After volume filter: {len([i for i in breakout_queue if i.get('ready')])} breakouts. Starting AI queue...")
 
@@ -765,6 +683,35 @@ async def main():
                     save_alerts(alerts)
             else:
                 logging.info(f"👀 Waiting list is empty. Time (UTC+3): {now_msk.strftime('%H:%M:%S')}")
+
+            # =========================================================
+            # BLOCK 2.5: RECHECK VOLUME WAITLIST
+            # =========================================================
+            from core.signal_pipeline import get_volume_waitlist, remove_from_volume_waitlist, clear_volume_waitlist
+            vol_waitlist = get_volume_waitlist()
+            if vol_waitlist:
+                logging.info(f"📊 Volume waitlist: rechecking {len(vol_waitlist)} coins")
+                for vw in vol_waitlist:
+                    try:
+                        vol_result = await check_volume_pass(session, vw["symbol"])
+                        if vol_result["pass"]:
+                            remove_from_volume_waitlist(vw["key"])
+                            logging.info(f"📊✅ VOL PASS: {vw['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
+                            # Re-add alert so next cycle picks it up for AI processing
+                            alerts = load_alerts()
+                            if vw.get("alert") and vw["alert"] not in alerts:
+                                alerts.append(vw["alert"])
+                                save_alerts(alerts)
+                        else:
+                            logging.info(f"📊 VOL WAIT: {vw['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                        await asyncio.sleep(1)
+                    except Exception as e:
+                        logging.error(f"❌ Vol waitlist recheck {vw.get('symbol', '?')}: {e}")
+
+            # Cleanup volume waitlist at 23:58 UTC (full rescan at 00:00)
+            if now_utc.hour == 23 and now_utc.minute == 58:
+                clear_volume_waitlist()
+                logging.info("🧹 Volume waitlist cleared (23:58 UTC, full rescan at 00:00)")
 
             # =========================================================
             # BLOCK 3: SMART TIMER (Sleep until exact time XX:05:02, XX:10:02)

@@ -334,6 +334,8 @@ async def handle_message(app_session, update):
             "    _All breakouts since scan / Все пробития_\n\n"
             "👁 `/monitor`\n"
             "    _Coins in monitor / Монеты в мониторинге_\n\n"
+            "📊 `/vol`\n"
+            "    _Volume waitlist / Ожидание объёма_\n\n"
             "🔔 `/alert BTC 69500`\n"
             "    _Price alert / Алерт на цену_\n"
             "🔔 `/alert list` — _active / активные_\n"
@@ -975,6 +977,46 @@ async def handle_message(app_session, update):
                 "Список: `/alert list`\n"
                 "Удалить все: `/alert clear`")
         await send_response(app_session, chat_id, alert_help, msg_id, parse_mode="Markdown")
+        return
+
+    # ==========================================
+    # /vol — show volume waitlist
+    # ==========================================
+    if text.startswith("/vol") or text in ["объём", "обьем", "объем"]:
+        from core.signal_pipeline import get_volume_waitlist
+        waitlist = get_volume_waitlist()
+        if not waitlist:
+            no_vol = "📭 Volume waitlist empty." if lang_pref == "en" else "📭 Список ожидания объёма пуст."
+            await send_response(app_session, chat_id, no_vol, msg_id)
+            return
+
+        header = "📊 *Ожидание объёма*\n\n" if lang_pref == "ru" else "📊 *Volume Waitlist*\n\n"
+        lines = []
+        for vw in sorted(waitlist, key=lambda x: x.get("symbol", "")):
+            sym = vw["symbol"]
+            tf = vw.get("tf", "?")
+            vol_12h = vw.get("vol_12h", 0)
+            vol_1h = vw.get("vol_1h", 0)
+            green = vw.get("candle_green", None)
+            added = vw.get("added_at", "?")
+            if "T" in str(added):
+                added = str(added).split("T")[1][:8]
+
+            candle_emoji = "🟢" if green else "🔴" if green is not None else "❓"
+            lines.append(
+                f"📉 *{sym}* ({tf})\n"
+                f"   12h: `${vol_12h:,.0f}` | 1h: `${vol_1h:,.0f}` {candle_emoji}\n"
+                f"   Добавлен: {added} UTC"
+            )
+
+        chunk = header
+        for line in lines:
+            if len(chunk) + len(line) + 2 > 3900:
+                await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
+                chunk = ""
+            chunk += line + "\n\n"
+        if chunk.strip():
+            await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
         return
 
     # ==========================================
