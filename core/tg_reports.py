@@ -202,6 +202,30 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
             )
             continue
 
+        # Duplicate symbol (different TF) — ©️ show prices but don't count in bank
+        if entry.get("is_duplicate", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
+            trade_lines.append(
+                f"{price_icon}©️ `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # 24h pump filter — 💯 show prices but don't count in bank
+        if entry.get("is_pump_filter", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(
+                f"{price_icon}💯 `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
         # Use candle-based TP/SL check (97 x 15m candles after entry)
         key = f"{sym}_{tf}"
         candle_status, candle_close = candle_results.get(key, ("open", 0))
@@ -422,6 +446,30 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
             )
             continue
 
+        # Duplicate symbol (different TF) — ©️ show prices but don't count in bank
+        if entry.get("is_duplicate", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
+            trade_lines.append(
+                f"{price_icon}©️ `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # 24h pump filter — 💯 show prices but don't count in bank
+        if entry.get("is_pump_filter", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(
+                f"{price_icon}💯 `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
         # Use candle-based TP/SL check (97 x 15m candles after entry)
         key = f"{sym}_{tf}"
         candle_status, candle_close = candle_results.get(key, ("open", 0))
@@ -634,6 +682,31 @@ async def build_signals_text_monitor(session: aiohttp.ClientSession, lang: str =
             trade_lines.append(f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
+
+        # Duplicate symbol (different TF) — ©️ show prices but don't count in bank
+        if entry.get("is_duplicate", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
+            trade_lines.append(
+                f"{price_icon}©️ `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # 24h pump filter — 💯 show prices but don't count in bank
+        if entry.get("is_pump_filter", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(
+                f"{price_icon}💯 `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
         key = f"{sym}_{tf}"
         candle_status, candle_close = candle_results.get(key, ("open", 0))
         status = candle_status
@@ -815,6 +888,31 @@ async def build_signals_close_text_monitor(session: aiohttp.ClientSession, lang:
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             price_icon = "🟢" if now_price >= entry_price else "🔴"
             trade_lines.append(f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            continue
+
+
+        # Duplicate symbol (different TF) — ©️ show prices but don't count in bank
+        if entry.get("is_duplicate", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            if ai_dir == "SHORT":
+                pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
+            trade_lines.append(
+                f"{price_icon}©️ `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
+            continue
+
+        # 24h pump filter — 💯 show prices but don't count in bank
+        if entry.get("is_pump_filter", False):
+            day_skipped += 1
+            now_price = price_map.get(sym, entry.get("current_price", 0))
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(
+                f"{price_icon}💯 `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+            )
             continue
 
         key = f"{sym}_{tf}"

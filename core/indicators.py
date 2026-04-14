@@ -602,15 +602,17 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
                 rsi_trend_50 = "falling"
     
     # RSI Pullback Peak Detection (last 50 candles)
-    # Find the highest RSI value that was followed by a meaningful drop (pullback)
-    # This gives a dynamic "danger level" — e.g. "last pullback started from RSI 82"
+    # Find the most recent RSI peak that was followed by a meaningful drop (pullback)
+    # Works for ANY RSI level — if RSI peaked at 62 and dropped 10 pts, that's a pullback
+    # Warns when current RSI approaches that level again
     rsi_pullback_peak = 0
     rsi_pullback_drop = 0
     if len(rsi_values_50) >= 10:
         # Scan backwards: find peaks where RSI dropped by ≥8 points after
         for i in range(len(rsi_values_50) - 3, 0, -1):
             val = rsi_values_50[i]
-            if val >= 70:  # only care about overbought peaks
+            # Check if this was a local peak (higher than neighbors)
+            if val > rsi_values_50[i-1] and val > rsi_values_50[i+1]:
                 # Check if RSI dropped significantly after this point
                 future_min = min(rsi_values_50[i+1:min(i+10, len(rsi_values_50))])
                 drop = val - future_min
@@ -1168,10 +1170,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     pullback_text = ""
     rsi_pullback_peak = indic.get("rsi_pullback_peak", 0)
     rsi_pullback_drop = indic.get("rsi_pullback_drop", 0)
-    if rsi_pullback_peak > 0 and rsi > 70:
+    if rsi_pullback_peak > 0 and rsi >= rsi_pullback_peak - 5:
         pullback_text = f"\n   ⚠️ PULLBACK HISTORY: last pullback started from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
         if rsi >= rsi_pullback_peak - 2:
-            pullback_text += f" — CURRENT RSI {rsi:.0f} IS NEAR THAT LEVEL!"
+            pullback_text += f" — CURRENT RSI {rsi:.0f} IS NEAR THAT LEVEL! CAUTION!"
     
     idx += 1
     rsi_analysis = (f"{idx}. RSI: {rsi:.1f} {'OVERBOUGHT' if rsi > 70 else ('OVERSOLD' if rsi < 30 else 'NORMAL')} | "

@@ -280,11 +280,22 @@ def parse_ai_trade_params(ai_text: str) -> dict:
     return result
 
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_monitor=False):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_monitor=False, is_pump_filter=False):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
-    # Don't duplicate same symbol+tf
-    if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
+    # Check if same symbol+tf already exists
+    existing = next((e for e in log if e["symbol"] == symbol and e["tf"] == tf), None)
+    if existing:
+        # If new entry is monitor but existing isn't marked, update it
+        if is_monitor and not existing.get("is_monitor", False):
+            existing["is_monitor"] = True
+            if ai_direction:
+                existing["ai_direction"] = ai_direction.upper()
+            save_breakout_log(log)
+        return  # already exists, don't duplicate
+    if True:  # new entry — always add
+        # Check if same symbol (any TF) already exists — mark as duplicate
+        symbol_already_exists = any(e["symbol"] == symbol for e in log)
         entry = {
             "symbol": symbol,
             "tf": tf,
@@ -306,6 +317,10 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             entry["ai_deposit_pct"] = ai_deposit_pct
         if is_monitor:
             entry["is_monitor"] = True
+        if is_pump_filter:
+            entry["is_pump_filter"] = True
+        if symbol_already_exists:
+            entry["is_duplicate"] = True
         log.append(entry)
         save_breakout_log(log)
 

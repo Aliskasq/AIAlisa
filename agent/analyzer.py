@@ -273,6 +273,14 @@ Rules:
 - Weights: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
 - If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
 - Leverage: always 1x. Deposit: always 2%.
+- Do NOT assume direction from indicators alone. When 8+ indicators are bullish, ACTIVELY look for exhaustion signals:
+  * RSI > 70 on ANY timeframe = potential reversal, consider SHORT or SKIP
+  * Bearish RSI-Mom divergence = momentum exhausting, strongly consider SHORT
+  * BB %B > 1.0 = price extended beyond bands, mean reversion likely
+  * OBV spike = climactic volume, often marks tops
+  * If 2+ exhaustion signals found: SHORT or SKIP, even if majority says LONG
+- Similarly for bearish consensus: look for oversold bounces.
+- Fresh trend (ADX rising from <20) is different from exhausted trend (RSI >80 + divergence). Distinguish them.
 - Respond in ENGLISH."""
 
 FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик. Проанализируй данные scorecard и дай вердикт.
@@ -293,6 +301,14 @@ FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик.
 - Веса: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
 - Если оба ниже 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
 - Плечо: всегда 1x. Депозит: всегда 2%.
+- НЕ следуй за большинством индикаторов слепо. Когда 8+ индикаторов бычьи, АКТИВНО ищи сигналы истощения:
+  * RSI > 70 на ЛЮБОМ таймфрейме = потенциальный разворот, рассмотри ШОРТ или ПРОПУСК
+  * Медвежья дивергенция RSI-Mom = импульс угасает, серьёзно рассмотри ШОРТ
+  * BB %B > 1.0 = цена вышла за полосы, вероятен возврат к среднему
+  * Всплеск OBV = кульминационный объём, часто отмечает вершины
+  * Если 2+ сигнала истощения: ШОРТ или ПРОПУСК, даже если большинство за ЛОНГ
+- Аналогично для медвежьего консенсуса: ищи отскоки от перепроданности.
+- Свежий тренд (ADX растёт от <20) отличается от истощённого (RSI >80 + дивергенция). Различай их.
 - Отвечай СТРОГО на РУССКОМ."""
 
 def get_fast_verdict_prompt(lang: str = "en") -> str:
@@ -749,6 +765,13 @@ CRITICAL RULES:
    - ADX < 30 (WEAK TREND): RSI > 82 on 4H = reduce confidence 10%. RSI > 82 on 2+ TFs = consider SKIP.
    - 15m RSI spikes are normal in breakouts — never penalize 15m RSI alone.
 10. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
+12. EXHAUSTION CHECK (MANDATORY when 8+ indicators bullish): Actively look for reversal signals:
+   - RSI > 70 on ANY TF = potential reversal, consider SHORT or SKIP
+   - Bearish RSI-Mom divergence = momentum exhausting, strongly consider SHORT
+   - BB %B > 1.0 = price extended beyond bands, mean reversion likely
+   - OBV spike (2σ) = climactic volume, often marks tops
+   - If 2+ exhaustion signals found: SHORT or SKIP, even if majority says LONG
+   - Fresh trend (ADX rising from <20) ≠ exhausted trend (RSI >80 + divergence). Distinguish them.
 11. You MUST always output BOTH parts. Never skip the second part.
 CRITICAL — REAL NUMBERS ONLY:
 - NEVER output literal "X%" or "Y%" in your response. Every percentage MUST be a real calculated number (e.g. "LONG 72%" not "LONG X%").
@@ -837,6 +860,13 @@ RULES:
    - ADX < 30: RSI > 82 on 4H = reduce 10%.
    - 15m RSI spikes = normal in breakouts, never penalize alone.
 8. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
+9. EXHAUSTION CHECK (MANDATORY when 8+ indicators bullish): Actively look for reversal signals:
+   - RSI > 70 on ANY TF = potential reversal, consider SHORT or SKIP
+   - Bearish RSI-Mom divergence = momentum exhausting, strongly consider SHORT
+   - BB %B > 1.0 = price extended beyond bands, mean reversion likely
+   - OBV spike (2σ) = climactic volume, often marks tops
+   - If 2+ exhaustion signals found: SHORT or SKIP, even if majority says LONG
+   - Fresh trend (ADX rising from <20) ≠ exhausted trend (RSI >80 + divergence). Distinguish them.
 CRITICAL — REAL NUMBERS ONLY:
 - NEVER output literal "X%" or "Y%" in your response. Every percentage MUST be a real calculated number (e.g. "LONG 72%" not "LONG X%").
 - Use the SCORECARD at the bottom of each TF data block — it already shows "LONG XX% / SHORT YY%" with real numbers. Use those as your starting point.

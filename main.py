@@ -537,6 +537,13 @@ async def main():
                         adx_value = last_indic_row.get("adx", 0)
                         adx_trend = last_indic_row.get("adx_trend", "stable")
                         adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
+
+                        # === 24H PUMP FILTER ===
+                        _change_24h = last_indic_row.get("change_24h", 0)
+                        _is_pump_filter = abs(_change_24h) > 100
+                        if _is_pump_filter:
+                            logging.info(f"💯 24h pump filter: {sym} changed {_change_24h:+.1f}% in 24h — marking as pump")
+
                         tier = classify_signal(long_pct, short_pct, adx_value,
                                               adx_trend=adx_trend, adx_avg_50=adx_avg_50,
                                               mtf_data=item.get("mtf_data"),
@@ -624,7 +631,8 @@ async def main():
                                                ai_sl=_monitor_sl,
                                                ai_tp=_monitor_tp,
                                                ai_leverage=1, ai_deposit_pct=2.0,
-                                               is_monitor=True)
+                                               is_monitor=True,
+                                               is_pump_filter=_is_pump_filter)
                             alerts_to_remove.append(item["alert"])
                             continue
 
@@ -676,7 +684,8 @@ async def main():
                                                ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
                                                ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
                                                ai_leverage=FIXED_LEVERAGE,       # ALWAYS 1x
-                                               ai_deposit_pct=FIXED_DEPOSIT_PCT) # ALWAYS 2%
+                                               ai_deposit_pct=FIXED_DEPOSIT_PCT, # ALWAYS 2%
+                                               is_pump_filter=_is_pump_filter)
                             alerts_to_remove.append(item["alert"])
                         else:
                             logging.warning(f"🔄 Signal {sym} ({tf}) LEFT IN QUEUE. Will retry in 5 minutes.")

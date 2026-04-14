@@ -804,6 +804,17 @@ async def monitor_recheck_loop(session):
                             except Exception as e:
                                 logging.error(f"❌ Monitor upgrade send: {e}")
 
+                        # Also notify main group about monitor upgrade (info only, not added to main bank)
+                        if MONITOR_GROUP_CHAT_ID and MONITOR_GROUP_CHAT_ID != GROUP_CHAT_ID:
+                            try:
+                                tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                                brief_text = f"ℹ️ Monitor upgrade: {sym} {tf} {direction} {conf}%\n💰 Entry: {current_price}"
+                                await session.post(tg_url, json={
+                                    "chat_id": GROUP_CHAT_ID, "text": brief_text
+                                }, timeout=10)
+                            except Exception:
+                                pass
+
                         # Parse trade params from AI text
                         ai_params = parse_ai_trade_params(ai_brief) if ai_brief else {}
 
@@ -821,17 +832,9 @@ async def monitor_recheck_loop(session):
                         except Exception as e:
                             logging.error(f"❌ Failed to add monitor bank entry for {sym}: {e}")
 
-                        # Upgrade existing breakout entry (overwrites SKIP/LONG/SHORT from initial monitor)
-                        try:
-                            upgrade_breakout_entry(sym, tf,
-                                              ai_direction=direction,
-                                              ai_entry=ai_params.get("ai_entry", current_price),
-                                              ai_sl=ai_params.get("ai_sl"),
-                                              ai_tp=ai_params.get("ai_tp"),
-                                              ai_leverage=FIXED_LEVERAGE,
-                                              ai_deposit_pct=FIXED_DEPOSIT_PCT)
-                        except Exception as e:
-                            logging.error(f"❌ Failed to upgrade breakout entry for {sym}: {e}")
+                        # NOTE: Monitor upgrades do NOT go into main breakout_log.
+                        # They only appear in monitor bank (breakout_log_monitor.json).
+                        # The original entry in main log keeps is_monitor=True.
                     else:
                         update_monitor_checked(m["key"])
                         logging.info(f"🔵 MONITOR still: {sym} (AI: {max(long_pct,short_pct):.0f}%, ADX {adx_val:.0f})")
