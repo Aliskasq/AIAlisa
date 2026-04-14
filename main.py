@@ -509,23 +509,27 @@ async def main():
                             import re as _re
                             # Parse verdict STRICTLY from VERDICT/ВЕРДИКТ line only (RU + EN)
                             # Supports: "VERDICT: LONG", "ВЕРДИКТ: ШОРТ", "🏆 ВЕРДИКТ: ЛОНГ", etc.
+                            _verdict_map = {
+                                "ЛОНГ": "LONG", "ДЛГО": "LONG",
+                                "ШОРТ": "SHORT", "КОРОТКО": "SHORT",
+                                "ПРОПУСК": "SKIP"
+                            }
                             _verdict_match = _re.search(
-                                r"(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК)",
+                                r"(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ДЛГО|КОРОТКО|ПРОПУСК)",
                                 ai_verdict, _re.IGNORECASE
                             )
                             if _verdict_match:
                                 _raw_dir = _verdict_match.group(1).upper()
-                                _ai_dir = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP"}.get(_raw_dir, _raw_dir)
+                                _ai_dir = _verdict_map.get(_raw_dir, _raw_dir)
                             else:
                                 # Fallback: look for standalone verdict pattern on its own line
-                                # e.g. "LONG" or "ШОРТ" as the first word on a line
                                 _line_verdict = _re.search(
-                                    r"(?:^|\n)\s*(?:🏆\s*)?(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК)\b",
+                                    r"(?:^|\n)\s*(?:🏆\s*)?(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ДЛГО|КОРОТКО|ПРОПУСК)\b",
                                     ai_verdict, _re.IGNORECASE
                                 )
                                 if _line_verdict:
                                     _raw = _line_verdict.group(1).upper()
-                                    _ai_dir = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP"}.get(_raw, _raw)
+                                    _ai_dir = _verdict_map.get(_raw, _raw)
                                 # If no verdict line found at all → _ai_dir stays "" (unknown)
 
                         # Parse confidence from AI and classify signal tier

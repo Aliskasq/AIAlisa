@@ -165,36 +165,40 @@ async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -
         dir_tag = f" {ai_dir}" if ai_dir else ""
         is_monitor = entry.get("is_monitor", False)
 
-        # SKIP signals — show in list but don't count in P&L/stats
+        # === Non-bank signals: Ⓜ️ (monitor), ⚪ (skip), ⚫ (no AI) — NOT counted in PnL ===
+
+        # SKIP signals — ⚪
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
-            marker = "⚪Ⓜ️" if is_monitor else "⚪"
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
             trade_lines.append(
-                f"{marker} `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+                f"{price_icon}⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭"
             )
             continue
 
-        # No AI verdict — show as info only, don't count in P&L/stats
+        # No AI verdict — ⚫ (show prices + % but don't count in bank)
         if not ai_dir:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
-            marker = "⚫Ⓜ️" if is_monitor else "⚫"
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
             trade_lines.append(
-                f"{marker} `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
-        # Monitor signals with LONG/SHORT — show but don't count in main P&L
+        # Monitor signals with LONG/SHORT — Ⓜ️ (verdict + % but don't count in bank)
         if is_monitor:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             if ai_dir == "SHORT":
                 pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
             trade_lines.append(
-                f"🔵Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{price_icon}Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -381,36 +385,40 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
         dir_tag = f" {ai_dir}" if ai_dir else ""
         is_monitor = entry.get("is_monitor", False)
 
-        # SKIP signals — show in list but don't count in P&L/stats
+        # === Non-bank signals: Ⓜ️ (monitor), ⚪ (skip), ⚫ (no AI) — NOT counted in PnL ===
+
+        # SKIP signals — ⚪
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
-            marker = "⚪Ⓜ️" if is_monitor else "⚪"
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
             trade_lines.append(
-                f"{marker} `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭"
+                f"{price_icon}⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭"
             )
             continue
 
-        # No AI verdict — show as info only, don't count in P&L/stats
+        # No AI verdict — ⚫ (show prices + % but don't count in bank)
         if not ai_dir:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
-            marker = "⚫Ⓜ️" if is_monitor else "⚫"
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
             trade_lines.append(
-                f"{marker} `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
-        # Monitor signals with LONG/SHORT — show but don't count in main P&L
+        # Monitor signals with LONG/SHORT — Ⓜ️ (verdict + % but don't count in bank)
         if is_monitor:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             if ai_dir == "SHORT":
                 pct = -pct
+            price_icon = "🟢" if pct >= 0 else "🔴"
             trade_lines.append(
-                f"🔵Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
+                f"{price_icon}Ⓜ️ `{short_sym}` {tf} {ai_dir} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️"
             )
             continue
 
@@ -613,14 +621,17 @@ async def build_signals_text_monitor(session: aiohttp.ClientSession, lang: str =
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
-            trade_lines.append(f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭")
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(f"{price_icon}⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭")
             continue
 
         if not ai_dir:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
-            trade_lines.append(f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
         key = f"{sym}_{tf}"
@@ -793,14 +804,17 @@ async def build_signals_close_text_monitor(session: aiohttp.ClientSession, lang:
         if ai_dir == "SKIP":
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
-            trade_lines.append(f"⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ⏭")
+            pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(f"{price_icon}⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭")
             continue
 
         if not ai_dir:
             day_skipped += 1
             now_price = price_map.get(sym, entry.get("current_price", 0))
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
-            trade_lines.append(f"⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            price_icon = "🟢" if now_price >= entry_price else "🔴"
+            trade_lines.append(f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
         key = f"{sym}_{tf}"

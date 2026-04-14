@@ -51,17 +51,21 @@ def classify_signal(long_pct: float, short_pct: float, adx: float,
     confidence = max(long_pct, short_pct)
     direction = "LONG" if long_pct > short_pct else "SHORT"
     
-    # === RSI PENALTY (applied even without AI response) ===
-    if indicators:
+    # === RSI PENALTY (only if escalating across TFs: 4H→1H→15m) ===
+    if indicators and mtf_data:
         rsi_4h = indicators.get("rsi14", 50)
-        # RSI > 75 = overbought — penalize LONG entries
-        if rsi_4h > 75 and direction == "LONG":
-            logging.info(f"⚠️ RSI penalty: 4H RSI={rsi_4h:.1f} > 75 (overbought) — forcing monitor for LONG")
-            return "monitor"
-        # RSI < 20 = oversold — penalize SHORT entries
-        if rsi_4h < 20 and direction == "SHORT":
-            logging.info(f"⚠️ RSI penalty: 4H RSI={rsi_4h:.1f} < 20 (oversold) — forcing monitor for SHORT")
-            return "monitor"
+        rsi_1h = mtf_data.get("1H", {}).get("rsi14", 0)
+        rsi_15m = mtf_data.get("15m", {}).get("rsi14", 0)
+        # Overbought: RSI > 85 on 4H AND escalating (1H > 4H AND 15m > 1H)
+        if rsi_4h > 85 and direction == "LONG":
+            if rsi_1h > rsi_4h and rsi_15m > rsi_1h:
+                logging.info(f"⚠️ RSI penalty: escalating overbought 4H={rsi_4h:.1f}→1H={rsi_1h:.1f}→15m={rsi_15m:.1f} — forcing monitor for LONG")
+                return "monitor"
+        # Oversold: RSI < 15 on 4H AND escalating down
+        if rsi_4h < 15 and direction == "SHORT":
+            if rsi_1h < rsi_4h and rsi_15m < rsi_1h:
+                logging.info(f"⚠️ RSI penalty: escalating oversold 4H={rsi_4h:.1f}→1H={rsi_1h:.1f}→15m={rsi_15m:.1f} — forcing monitor for SHORT")
+                return "monitor"
     
     # === 15m PUMP PENALTY ===
     if mtf_data:
