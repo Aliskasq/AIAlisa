@@ -42,8 +42,8 @@ def classify_signal(long_pct: float, short_pct: float, adx: float,
     - ADX low on 4H but HIGH on 1H/15m → early trend, 4H hasn't caught up yet → DON'T penalize
     
     PENALTIES (force monitor even with high confidence):
-    - RSI > 75 on 4H = overbought → monitor (risky LONG entry)
-    - RSI < 20 on 4H = oversold → monitor (risky SHORT entry)
+    - RSI > 85 on 4H + escalating across TFs (4H < 1H < 15m) = overbought → monitor LONG
+    - RSI < 15 on 4H + escalating down (4H > 1H > 15m) = oversold → monitor SHORT
     - 15m candle pump > 10% = too volatile → monitor
     
     Returns: "full" or "monitor"
