@@ -58,6 +58,13 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['rsi14'] = 100 - (100 / (1 + rs14))
     df['rsi14'] = df['rsi14'].fillna(50)
 
+    # RSI(6) — fast RSI for early exhaustion warning
+    avg_g6 = rma(gain, 6)
+    avg_l6 = rma(loss, 6)
+    rs6 = avg_g6 / avg_l6.replace(0, np.nan)
+    df['rsi6'] = 100 - (100 / (1 + rs6))
+    df['rsi6'] = df['rsi6'].fillna(50)
+
     # 3. MACD
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
@@ -421,6 +428,27 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
                 ema7_25_cross_dir = "death"
                 break
     
+    # EMA Body Analysis — 3-candle body position vs EMA levels
+    # body_low = min(open, close), body_high = max(open, close)
+    ema_body_score_long = 0  # 0-9 scale
+    ema_body_score_short = 0  # 0-9 scale
+    ema_body_details = []
+
+    if len(df) >= 3:
+        for candle_offset in range(3):  # 0=current, 1=prev, 2=two-ago
+            idx = -(candle_offset + 1)
+            row = df.iloc[idx]
+            body_low = min(row['open'], row['close'])
+            body_high = max(row['open'], row['close'])
+
+            for ema_name, ema_val in [('ema7', row['ema7']), ('ema25', row['ema25']), ('ema99', row['ema99'])]:
+                # LONG scoring
+                if row['close'] > ema_val and body_low > ema_val:
+                    ema_body_score_long += 1  # strong: both close and body above
+                # SHORT scoring
+                if row['close'] < ema_val and body_high < ema_val:
+                    ema_body_score_short += 1  # strong: both close and body below
+
     # MACD History (50 candles)
     macd_hist_trend_50 = []
     macd_hist_direction = "unknown"
@@ -506,6 +534,25 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
                 macd_bars_since_cross = i
                 break
     
+    # MACD zero-line cross (DIF crossing zero — stronger signal than signal line cross)
+    macd_zero_cross_bars = None
+    macd_zero_cross_dir = None  # "bull" (negative→positive) or "bear" (positive→negative)
+
+    if len(df) >= 50:
+        macd_vals = df['macd_line'].tail(50).values
+        for i in range(len(macd_vals) - 2, 0, -1):  # go backwards from recent
+            prev_val = macd_vals[i - 1]
+            curr_val = macd_vals[i]
+            bars_ago = len(macd_vals) - 1 - i
+            if prev_val <= 0 < curr_val:
+                macd_zero_cross_bars = bars_ago
+                macd_zero_cross_dir = "bull"
+                break
+            elif prev_val >= 0 > curr_val:
+                macd_zero_cross_bars = bars_ago
+                macd_zero_cross_dir = "bear"
+                break
+
     # OBV History (50 candles)
     obv_roc_50 = 0
     obv_roc_10 = 0
@@ -864,6 +911,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "recent_label": recent_label,
         "ema7": last['ema7'], "ema25": last['ema25'], "ema99": last['ema99'],
         "rsi14": last['rsi14'],
+        "rsi6": float(df['rsi6'].iloc[-1]),
         "macd_line": last['macd_line'],
         "macd_signal": last['macd_signal'],
         "macd_hist": last['macd_hist'],
@@ -895,11 +943,15 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "price_above_ema7_count": price_above_ema7_count,
         "price_above_ema25_count": price_above_ema25_count,
         "price_above_ema99_count": price_above_ema99_count,
+        "ema_body_score_long": ema_body_score_long,   # 0-9: 3 candles × 3 EMAs body position
+        "ema_body_score_short": ema_body_score_short,  # 0-9: 3 candles × 3 EMAs body position
         
         # MACD History (50 candles)
         "macd_hist_trend_50": [round(h, 6) for h in macd_hist_trend_50[-10:]],  # last 10 values for prompt
         "macd_hist_direction": macd_hist_direction,
         "macd_bars_since_cross": macd_bars_since_cross,
+        "macd_zero_cross_bars": macd_zero_cross_bars,    # bars since MACD crossed zero line
+        "macd_zero_cross_dir": macd_zero_cross_dir,      # "bull" or "bear"
         "macd_hist_accel": round(macd_hist_accel, 6),
         "macd_hist_min_50": round(macd_hist_min_50, 6),
         "macd_hist_max_50": round(macd_hist_max_50, 6),
@@ -1560,283 +1612,515 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     #                  ADX<20 → oscillators ×1.5, trend/momentum ×0.5
     # OB/OS "INFO" signals = neutral (don't vote, AI decides with context)
 
-    def _classify_vote(sig):
-        """Classify signal as bull/bear/neutral. INFO signals = neutral."""
-        if "INFO" in sig:
-            return "neutral"
-        if "🟢" in sig or "BULLISH" in sig:
-            return "bull"
-        if "🔴" in sig or "BEARISH" in sig:
-            return "bear"
-        return "neutral"
+    # ══════════════════════════════════════════════════════════════════
+    # 📊 NEW 5-GROUP SCORECARD — percentage-based with weighted groups
+    # ══════════════════════════════════════════════════════════════════
+    #
+    # GROUP 1: TREND (30%) — Where is the trend going?
+    # GROUP 2: EXHAUSTION (25%) — Is it overheated? (counter-trend)
+    # GROUP 3: MOMENTUM QUALITY (20%) — How healthy is the trend?
+    # GROUP 4: MONEY FLOW (15%) — Does money confirm?
+    # GROUP 5: SMART MONEY (10%) — What are institutions doing?
+    #
+    # Each group produces LONG% internally, then weighted into final.
 
-    def _group_majority(members):
-        """Group vote = majority direction. Tie = neutral."""
-        bulls = sum(1 for _, v in members if v == "bull")
-        bears = sum(1 for _, v in members if v == "bear")
-        if bulls > bears:
-            return "bull", bulls, bears
-        elif bears > bulls:
-            return "bear", bulls, bears
-        return "neutral", bulls, bears
+    # ── HELPER ──
+    def _score_to_pct(bull_pts, bear_pts, max_pts):
+        """Convert raw bull/bear points to LONG percentage (0-100)."""
+        if max_pts <= 0:
+            return 50
+        net = bull_pts - bear_pts
+        ratio = net / max_pts  # -1 to +1
+        pct = 50 + ratio * 50
+        return max(5, min(95, round(pct, 1)))
 
-    # --- Classify all individual indicators ---
-    ema_v = _classify_vote(ema_signal)
-    st_v = "bull" if "BULLISH" in st_status else ("bear" if "BEARISH" in st_status else "neutral")
-    ichi_v = _classify_vote(ichi_signal) if is_higher_tf else None
+    group_results = []  # (name, weight, long_pct, details_list)
 
-    macd_v = _classify_vote(macd_signal)
-    ccmi_v = _classify_vote(ccmi_signal_txt)
-    rsi_mom_v = _classify_vote(rsi_mom_signal_txt)
+    # ════════════════════════════════════════════
+    # GROUP 1: TREND (30%)
+    # ════════════════════════════════════════════
+    trend_bull = 0
+    trend_bear = 0
+    trend_max = 0
+    trend_details = []
 
-    rsi_v = _classify_vote(rsi_signal)
-    stoch_v = _classify_vote(stoch_signal)
-    mfi_v = _classify_vote(mfi_signal)
-    imi_v = _classify_vote(imi_signal_txt)
+    # 1a. EMA Body (3-candle, 0-9 scale)
+    ema_body_long = indic.get('ema_body_score_long', 0)
+    ema_body_short = indic.get('ema_body_score_short', 0)
+    trend_bull += ema_body_long
+    trend_bear += ema_body_short
+    trend_max += 9
+    trend_details.append(f"EMA-Body: L{ema_body_long}/9 S{ema_body_short}/9")
 
-    obv_v = _classify_vote(obv_signal)
-    cmf_v = _classify_vote(cmf_signal)
-
-    bb_v = _classify_vote(bb_signal)
-    adx_v = _classify_vote(adx_signal)
-
-    # --- Build groups ---
-    trend_members = [("EMA", ema_v), ("SuperTrend", st_v)]
-    if ichi_v is not None:
-        trend_members.append(("Ichimoku", ichi_v))
-
-    momentum_members = [("MACD", macd_v), ("CCMI", ccmi_v), ("RSI-Mom", rsi_mom_v)]
-    oscillator_members = [("RSI", rsi_v), ("StochRSI", stoch_v), ("MFI", mfi_v), ("IMI", imi_v)]
-    volume_members = [("OBV", obv_v), ("CMF", cmf_v)]
-    volatility_members = [("BB", bb_v)]
-    direction_members = [("ADX/DI", adx_v)]
-
-    groups = [
-        ("Trend",      trend_members,      "trend"),
-        ("Momentum",   momentum_members,   "trend"),       # trend-like behaviour
-        ("Oscillators", oscillator_members, "oscillator"),
-        ("Volume",     volume_members,     "volume"),
-        ("Volatility", volatility_members, "volatility"),
-        ("Direction",  direction_members,  "direction"),
-    ]
-
-    # --- Dynamic weight multipliers based on ADX regime ---
-    if adx > 25:
-        w_mult = {"trend": 1.5, "oscillator": 0.5, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
-        regime = "TRENDING"
-    elif adx < 20:
-        w_mult = {"trend": 0.5, "oscillator": 1.5, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
-        regime = "RANGING"
-    else:
-        w_mult = {"trend": 1.0, "oscillator": 1.0, "volume": 1.0, "volatility": 1.0, "direction": 1.0}
-        regime = "TRANSITION"
-
-    # --- Compute grouped scorecard ---
-    bullish_weight = 0.0
-    bearish_weight = 0.0
-    group_details = []
-    bull_groups = 0
-    bear_groups = 0
-    neutral_groups = 0
-
-    for grp_name, members, category in groups:
-        direction, bulls, bears = _group_majority(members)
-        w = w_mult[category]
-
-        member_icons = "/".join(
-            f"{n}{'🟢' if v == 'bull' else ('🔴' if v == 'bear' else '⚪')}" for n, v in members
-        )
-
-        if direction == "bull":
-            bullish_weight += w
-            bull_groups += 1
-            group_details.append(f"  {grp_name}=🟢(×{w:.1f}) [{member_icons}]")
-        elif direction == "bear":
-            bearish_weight += w
-            bear_groups += 1
-            group_details.append(f"  {grp_name}=🔴(×{w:.1f}) [{member_icons}]")
+    # 1b. EMA Cross Freshness
+    cross_bars_val = indic.get('ema7_25_cross_bars')
+    cross_dir_val = indic.get('ema7_25_cross_dir')
+    trend_max += 3
+    if cross_bars_val and cross_dir_val:
+        if cross_bars_val < 5:
+            fresh_w = 1.5
+        elif cross_bars_val < 20:
+            fresh_w = 1.0
+        elif cross_bars_val < 50:
+            fresh_w = 0.7
         else:
-            neutral_groups += 1
-            group_details.append(f"  {grp_name}=⚪ [{member_icons}]")
+            fresh_w = 0.3
+        pts = round(3 * fresh_w, 1)
+        if cross_dir_val == "golden":
+            trend_bull += pts
+            trend_details.append(f"Golden×{cross_bars_val}b→L+{pts}")
+        else:
+            trend_bear += pts
+            trend_details.append(f"Death×{cross_bars_val}b→S+{pts}")
 
-    # --- Open Interest bonus (if available) ---
-    oi_impact = ""
+    # 1c. EMA Slope modifier
+    ema7_slope_v = indic.get('ema7_slope_50', 0)
+    trend_max += 2
+    if ema7_slope_v > 1:
+        trend_bull += 2
+        trend_details.append(f"EMA7↗{ema7_slope_v:+.1f}%")
+    elif ema7_slope_v < -1:
+        trend_bear += 2
+        trend_details.append(f"EMA7↘{ema7_slope_v:+.1f}%")
+
+    # 1d. SuperTrend with staleness
+    trend_max += 3
+    if "BULLISH" in st_status:
+        if st_flip_bars < 3:
+            pts = round(3 * 1.5, 1)
+        elif st_flip_bars < 15:
+            pts = 3.0
+        elif st_flip_bars < 30:
+            pts = round(3 * 0.7, 1)
+        else:
+            pts = round(3 * 0.3, 1)
+        trend_bull += pts
+        trend_details.append(f"ST🟢{st_flip_bars}b→L+{pts}")
+    elif "BEARISH" in st_status:
+        if st_flip_bars < 3:
+            pts = round(3 * 1.5, 1)
+        elif st_flip_bars < 15:
+            pts = 3.0
+        elif st_flip_bars < 30:
+            pts = round(3 * 0.7, 1)
+        else:
+            pts = round(3 * 0.3, 1)
+        trend_bear += pts
+        trend_details.append(f"ST🔴{st_flip_bars}b→S+{pts}")
+
+    # 1e. MACD direction (DIF vs DEA)
+    trend_max += 2
+    if macd_line > macd_signal_val:
+        trend_bull += 2
+        trend_details.append("MACD>sig→L+2")
+    else:
+        trend_bear += 2
+        trend_details.append("MACD<sig→S+2")
+
+    # 1f. MACD zero-line cross freshness
+    macd_zc_bars = indic.get('macd_zero_cross_bars')
+    macd_zc_dir = indic.get('macd_zero_cross_dir')
+    trend_max += 3
+    if macd_zc_bars is not None and macd_zc_dir:
+        if macd_zc_bars < 3:
+            pts = 3
+        elif macd_zc_bars < 10:
+            pts = 2
+        elif macd_zc_bars < 30:
+            pts = 1
+        else:
+            pts = 0
+        if pts > 0:
+            if macd_zc_dir == "bull":
+                trend_bull += pts
+                trend_details.append(f"MACD0×{macd_zc_bars}b→L+{pts}")
+            else:
+                trend_bear += pts
+                trend_details.append(f"MACD0×{macd_zc_bars}b→S+{pts}")
+
+    # 1g. ADX/DI + freshness
+    trend_max += 3
+    di_cross_bars_v = indic.get('di_cross_bars')
+    di_fresh_mult = 1.5 if (di_cross_bars_v and di_cross_bars_v < 5) else 1.0
+    if di_plus > di_minus:
+        pts = round(2 * di_fresh_mult, 1)
+        trend_bull += pts
+        trend_details.append(f"DI+>{di_fresh_mult:.1f}x→L+{pts}")
+    else:
+        pts = round(2 * di_fresh_mult, 1)
+        trend_bear += pts
+        trend_details.append(f"DI->{di_fresh_mult:.1f}x→S+{pts}")
+
+    # ADX rising from <20 = trend birth
+    if adx_trend == "rising" and adx < 25:
+        trend_bull += 1 if di_plus > di_minus else 0
+        trend_bear += 1 if di_minus > di_plus else 0
+        trend_details.append(f"ADX↑from{adx:.0f}")
+
+    # 1h. Ichimoku (4H/1D only)
+    if is_higher_tf:
+        trend_max += 2
+        ichi_status_v = indic.get('ichimoku_status', '')
+        future_cloud_v = indic.get('future_cloud', 'neutral')
+        if "ABOVE" in ichi_status_v:
+            trend_bull += 2
+            trend_details.append("Ichi↑L+2")
+        elif "BELOW" in ichi_status_v:
+            trend_bear += 2
+            trend_details.append("Ichi↓S+2")
+        # Future cloud contradiction = warning
+        if future_cloud_v == "bearish" and "ABOVE" in ichi_status_v:
+            trend_bull -= 1
+            trend_details.append("FutCloud↓warn→L-1")
+        elif future_cloud_v == "bullish" and "BELOW" in ichi_status_v:
+            trend_bear -= 1
+            trend_details.append("FutCloud↑warn→S-1")
+
+    # TF divergence modifier (if this data is part of MTF)
+    # (Applied externally when combining TFs — not here)
+
+    trend_long_pct = _score_to_pct(trend_bull, trend_bear, trend_max)
+    group_results.append(("TREND", 0.30, trend_long_pct, trend_details))
+
+    # ════════════════════════════════════════════
+    # GROUP 2: EXHAUSTION (25%) — counter-trend!
+    # High exhaustion = PENALIZES the current trend direction
+    # ════════════════════════════════════════════
+    exh_bull = 0  # signals favoring SHORT (overbought = exhausted LONG)
+    exh_bear = 0  # signals favoring LONG (oversold = exhausted SHORT)
+    exh_max = 0
+    exh_details = []
+
+    # 2a. RSI(14)
+    rsi_val = indic.get('rsi14', 50)
+    exh_max += 2
+    if rsi_val > 80:
+        exh_bull += 2
+        exh_details.append(f"RSI14={rsi_val:.0f}>80→OB-2")
+    elif rsi_val > 70:
+        exh_bull += 1
+        exh_details.append(f"RSI14={rsi_val:.0f}>70→OB-1")
+    elif rsi_val < 20:
+        exh_bear += 2
+        exh_details.append(f"RSI14={rsi_val:.0f}<20→OS-2")
+    elif rsi_val < 30:
+        exh_bear += 1
+        exh_details.append(f"RSI14={rsi_val:.0f}<30→OS-1")
+
+    # 2b. RSI(6) early warning
+    rsi6_val = indic.get('rsi6', 50)
+    exh_max += 1
+    if rsi6_val > 85 and rsi_val > 65:
+        exh_bull += 1
+        exh_details.append(f"RSI6={rsi6_val:.0f}>85+RSI14>65→earlyOB")
+    elif rsi6_val < 15 and rsi_val < 35:
+        exh_bear += 1
+        exh_details.append(f"RSI6={rsi6_val:.0f}<15+RSI14<35→earlyOS")
+
+    # 2c. StochRSI — ONLY votes when ADX < 25
+    exh_max += 1
+    stoch_k_val = indic.get('stoch_k', 50)
+    if adx < 25:
+        if stoch_k_val > 80:
+            exh_bull += 1
+            exh_details.append(f"StochRSI={stoch_k_val:.0f}>80(ADX{adx:.0f})→OB")
+        elif stoch_k_val < 20:
+            exh_bear += 1
+            exh_details.append(f"StochRSI={stoch_k_val:.0f}<20(ADX{adx:.0f})→OS")
+
+    # 2d. MFI — ONLY votes when ADX < 25
+    exh_max += 1
+    mfi_val = indic.get('mfi', 50)
+    if adx < 25:
+        if mfi_val > 80:
+            exh_bull += 1
+            exh_details.append(f"MFI={mfi_val:.0f}>80→OB")
+        elif mfi_val < 20:
+            exh_bear += 1
+            exh_details.append(f"MFI={mfi_val:.0f}<20→OS")
+
+    # 2e. BB %B — expanded scoring
+    bb_pctb_val = indic.get('bb_pctb', 0.5)
+    exh_max += 2
+    if bb_pctb_val > 1.0:
+        exh_bull += 2
+        exh_details.append(f"BB%B={bb_pctb_val:.2f}>1.0→OB-2")
+    elif bb_pctb_val > 0.8:
+        exh_bull += 1
+        exh_details.append(f"BB%B={bb_pctb_val:.2f}>0.8→OB-1")
+    elif bb_pctb_val < 0.0:
+        exh_bear += 2
+        exh_details.append(f"BB%B={bb_pctb_val:.2f}<0→OS-2")
+    elif bb_pctb_val < 0.2:
+        exh_bear += 1
+        exh_details.append(f"BB%B={bb_pctb_val:.2f}<0.2→OS-1")
+
+    # BB walking band + RSI penalty
+    bb_walk_u = indic.get('bb_walking_upper', 0)
+    if bb_walk_u > 10 and rsi_val > 75:
+        exh_bull += 1
+        exh_max += 1
+        exh_details.append(f"BBwalk{bb_walk_u}+RSI{rsi_val:.0f}→tired")
+
+    # 2f. RSI Pullback History
+    rsi_pullback_peak_v = indic.get('rsi_pullback_peak', 0)
+    rsi_pullback_drop_v = indic.get('rsi_pullback_drop', 0)
+    exh_max += 2
+    if rsi_pullback_peak_v > 0 and rsi_val > 70:
+        if rsi_val >= rsi_pullback_peak_v:
+            exh_bull += 2
+            exh_details.append(f"RSI≥peak{rsi_pullback_peak_v:.0f}→DANGER-2")
+        elif rsi_val >= rsi_pullback_peak_v - 3:
+            exh_bull += 1.5
+            exh_details.append(f"RSI~peak{rsi_pullback_peak_v:.0f}→warn-1.5")
+        elif rsi_val >= rsi_pullback_peak_v - 5:
+            exh_bull += 1
+            exh_details.append(f"RSI→peak{rsi_pullback_peak_v:.0f}→caution-1")
+
+    # 2g. SuperTrend stale + RSI OB = extra exhaustion
+    if st_flip_bars > 30 and rsi_val > 70:
+        exh_bull += 1
+        exh_max += 1
+        exh_details.append(f"ST_stale{st_flip_bars}b+RSI{rsi_val:.0f}→exh")
+
+    # Exhaustion is COUNTER-TREND:
+    # High exh_bull = bad for LONG (overbought), so Exhaustion LONG% = inverse
+    # exh_bull means "overbought" → bad for LONG → LONG% should be LOW
+    exh_long_pct = _score_to_pct(exh_bear, exh_bull, exh_max)  # inverted!
+    group_results.append(("EXHAUSTION", 0.25, exh_long_pct, exh_details))
+
+    # ════════════════════════════════════════════
+    # GROUP 3: MOMENTUM QUALITY (20%)
+    # ════════════════════════════════════════════
+    mom_healthy = 0  # healthy = trend continuing
+    mom_fading = 0   # fading = trend dying
+    mom_max = 0
+    mom_details = []
+
+    # 3a. MACD Histogram direction
+    mom_max += 2
+    hist_dir = indic.get('macd_hist_direction', 'stable')
+    if hist_dir in ('growing', 'turned_positive'):
+        mom_healthy += 2
+        mom_details.append(f"MACDhist={hist_dir}→H+2")
+    elif hist_dir == 'fading_bullish':
+        mom_fading += 1.5
+        mom_details.append(f"MACDhist=fading_bull→F+1.5")
+    elif hist_dir in ('shrinking', 'turned_negative'):
+        mom_fading += 2
+        mom_details.append(f"MACDhist={hist_dir}→F+2")
+    elif hist_dir == 'fading_bearish':
+        mom_healthy += 1.5  # bearish is fading = good if LONG
+        mom_details.append(f"MACDhist=fading_bear→H+1.5")
+
+    # 3b. CCMI
+    mom_max += 2
+    ccmi_v = indic.get('ccmi', 0)
+    ccmi_s = indic.get('ccmi_signal', 0)
+    if ccmi_v > ccmi_s and ccmi_v > 0:
+        mom_healthy += 2
+        mom_details.append(f"CCMI↑{ccmi_v:.0f}")
+    elif ccmi_v < ccmi_s and ccmi_v < 0:
+        mom_fading += 2
+        mom_details.append(f"CCMI↓{ccmi_v:.0f}")
+    elif ccmi_v > 0:
+        mom_healthy += 1
+        mom_details.append(f"CCMI+{ccmi_v:.0f}")
+    elif ccmi_v < 0:
+        mom_fading += 1
+        mom_details.append(f"CCMI-{ccmi_v:.0f}")
+
+    # 3c. RSI-Mom Divergence (×2 weight!)
+    mom_max += 4  # double weight
+    rsi_mom_bear_v = indic.get('rsi_mom_bear_div', False)
+    rsi_mom_bull_v = indic.get('rsi_mom_bull_div', False)
+    if rsi_mom_bear_v:
+        mom_fading += 4
+        mom_details.append("RSI-Mom bearDiv→F+4(×2)")
+    elif rsi_mom_bull_v:
+        mom_healthy += 4
+        mom_details.append("RSI-Mom bullDiv→H+4(×2)")
+
+    # 3d. ATR trend
+    mom_max += 2
+    atr_exp = indic.get('atr_expanding', False)
+    atr_tr = indic.get('atr_trend', 'stable')
+    if atr_exp and adx_trend == "rising":
+        mom_healthy += 2
+        mom_details.append("ATR↑+ADX↑→breakout+2")
+    elif atr_tr == "falling" and adx_trend == "falling":
+        mom_fading += 2
+        mom_details.append("ATR↓+ADX↓→dying-2")
+    elif atr_exp:
+        mom_healthy += 1
+        mom_details.append("ATR↑→H+1")
+
+    # 3e. TTM Squeeze
+    mom_max += 2
+    ttm_fired = indic.get('ttm_squeeze_fired', False)
+    ttm_on = indic.get('ttm_squeeze_on', False)
+    if ttm_fired:
+        mom_healthy += 2
+        mom_details.append("TTM_FIRED→H+2")
+    elif ttm_on and indic.get('ttm_squeeze_bars', 0) > 5:
+        # Compression, neutral but building
+        mom_details.append(f"TTM_squeeze{indic.get('ttm_squeeze_bars', 0)}b")
+
+    # Momentum = trend health. Healthy confirms LONG if trend is LONG.
+    # Since we measure "health" vs "fading", map to LONG% based on trend direction.
+    # If trend is bullish, healthy = good for LONG. If bearish, healthy = good for SHORT.
+    trend_is_bullish = trend_long_pct > 55
+    if trend_is_bullish:
+        mom_long_pct = _score_to_pct(mom_healthy, mom_fading, mom_max)
+    else:
+        mom_long_pct = _score_to_pct(mom_fading, mom_healthy, mom_max)
+    group_results.append(("MOMENTUM", 0.20, mom_long_pct, mom_details))
+
+    # ════════════════════════════════════════════
+    # GROUP 4: MONEY FLOW (15%)
+    # ════════════════════════════════════════════
+    mf_bull = 0
+    mf_bear = 0
+    mf_max = 0
+    mf_details = []
+
+    # 4a. OBV
+    mf_max += 2
+    obv_st = indic.get('obv_status', '')
+    obv_div = indic.get('obv_price_divergence', 'none')
+    if "Accumulation" in obv_st:
+        mf_bull += 2
+        mf_details.append("OBV↑L+2")
+    else:
+        mf_bear += 2
+        mf_details.append("OBV↓S+2")
+
+    # OBV divergence penalty
+    mf_max += 2
+    if obv_div == "bearish":
+        mf_bear += 2
+        mf_details.append("OBVdiv🐻→S+2")
+    elif obv_div == "bullish":
+        mf_bull += 2
+        mf_details.append("OBVdiv🐂→L+2")
+
+    # 4b. CMF
+    mf_max += 2
+    cmf_val = indic.get('cmf', 0)
+    if cmf_val > 0.1:
+        mf_bull += 2
+        mf_details.append(f"CMF={cmf_val:.3f}→L+2")
+    elif cmf_val > 0:
+        mf_bull += 1
+        mf_details.append(f"CMF={cmf_val:.3f}→L+1")
+    elif cmf_val < -0.1:
+        mf_bear += 2
+        mf_details.append(f"CMF={cmf_val:.3f}→S+2")
+    elif cmf_val < 0:
+        mf_bear += 1
+        mf_details.append(f"CMF={cmf_val:.3f}→S+1")
+
+    # 4c. IMI
+    mf_max += 2
+    imi_v = indic.get('imi', 50)
+    if imi_v > 70:
+        mf_bull += 2
+        mf_details.append(f"IMI={imi_v:.0f}→L+2")
+    elif imi_v > 50:
+        mf_bull += 1
+        mf_details.append(f"IMI={imi_v:.0f}→L+1")
+    elif imi_v < 30:
+        mf_bear += 2
+        mf_details.append(f"IMI={imi_v:.0f}→S+2")
+    elif imi_v < 50:
+        mf_bear += 1
+        mf_details.append(f"IMI={imi_v:.0f}→S+1")
+
+    # 4d. OI change
     positioning = indic.get("positioning", {})
     if positioning and "oi_change_pct" in positioning:
-        oi_change = positioning.get("oi_change_pct", 0)
-        if oi_change > 5:
-            bullish_weight += 0.5
-            oi_impact = " +OI📈"
-        elif oi_change < -5:
-            bearish_weight += 0.5
-            oi_impact = " +OI📉"
+        mf_max += 1
+        oi_chg = positioning.get("oi_change_pct", 0)
+        if oi_chg > 5:
+            mf_bull += 1
+            mf_details.append(f"OI+{oi_chg:.0f}%→L+1")
+        elif oi_chg < -5:
+            mf_bear += 1
+            mf_details.append(f"OI{oi_chg:.0f}%→S+1")
 
-    # --- Confluence bonuses ---
-    bullish_weight += confluence_bull_bonus
-    bearish_weight += confluence_bear_bonus
+    # 4e. Taker Buy/Sell (×0.5 weight)
+    if positioning and "taker_buy_sell_ratio" in positioning:
+        mf_max += 1
+        taker = positioning.get("taker_buy_sell_ratio", 1.0)
+        if taker > 1.05:
+            mf_bull += 0.5
+            mf_details.append(f"Taker={taker:.2f}→L+0.5")
+        elif taker < 0.95:
+            mf_bear += 0.5
+            mf_details.append(f"Taker={taker:.2f}→S+0.5")
 
-    # --- PENALTY SYSTEM: reality checks that cap unrealistic confidence ---
-    penalties = []
-    penalty_pct = 0  # total percentage points to subtract from bull_pct (or add if negative = bear penalties)
+    mf_long_pct = _score_to_pct(mf_bull, mf_bear, mf_max)
+    group_results.append(("MONEY_FLOW", 0.15, mf_long_pct, mf_details))
 
-    rsi = indic.get('rsi14', 50)
-    stoch_k = indic.get('stoch_k', 50)
-    macd_hist = indic.get('macd_hist', 0)
-    hist_direction = indic.get('hist_direction', 'stable')
-    rsi_mom_bear_div = indic.get('rsi_mom_bear_div', False)
-    rsi_mom_bull_div = indic.get('rsi_mom_bull_div', False)
-    stoch_k_trend = indic.get('stoch_k_trend', 'stable')
-
-    # 1. RSI extreme overbought → penalty on LONG
-    if rsi > 85:
-        p = 10
-        penalties.append(f"RSI {rsi:.0f} >85 → LONG -{p}%")
-        penalty_pct += p
-    elif rsi > 80:
-        p = 5
-        penalties.append(f"RSI {rsi:.0f} >80 → LONG -{p}%")
-        penalty_pct += p
-
-    # 2. RSI extreme oversold → penalty on SHORT
-    if rsi < 15:
-        p = -10
-        penalties.append(f"RSI {rsi:.0f} <15 → SHORT -10%")
-        penalty_pct += p
-    elif rsi < 20:
-        p = -5
-        penalties.append(f"RSI {rsi:.0f} <20 → SHORT -5%")
-        penalty_pct += p
-
-    # 3. RSI-Mom bearish divergence → penalty on LONG
-    if rsi_mom_bear_div:
-        p = 5
-        penalties.append(f"RSI-Mom bearish divergence → LONG -{p}%")
-        penalty_pct += p
-
-    # 4. RSI-Mom bullish divergence → penalty on SHORT
-    if rsi_mom_bull_div:
-        p = -5
-        penalties.append(f"RSI-Mom bullish divergence → SHORT -5%")
-        penalty_pct += p
-
-    # 5. MACD fading/weakening → penalty on dominant side
-    if hist_direction == "fading_bullish":
-        p = 5
-        penalties.append(f"MACD fading bullish → LONG -{p}%")
-        penalty_pct += p
-    elif hist_direction == "fading_bearish":
-        p = -5
-        penalties.append(f"MACD fading bearish → SHORT -5%")
-        penalty_pct += p
-
-    # 6. StochRSI bearish cross while overbought → penalty on LONG
-    if stoch_k > 70 and stoch_k_trend == 'falling':
-        p = 5
-        penalties.append(f"StochRSI bearish cross OB ({stoch_k:.0f}, falling) → LONG -{p}%")
-        penalty_pct += p
-    # StochRSI bullish cross while oversold → penalty on SHORT
-    elif stoch_k < 30 and stoch_k_trend == 'rising':
-        p = -5
-        penalties.append(f"StochRSI bullish cross OS ({stoch_k:.0f}, rising) → SHORT -5%")
-        penalty_pct += p
-
-    # 7. EMA penalties (worst one wins, no stacking)
-    ema7_val = indic.get('ema7', 0)
-    ema25_val = indic.get('ema25', 0)
-    ema99_val = indic.get('ema99', 0)
-    ema7_slope_val = indic.get('ema7_slope_50', 0)
-
-    ema_penalty = 0
-    ema_penalty_reason = ""
-    if ema7_val > 0 and ema25_val > 0 and ema99_val > 0:
-        if ema7_val < ema25_val < ema99_val:
-            # Full death cross — worst case
-            ema_penalty = 15
-            ema_penalty_reason = f"EMA full death cross (7<25<99) → LONG -{ema_penalty}%"
-        elif ema25_val < ema99_val:
-            # Death cross EMA25 < EMA99
-            ema_penalty = 10
-            ema_penalty_reason = f"EMA death cross (25<99) → LONG -{ema_penalty}%"
-        elif ema7_val < ema25_val:
-            # EMA7 crossed below EMA25
-            ema_penalty = 7
-            ema_penalty_reason = f"EMA7 < EMA25 → LONG -{ema_penalty}%"
-        elif ema7_slope_val < -0.5:
-            # EMA7 slope turning down
-            ema_penalty = 5
-            ema_penalty_reason = f"EMA7 slope down ({ema7_slope_val:+.1f}%) → LONG -{ema_penalty}%"
-
-        # Mirror: bullish EMA penalties on SHORT side (negative = penalizes SHORT)
-        if ema_penalty == 0:
-            if ema7_val > ema25_val > ema99_val:
-                # Full golden cross — worst for SHORT
-                ema_penalty = -15
-                ema_penalty_reason = f"EMA full golden cross (7>25>99) → SHORT -15%"
-            elif ema25_val > ema99_val and ema7_val < ema25_val:
-                # Golden cross EMA25 > EMA99 but EMA7 lagging
-                ema_penalty = -10
-                ema_penalty_reason = f"EMA golden cross (25>99) → SHORT -10%"
-            elif ema7_val > ema25_val:
-                # EMA7 crossed above EMA25
-                ema_penalty = -7
-                ema_penalty_reason = f"EMA7 > EMA25 → SHORT -7%"
-            elif ema7_slope_val > 0.5:
-                # EMA7 slope turning up
-                ema_penalty = -5
-                ema_penalty_reason = f"EMA7 slope up ({ema7_slope_val:+.1f}%) → SHORT -5%"
-
-    if ema_penalty != 0:
-        penalties.append(ema_penalty_reason)
-        penalty_pct += ema_penalty
-
-    # --- Final LONG/SHORT percentage ---
-    total_weight = bullish_weight + bearish_weight
-    if total_weight > 0:
-        bull_pct = bullish_weight / total_weight * 100
-        bear_pct = bearish_weight / total_weight * 100
+    # ════════════════════════════════════════════
+    # GROUP 5: SMART MONEY (10%) — from SMC data
+    # ════════════════════════════════════════════
+    smc_score = indic.get("_smc_score")
+    if smc_score:
+        smc_long_pct = smc_score.get("long_pct", 50)
+        smc_details = smc_score.get("details", [])
     else:
-        bull_pct = bear_pct = 50
+        smc_long_pct = 50
+        smc_details = ["No SMC scoring"]
+    group_results.append(("SMC", 0.10, smc_long_pct, smc_details))
 
-    # Apply penalties
-    if penalty_pct != 0:
-        bull_pct -= penalty_pct
-        bear_pct += penalty_pct
+    # ════════════════════════════════════════════
+    # FINAL WEIGHTED CALCULATION
+    # ════════════════════════════════════════════
+    weighted_long = 0
+    total_weight_sum = 0
+    scorecard_lines = []
 
-    bull_pct = max(0, min(100, round(bull_pct)))
-    bear_pct = 100 - bull_pct
+    for grp_name, weight, long_pct, details in group_results:
+        short_pct_g = round(100 - long_pct, 1)
+        contribution = long_pct * weight
+        weighted_long += contribution
+        total_weight_sum += weight
 
-    adx_note = f"ADX={adx:.0f}({trend_strength.lower()}, DI+ {'dominant' if di_plus > di_minus else 'weak'})"
+        detail_str = " | ".join(details[:6]) if details else "—"
+        side = "L" if long_pct >= 55 else ("S" if long_pct <= 45 else "N")
+        icon = "🟢" if side == "L" else ("🔴" if side == "S" else "⚪")
+        scorecard_lines.append(
+            f"  {icon} {grp_name}({int(weight*100)}%): L{long_pct:.0f}/S{short_pct_g:.0f} [{detail_str}]"
+        )
 
-    confluence_note = ""
-    if confluence_bull_bonus > 0 or confluence_bear_bonus > 0:
-        confluence_note = f" | Confluence: +{confluence_bull_bonus:.1f}🟢 +{confluence_bear_bonus:.1f}🔴"
+    if total_weight_sum > 0:
+        final_long = round(weighted_long / total_weight_sum, 1)
+    else:
+        final_long = 50
+    final_long = max(5, min(95, final_long))
+    final_short = round(100 - final_long, 1)
 
-    penalty_note = ""
-    if penalties:
-        penalty_note = f" | ⚠️ Penalties: {', '.join(penalties)}"
+    # Regime text
+    if adx > 25:
+        regime_txt = "TRENDING"
+    elif adx < 20:
+        regime_txt = "RANGING"
+    else:
+        regime_txt = "TRANSITION"
 
-    # RSI pullback history line (forced into scorecard, all TFs)
+    # RSI pullback history line
     rsi_pullback_line = ""
-    rsi_val = indic.get('rsi14', 50)
-    rsi_pullback_peak = indic.get('rsi_pullback_peak', 0)
-    rsi_pullback_drop = indic.get('rsi_pullback_drop', 0)
-    if rsi_val > 70:
-        if rsi_pullback_peak > 0:
-            rsi_pullback_line = f"   ⚠️ ОТКАТ: предыдущий откат начинался с RSI {rsi_pullback_peak} (падение {rsi_pullback_drop} пунктов)"
-            if rsi_val >= rsi_pullback_peak - 2:
-                rsi_pullback_line += f" — ТЕКУЩИЙ RSI {rsi_val:.0f} БЛИЗКО К ОПАСНОЙ ЗОНЕ!"
-        else:
-            rsi_pullback_line = f"   ℹ️ RSI {rsi_val:.0f} >70 — история откатов не зафиксирована"
+    if rsi_val > 70 and rsi_pullback_peak_v > 0:
+        rsi_pullback_line = f"\n   ⚠️ PULLBACK HISTORY: last pullback from RSI {rsi_pullback_peak_v} (drop {rsi_pullback_drop_v} pts)"
+        if rsi_val >= rsi_pullback_peak_v - 2:
+            rsi_pullback_line += f" — RSI {rsi_val:.0f} NEAR DANGER ZONE!"
 
-    consensus_lines = [
-        f"📊 GROUPED SCORECARD (6 groups, regime={regime}): {bull_groups}🟢 vs {bear_groups}🔴 vs {neutral_groups}⚪{oi_impact}{confluence_note}{penalty_note}",
-        f"   Weights: Trend/Mom ×{w_mult['trend']:.1f} | Oscillators ×{w_mult['oscillator']:.1f} | Vol/Volat/Dir ×1.0",
-        f"→ LONG {bull_pct}% / SHORT {bear_pct}% | {adx_note}",
-    ] + group_details
-    if rsi_pullback_line:
-        consensus_lines.append(rsi_pullback_line)
-
-    consensus = "\n".join(consensus_lines)
+    consensus = "\n".join([
+        f"📊 5-GROUP SCORECARD (regime={regime_txt}, ADX={adx:.0f})",
+    ] + scorecard_lines + [
+        f"→ LONG {final_long:.0f}% / SHORT {final_short:.0f}%{rsi_pullback_line}",
+    ])
 
     return (
         f"=== {tf_label} ===\n"

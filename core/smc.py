@@ -783,3 +783,235 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         import traceback
         logging.error(traceback.format_exc())
         return {"summary": f"[{tf_label}] SMC error: {str(e)[:100]}"}
+
+
+def score_smc(smc_data: dict, current_price: float) -> dict:
+    """
+    Score SMC data for the 5-group scorecard.
+    
+    Returns dict with:
+      long_score, short_score (raw points),
+      long_pct, short_pct (0-100),
+      details (list of strings explaining each score component)
+    """
+    long_pts = 0
+    short_pts = 0
+    details = []
+    max_possible = 0  # track max for percentage calc
+
+    if not smc_data or "swing_structures" not in smc_data:
+        return {"long_pct": 50, "short_pct": 50, "details": ["No SMC data"]}
+
+    # ============================================
+    # 1. BOS / CHoCH — Swing Structure (+3 CHoCH, +2 BOS)
+    # ============================================
+    max_possible += 3
+    swing_structs = smc_data.get("swing_structures", [])
+    if swing_structs:
+        last_swing = swing_structs[-1]
+        swing_type = last_swing.get("type", "")  # "BOS" or "CHoCH"
+        swing_bias = last_swing.get("bias", "")   # "Bullish" or "Bearish"
+        bars_since = last_swing.get("bars_since", 999)
+
+        # Freshness multiplier
+        if bars_since < 10:
+            fresh_mult = 1.0
+        elif bars_since < 30:
+            fresh_mult = 0.5
+        else:
+            fresh_mult = 0.3
+
+        base_pts = 3 if "CHoCH" in swing_type else 2
+
+        if "Bullish" in swing_bias or "bullish" in swing_bias:
+            pts = round(base_pts * fresh_mult, 1)
+            long_pts += pts
+            details.append(f"Swing {swing_type} Bullish ({bars_since}b ago) → LONG +{pts}")
+        elif "Bearish" in swing_bias or "bearish" in swing_bias:
+            pts = round(base_pts * fresh_mult, 1)
+            short_pts += pts
+            details.append(f"Swing {swing_type} Bearish ({bars_since}b ago) → SHORT +{pts}")
+
+    # ============================================
+    # 2. Internal Structure (×0.5 weight of swing)
+    # ============================================
+    max_possible += 1.5
+    internal_structs = smc_data.get("internal_structures", [])
+    if internal_structs:
+        last_internal = internal_structs[-1]
+        int_type = last_internal.get("type", "")
+        int_bias = last_internal.get("bias", "")
+        int_bars = last_internal.get("bars_since", 999)
+
+        if int_bars < 10:
+            int_fresh = 0.5
+        elif int_bars < 30:
+            int_fresh = 0.25
+        else:
+            int_fresh = 0.15
+
+        int_base = 1.5 if "CHoCH" in int_type else 1.0
+
+        if "Bullish" in int_bias or "bullish" in int_bias:
+            pts = round(int_base * int_fresh / 0.5, 1)  # normalized
+            long_pts += pts
+            details.append(f"Internal {int_type} Bullish ({int_bars}b) → LONG +{pts}")
+        elif "Bearish" in int_bias or "bearish" in int_bias:
+            pts = round(int_base * int_fresh / 0.5, 1)
+            short_pts += pts
+            details.append(f"Internal {int_type} Bearish ({int_bars}b) → SHORT +{pts}")
+
+    # Internal vs Swing conflict
+    if swing_structs and internal_structs:
+        swing_bias = swing_structs[-1].get("bias", "")
+        int_bias = internal_structs[-1].get("bias", "")
+        if ("Bullish" in swing_bias and "Bearish" in int_bias):
+            long_pts -= 1
+            details.append("⚠️ Swing↑ vs Internal↓ conflict → LONG -1")
+        elif ("Bearish" in swing_bias and "Bullish" in int_bias):
+            short_pts -= 1
+            details.append("⚠️ Swing↓ vs Internal↑ conflict → SHORT -1")
+
+    # ============================================
+    # 3. Order Blocks (proximity scoring)
+    # ============================================
+    max_possible += 4  # up to ±2 per side
+    all_obs = smc_data.get("swing_order_blocks", []) + smc_data.get("internal_order_blocks", [])
+
+    for ob in all_obs:
+        ob_top = ob.get("top", 0)
+        ob_bottom = ob.get("bottom", 0)
+        ob_type = ob.get("type", "")  # "bull" or "bear"
+        ob_mid = (ob_top + ob_bottom) / 2 if ob_top and ob_bottom else 0
+
+        if ob_mid <= 0 or current_price <= 0:
+            continue
+
+        dist_pct = abs(current_price - ob_mid) / current_price * 100
+
+        if dist_pct > 5:
+            continue  # too far
+
+        if "bull" in ob_type.lower():
+            # Bullish OB = support zone (below price = good for LONG)
+            if ob_mid < current_price:
+                pts = 2 if dist_pct < 2 else 1
+                long_pts += pts
+                details.append(f"🟦 Bull OB {dist_pct:.1f}% below → LONG +{pts}")
+            else:
+                # Bull OB above price = less relevant
+                pass
+        elif "bear" in ob_type.lower():
+            # Bearish OB = resistance zone (above price = bad for LONG)
+            if ob_mid > current_price:
+                pts = 2 if dist_pct < 2 else 1
+                long_pts -= pts
+                short_pts += pts
+                details.append(f"🟥 Bear OB {dist_pct:.1f}% above → LONG -{pts}, SHORT +{pts}")
+            else:
+                # Bear OB below price = less relevant (already broken)
+                pass
+
+    # ============================================
+    # 4. Strong/Weak High/Low
+    # ============================================
+    max_possible += 2
+    trailing = smc_data.get("trailing", {})
+
+    strong_high = trailing.get("strong_high")
+    weak_high = trailing.get("weak_high")
+    strong_low = trailing.get("strong_low")
+    weak_low = trailing.get("weak_low")
+
+    if weak_high and current_price > 0:
+        dist = abs(current_price - weak_high) / current_price * 100
+        if dist < 2:
+            long_pts += 2
+            details.append(f"Weak High {dist:.1f}% away → LONG +2 (breakout likely)")
+
+    if strong_high and current_price > 0:
+        dist = abs(current_price - strong_high) / current_price * 100
+        if dist < 2:
+            long_pts -= 2
+            short_pts += 1
+            details.append(f"Strong High {dist:.1f}% away → LONG -2 (wall)")
+
+    if weak_low and current_price > 0:
+        dist = abs(current_price - weak_low) / current_price * 100
+        if dist < 2:
+            short_pts += 2
+            details.append(f"Weak Low {dist:.1f}% away → SHORT +2 (breakdown likely)")
+
+    if strong_low and current_price > 0:
+        dist = abs(current_price - strong_low) / current_price * 100
+        if dist < 2:
+            short_pts -= 2
+            long_pts += 1
+            details.append(f"Strong Low {dist:.1f}% away → SHORT -2 (floor)")
+
+    # ============================================
+    # 5. Premium / Discount Zones
+    # ============================================
+    max_possible += 3
+    zones = smc_data.get("zones", {})
+    current_zone = zones.get("current_zone", "")
+
+    if "Premium" in current_zone:
+        long_pts -= 3
+        details.append("Premium zone → LONG -3 (buying high)")
+    elif "Discount" in current_zone:
+        short_pts -= 3
+        details.append("Discount zone → SHORT -3 (shorting low)")
+    # Equilibrium = neutral, no score
+
+    # ============================================
+    # 6. EQH / EQL (liquidity magnets)
+    # ============================================
+    max_possible += 1
+    equal_hl = smc_data.get("equal_hl", {})
+    eqh_list = equal_hl.get("eqh", [])
+    eql_list = equal_hl.get("eql", [])
+
+    for eqh in (eqh_list if isinstance(eqh_list, list) else []):
+        eqh_price = eqh.get("price", 0) if isinstance(eqh, dict) else 0
+        if eqh_price > current_price and current_price > 0:
+            dist = (eqh_price - current_price) / current_price * 100
+            if dist < 3:
+                long_pts += 1
+                details.append(f"EQH {dist:.1f}% above → LONG +1 (liquidity magnet)")
+                break
+
+    for eql in (eql_list if isinstance(eql_list, list) else []):
+        eql_price = eql.get("price", 0) if isinstance(eql, dict) else 0
+        if eql_price < current_price and current_price > 0:
+            dist = (current_price - eql_price) / current_price * 100
+            if dist < 3:
+                short_pts += 1
+                details.append(f"EQL {dist:.1f}% below → SHORT +1 (liquidity magnet)")
+                break
+
+    # ============================================
+    # Convert to percentages
+    # ============================================
+    total = abs(long_pts) + abs(short_pts)
+    if total == 0:
+        long_pct = 50
+        short_pct = 50
+    else:
+        # Shift from raw score to 0-100
+        net = long_pts - short_pts
+        # Map net score to percentage: positive net = LONG bias
+        # Scale: max realistic net is ~±12
+        max_net = max(max_possible, 12)
+        ratio = net / max_net  # -1 to +1
+        long_pct = round(50 + ratio * 50, 1)
+        long_pct = max(5, min(95, long_pct))  # clamp
+        short_pct = round(100 - long_pct, 1)
+
+    return {
+        "long_pts": round(long_pts, 1),
+        "short_pts": round(short_pts, 1),
+        "long_pct": long_pct,
+        "short_pct": short_pct,
+        "details": details,
+    }

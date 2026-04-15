@@ -949,6 +949,14 @@ SKIP RULES:
     # 2. BUILD MULTI-TIMEFRAME DATA BLOCK
     from core.indicators import format_tf_summary
 
+    # Inject SMC scoring into indicator dicts for 5-group scorecard
+    from core.smc import score_smc
+    current_price_for_smc = clean_indic.get('close', 0)
+    if smc_data and tf_key in smc_data:
+        smc_result = smc_data[tf_key]
+        if isinstance(smc_result, dict) and "swing_structures" in smc_result:
+            clean_indic["_smc_score"] = score_smc(smc_result, current_price_for_smc)
+
     # Primary TF data (always present)
     primary_tf_text = format_tf_summary(clean_indic, tf_key)
 
@@ -963,6 +971,12 @@ SKIP RULES:
                     clean_mtf[k] = 0.0
                 else:
                     clean_mtf[k] = v
+            # Inject SMC scoring for this MTF
+            if smc_data and mtf_label in smc_data:
+                smc_mtf = smc_data[mtf_label]
+                if isinstance(smc_mtf, dict) and "swing_structures" in smc_mtf:
+                    mtf_price = clean_mtf.get('close', current_price_for_smc)
+                    clean_mtf["_smc_score"] = score_smc(smc_mtf, mtf_price)
             mtf_text += "\n" + format_tf_summary(clean_mtf, mtf_label)
 
     # Build SMC block with per-TF directional scorecard
