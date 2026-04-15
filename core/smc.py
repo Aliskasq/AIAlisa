@@ -1,10 +1,14 @@
 """
-Smart Money Concepts (SMC) module — ported from LuxAlgo Pine Script.
-Detects: Market Structure (BOS/CHoCH), Order Blocks, Fair Value Gaps,
-Equal Highs/Lows, Premium/Discount Zones.
+Smart Money Concepts (SMC) module — exact port of LuxAlgo Pine Script v5.
 
-Input: pandas DataFrame with columns [open, high, low, close, volume]
+Detects: Market Structure (BOS/CHoCH), Order Blocks (internal + swing),
+Fair Value Gaps, Equal Highs/Lows, Strong/Weak High/Low,
+Premium/Discount Zones, Trailing Extremes.
+
+Input:  pandas DataFrame with columns [open, high, low, close, volume]
 Output: dict with all SMC data + formatted text summary for AI prompt.
+
+Reference: 'Smart Money Concepts [LuxAlgo]' indicator for TradingView.
 """
 
 import pandas as pd
@@ -20,117 +24,106 @@ BULLISH_LEG = 1
 BEARISH_LEG = 0
 
 
-# ─── PIVOT / SWING DETECTION ────────────────────────────────────────────────
+# ─── LEG DETECTION (exact LuxAlgo port) ─────────────────────────────────────
 
-def find_pivots(df: pd.DataFrame, size: int) -> pd.DataFrame:
+def _compute_legs(highs: np.ndarray, lows: np.ndarray, size: int) -> np.ndarray:
     """
-    Detect pivot highs and lows using LuxAlgo leg() logic.
-    A pivot high at bar[i] if high[i] > max(high[i-size:i]) (bar is higher than next `size` bars before it).
-    Returns df with added columns: pivot_high (bool), pivot_low (bool).
+    Port of LuxAlgo leg() function.
+
+    leg(int size) =>
+        var leg = 0
+        newLegHigh = high[size] > ta.highest(size)   // bar `size` ago is higher than highest of bars 0..size-1
+        newLegLow  = low[size]  < ta.lowest(size)    // bar `size` ago is lower  than lowest  of bars 0..size-1
+        if newLegHigh → leg := BEARISH_LEG (0)
+        if newLegLow  → leg := BULLISH_LEG (1)
+
+    Returns array of leg values (0 or 1) for each bar.
     """
-    highs = df["high"].values
-    lows = df["low"].values
-    n = len(df)
+    n = len(highs)
+    legs = np.zeros(n, dtype=int)
+    current_leg = 0
 
-    pivot_high = np.zeros(n, dtype=bool)
-    pivot_low = np.zeros(n, dtype=bool)
+    for i in range(size, n):
+        # high[size] in Pine = highs[i - size] looking back from bar i
+        bar_high = highs[i - size]
+        bar_low = lows[i - size]
 
-    for i in range(size, n - size):
-        # Check if high[i] is the highest in window [i-size, i+size]
-        left_max_h = np.max(highs[i - size:i])
-        right_max_h = np.max(highs[i + 1:i + size + 1])
-        if highs[i] >= left_max_h and highs[i] >= right_max_h:
-            pivot_high[i] = True
+        # ta.highest(size) = max of bars [i-size+1 .. i] (the most recent `size` bars)
+        window_high = np.max(highs[i - size + 1: i + 1])
+        # ta.lowest(size) = min of bars [i-size+1 .. i]
+        window_low = np.min(lows[i - size + 1: i + 1])
 
-        # Check if low[i] is the lowest in window [i-size, i+size]
-        left_min_l = np.min(lows[i - size:i])
-        right_min_l = np.min(lows[i + 1:i + size + 1])
-        if lows[i] <= left_min_l and lows[i] <= right_min_l:
-            pivot_low[i] = True
+        if bar_high > window_high:
+            current_leg = BEARISH_LEG  # pivot high detected → start of bearish leg
+        elif bar_low < window_low:
+            current_leg = BULLISH_LEG  # pivot low detected → start of bullish leg
 
-    result = df.copy()
-    result["pivot_high"] = pivot_high
-    result["pivot_low"] = pivot_low
-    return result
+        legs[i] = current_leg
+
+    return legs
 
 
-# ─── MARKET STRUCTURE (BOS / CHoCH) ─────────────────────────────────────────
-
-def detect_structure(df: pd.DataFrame, size: int) -> List[Dict]:
+def _detect_pivots_from_legs(highs: np.ndarray, lows: np.ndarray,
+                             legs: np.ndarray, size: int) -> List[Dict]:
     """
-    Detect BOS (Break of Structure) and CHoCH (Change of Character).
-    
-    Logic (from LuxAlgo):
-    - Track last swing high and swing low pivots.
-    - When close crosses above last swing high:
-        If trend was BULLISH → BOS (continuation)
-        If trend was BEARISH → CHoCH (reversal)
-    - When close crosses below last swing low:
-        If trend was BEARISH → BOS (continuation)
-        If trend was BULLISH → CHoCH (reversal)
+    Detect pivot points from leg changes (exact LuxAlgo getCurrentStructure logic).
+
+    When leg changes:
+    - From bearish→bullish (startOfBullishLeg): pivot LOW at bar[i-size] (low)
+    - From bullish→bearish (startOfBearishLeg): pivot HIGH at bar[i-size] (high)
+
+    Returns list of pivots: {"type": "high"|"low", "price": float, "index": int}
     """
-    pivoted = find_pivots(df, size)
-    closes = pivoted["close"].values
-    highs = pivoted["high"].values
-    lows = pivoted["low"].values
-    n = len(pivoted)
+    n = len(legs)
+    pivots = []
 
-    structures = []
-    trend = 0  # 0 = undefined, BULLISH = 1, BEARISH = -1
+    for i in range(size + 1, n):
+        change = legs[i] - legs[i - 1]
+        if change == 0:
+            continue
 
-    last_swing_high = None  # {"price": float, "index": int, "crossed": bool}
-    last_swing_low = None
-
-    for i in range(n):
-        # Update pivots
-        if pivoted["pivot_high"].iloc[i]:
-            last_swing_high = {"price": highs[i], "index": i, "crossed": False}
-        if pivoted["pivot_low"].iloc[i]:
-            last_swing_low = {"price": lows[i], "index": i, "crossed": False}
-
-        # Check bullish break (close > last swing high)
-        if last_swing_high and not last_swing_high["crossed"]:
-            if closes[i] > last_swing_high["price"]:
-                tag = "CHoCH" if trend == BEARISH else "BOS"
-                bias = BULLISH
-                last_swing_high["crossed"] = True
-                trend = BULLISH
-                structures.append({
-                    "type": tag,
-                    "bias": bias,
-                    "price": last_swing_high["price"],
-                    "break_index": i,
-                    "pivot_index": last_swing_high["index"],
+        if change > 0:
+            # startOfBullishLeg → new pivot LOW at bar[i - size]
+            idx = i - size
+            if idx >= 0:
+                pivots.append({
+                    "type": "low",
+                    "price": float(lows[idx]),
+                    "index": idx,
+                })
+        elif change < 0:
+            # startOfBearishLeg → new pivot HIGH at bar[i - size]
+            idx = i - size
+            if idx >= 0:
+                pivots.append({
+                    "type": "high",
+                    "price": float(highs[idx]),
+                    "index": idx,
                 })
 
-        # Check bearish break (close < last swing low)
-        if last_swing_low and not last_swing_low["crossed"]:
-            if closes[i] < last_swing_low["price"]:
-                tag = "CHoCH" if trend == BULLISH else "BOS"
-                bias = BEARISH
-                last_swing_low["crossed"] = True
-                trend = BEARISH
-                structures.append({
-                    "type": tag,
-                    "bias": bias,
-                    "price": last_swing_low["price"],
-                    "break_index": i,
-                    "pivot_index": last_swing_low["index"],
-                })
-
-    return structures
+    return pivots
 
 
-# ─── ORDER BLOCKS ────────────────────────────────────────────────────────────
+# ─── MARKET STRUCTURE (BOS / CHoCH) — exact LuxAlgo displayStructure ────────
 
-def find_order_blocks(df: pd.DataFrame, structures: List[Dict], max_blocks: int = 5) -> List[Dict]:
+def detect_structure(df: pd.DataFrame, size: int,
+                     internal: bool = False,
+                     swing_high_level: float = None,
+                     swing_low_level: float = None) -> Tuple[List[Dict], List[Dict], int]:
     """
-    Find Order Blocks at structure breaks.
-    
-    At a bullish break: find the candle with the lowest low between the pivot and the break → bullish OB.
-    At a bearish break: find the candle with the highest high between the pivot and the break → bearish OB.
-    
-    Then check mitigation (price has passed through OB).
+    Detect BOS and CHoCH from structure breaks.
+
+    Exact LuxAlgo logic:
+    - Track last pivot high (swingHigh / internalHigh) and last pivot low.
+    - On each bar, check:
+      * close crosses ABOVE last pivot high (crossover, not just above):
+        trend was BEARISH → CHoCH; trend was BULLISH → BOS
+      * close crosses BELOW last pivot low (crossunder):
+        trend was BULLISH → CHoCH; trend was BEARISH → BOS
+    - Internal filter: if internal, skip if pivot level == swing level (confluence filter).
+
+    Returns:
+        (structures, pivots, final_trend_bias)
     """
     highs = df["high"].values
     lows = df["low"].values
@@ -138,9 +131,145 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict], max_blocks: int 
     opens = df["open"].values
     n = len(df)
 
-    # ATR for volatility filter
-    tr = np.maximum(highs - lows, np.maximum(np.abs(highs - np.roll(closes, 1)), np.abs(lows - np.roll(closes, 1))))
-    atr = pd.Series(tr).rolling(200, min_periods=1).mean().values
+    # Compute legs and pivots
+    legs = _compute_legs(highs, lows, size)
+    raw_pivots = _detect_pivots_from_legs(highs, lows, legs, size)
+
+    structures = []
+    trend = 0  # 0 = undefined
+
+    # State tracking (exact LuxAlgo pivot UDT)
+    last_high = {"price": None, "last_price": None, "index": 0, "crossed": False}
+    last_low = {"price": None, "last_price": None, "index": 0, "crossed": False}
+
+    # Process pivots in bar order, interleave with close checks
+    # Build a per-bar event map
+    pivot_at_bar = {}
+    for p in raw_pivots:
+        idx = p["index"]
+        if idx not in pivot_at_bar:
+            pivot_at_bar[idx] = []
+        pivot_at_bar[idx].append(p)
+
+    for i in range(n):
+        # Update pivots that occur at this bar
+        if i in pivot_at_bar:
+            for p in pivot_at_bar[i]:
+                if p["type"] == "low":
+                    last_low["last_price"] = last_low["price"]
+                    last_low["price"] = p["price"]
+                    last_low["index"] = p["index"]
+                    last_low["crossed"] = False
+                elif p["type"] == "high":
+                    last_high["last_price"] = last_high["price"]
+                    last_high["price"] = p["price"]
+                    last_high["index"] = p["index"]
+                    last_high["crossed"] = False
+
+        # Check bullish break: close crosses above last high
+        if last_high["price"] is not None and not last_high["crossed"]:
+            # Crossover: previous close <= level AND current close > level
+            prev_close = closes[i - 1] if i > 0 else 0
+            if prev_close <= last_high["price"] and closes[i] > last_high["price"]:
+                # Internal confluence filter
+                if internal and swing_high_level is not None:
+                    if last_high["price"] == swing_high_level:
+                        pass  # skip — same as swing level
+                    else:
+                        tag = "CHoCH" if trend == BEARISH else "BOS"
+                        last_high["crossed"] = True
+                        trend = BULLISH
+                        structures.append({
+                            "type": tag,
+                            "bias": BULLISH,
+                            "price": last_high["price"],
+                            "break_index": i,
+                            "pivot_index": last_high["index"],
+                        })
+                else:
+                    tag = "CHoCH" if trend == BEARISH else "BOS"
+                    last_high["crossed"] = True
+                    trend = BULLISH
+                    structures.append({
+                        "type": tag,
+                        "bias": BULLISH,
+                        "price": last_high["price"],
+                        "break_index": i,
+                        "pivot_index": last_high["index"],
+                    })
+
+        # Check bearish break: close crosses below last low
+        if last_low["price"] is not None and not last_low["crossed"]:
+            prev_close = closes[i - 1] if i > 0 else float('inf')
+            if prev_close >= last_low["price"] and closes[i] < last_low["price"]:
+                # Internal confluence filter
+                if internal and swing_low_level is not None:
+                    if last_low["price"] == swing_low_level:
+                        pass  # skip
+                    else:
+                        tag = "CHoCH" if trend == BULLISH else "BOS"
+                        last_low["crossed"] = True
+                        trend = BEARISH
+                        structures.append({
+                            "type": tag,
+                            "bias": BEARISH,
+                            "price": last_low["price"],
+                            "break_index": i,
+                            "pivot_index": last_low["index"],
+                        })
+                else:
+                    tag = "CHoCH" if trend == BULLISH else "BOS"
+                    last_low["crossed"] = True
+                    trend = BEARISH
+                    structures.append({
+                        "type": tag,
+                        "bias": BEARISH,
+                        "price": last_low["price"],
+                        "break_index": i,
+                        "pivot_index": last_low["index"],
+                    })
+
+    return structures, raw_pivots, trend
+
+
+# ─── ORDER BLOCKS (exact LuxAlgo storeOrderBlock + deleteOrderBlocks) ───────
+
+def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
+                      max_blocks: int = 5,
+                      mitigation: str = "highlow") -> List[Dict]:
+    """
+    Find and manage Order Blocks at structure breaks.
+
+    LuxAlgo logic:
+    - At bullish break: find candle with min(parsedLow) between pivot and break.
+    - At bearish break: find candle with max(parsedHigh) between pivot and break.
+    - parsedHigh/parsedLow: if bar is high-volatility (range >= 2*ATR), swap high↔low.
+    - OB boundaries use parsedHighs/parsedLows (not raw).
+    - Mitigation: bearish OB mitigated when high > OB.barHigh (or close > OB.barHigh).
+                  bullish OB mitigated when low < OB.barLow (or close < OB.barLow).
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    closes = df["close"].values
+    n = len(df)
+
+    # ATR(200) for volatility filter (exact LuxAlgo: ta.atr(200))
+    tr = np.zeros(n)
+    tr[0] = highs[0] - lows[0]
+    for i in range(1, n):
+        tr[i] = max(highs[i] - lows[i],
+                     abs(highs[i] - closes[i - 1]),
+                     abs(lows[i] - closes[i - 1]))
+    atr200 = pd.Series(tr).rolling(200, min_periods=1).mean().values
+
+    # Build parsed highs/lows arrays (exact LuxAlgo high-volatility bar logic)
+    parsed_highs = np.copy(highs)
+    parsed_lows = np.copy(lows)
+    for i in range(n):
+        if (highs[i] - lows[i]) >= 2 * atr200[i] and atr200[i] > 0:
+            # High volatility bar: swap
+            parsed_highs[i] = lows[i]
+            parsed_lows[i] = highs[i]
 
     order_blocks = []
 
@@ -151,69 +280,73 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict], max_blocks: int 
         if pivot_idx >= break_idx or pivot_idx < 0:
             continue
 
-        # High volatility bar parsing (from LuxAlgo)
-        segment_highs = []
-        segment_lows = []
-        for j in range(pivot_idx, break_idx):
-            hv = (highs[j] - lows[j]) >= (2 * atr[j]) if atr[j] > 0 else False
-            parsed_h = lows[j] if hv else highs[j]
-            parsed_l = highs[j] if hv else lows[j]
-            segment_highs.append(parsed_h)
-            segment_lows.append(parsed_l)
-
-        if not segment_highs:
-            continue
-
-        if s["bias"] == BULLISH:
-            # Bullish OB: candle with lowest parsed low
-            min_idx = int(np.argmin(segment_lows))
-            ob_idx = pivot_idx + min_idx
-            ob = {
-                "bias": BULLISH,
-                "high": highs[ob_idx],
-                "low": lows[ob_idx],
-                "index": ob_idx,
-                "mitigated": False,
-            }
+        if s["bias"] == BEARISH:
+            # Bearish OB: find max parsedHigh between pivot and break
+            segment = parsed_highs[pivot_idx:break_idx]
+            if len(segment) == 0:
+                continue
+            local_idx = int(np.argmax(segment))
+            ob_idx = pivot_idx + local_idx
         else:
-            # Bearish OB: candle with highest parsed high
-            max_idx = int(np.argmax(segment_highs))
-            ob_idx = pivot_idx + max_idx
-            ob = {
-                "bias": BEARISH,
-                "high": highs[ob_idx],
-                "low": lows[ob_idx],
-                "index": ob_idx,
-                "mitigated": False,
-            }
+            # Bullish OB: find min parsedLow between pivot and break
+            segment = parsed_lows[pivot_idx:break_idx]
+            if len(segment) == 0:
+                continue
+            local_idx = int(np.argmin(segment))
+            ob_idx = pivot_idx + local_idx
 
-        # Check mitigation (after OB formed, did price pass through it?)
+        # OB boundaries use PARSED values (exact LuxAlgo)
+        ob = {
+            "bias": s["bias"],
+            "high": float(parsed_highs[ob_idx]),
+            "low": float(parsed_lows[ob_idx]),
+            "raw_high": float(highs[ob_idx]),
+            "raw_low": float(lows[ob_idx]),
+            "index": ob_idx,
+            "break_index": break_idx,
+            "mitigated": False,
+            "mitigated_index": None,
+        }
+
+        # Check mitigation after the break
         for k in range(break_idx + 1, n):
-            if ob["bias"] == BEARISH and highs[k] > ob["high"]:
+            if mitigation == "close":
+                mit_bear_src = closes[k]
+                mit_bull_src = closes[k]
+            else:
+                mit_bear_src = highs[k]
+                mit_bull_src = lows[k]
+
+            if ob["bias"] == BEARISH and mit_bear_src > ob["high"]:
                 ob["mitigated"] = True
+                ob["mitigated_index"] = k
                 break
-            elif ob["bias"] == BULLISH and lows[k] < ob["low"]:
+            elif ob["bias"] == BULLISH and mit_bull_src < ob["low"]:
                 ob["mitigated"] = True
+                ob["mitigated_index"] = k
                 break
 
         order_blocks.append(ob)
 
-    # Return only unmitigated, most recent blocks
+    # Return unmitigated, most recent blocks (capped)
     active = [ob for ob in order_blocks if not ob["mitigated"]]
-    # Keep last N
-    return active[-max_blocks:]
+    if len(active) > max_blocks:
+        active = active[-max_blocks:]
+    return active
 
 
-# ─── FAIR VALUE GAPS (FVG) ──────────────────────────────────────────────────
+# ─── FAIR VALUE GAPS (exact LuxAlgo drawFairValueGaps) ──────────────────────
 
 def find_fair_value_gaps(df: pd.DataFrame) -> List[Dict]:
     """
     Detect Fair Value Gaps (3-candle imbalance).
-    
-    Bullish FVG: current_low > 2-bars-ago high (gap between candle 0 and candle 2)
-    Bearish FVG: current_high < 2-bars-ago low
-    
-    Filter by ATR threshold to remove insignificant gaps.
+
+    LuxAlgo logic:
+    Bullish FVG:  currentLow > last2High AND lastClose > last2High AND barDelta > threshold
+    Bearish FVG:  currentHigh < last2Low AND lastClose < last2Low AND -barDelta > threshold
+
+    Threshold: cumulative mean of |bar delta %| * 2  (auto threshold)
+    Mitigation: bullish → low < FVG.bottom;  bearish → high > FVG.top
     """
     highs = df["high"].values
     lows = df["low"].values
@@ -221,142 +354,216 @@ def find_fair_value_gaps(df: pd.DataFrame) -> List[Dict]:
     opens = df["open"].values
     n = len(df)
 
-    # ATR threshold
-    tr = np.maximum(highs - lows, np.maximum(np.abs(highs - np.roll(closes, 1)), np.abs(lows - np.roll(closes, 1))))
-    atr = pd.Series(tr).rolling(14, min_periods=1).mean().values
-
+    # Cumulative mean range threshold (LuxAlgo auto threshold)
+    cum_abs_delta = 0.0
     fvgs = []
 
     for i in range(2, n):
-        # Bullish FVG: gap up
-        if lows[i] > highs[i - 2]:
-            gap_size = lows[i] - highs[i - 2]
-            if gap_size > 0.5 * atr[i]:  # threshold filter
-                mitigated = False
-                for k in range(i + 1, n):
-                    if lows[k] < highs[i - 2]:
-                        mitigated = True
-                        break
-                fvgs.append({
-                    "bias": BULLISH,
-                    "top": lows[i],
-                    "bottom": highs[i - 2],
-                    "index": i,
-                    "mitigated": mitigated,
-                })
+        # barDeltaPercent = (close[i-1] - open[i-1]) / (open[i-1] * 100)
+        last_close = closes[i - 1]
+        last_open = opens[i - 1]
+        if last_open != 0:
+            bar_delta_pct = (last_close - last_open) / (last_open * 100)
+        else:
+            bar_delta_pct = 0
 
-        # Bearish FVG: gap down
-        if highs[i] < lows[i - 2]:
-            gap_size = lows[i - 2] - highs[i]
-            if gap_size > 0.5 * atr[i]:
-                mitigated = False
-                for k in range(i + 1, n):
-                    if highs[k] > lows[i - 2]:
-                        mitigated = True
-                        break
-                fvgs.append({
-                    "bias": BEARISH,
-                    "top": lows[i - 2],
-                    "bottom": highs[i],
-                    "index": i,
-                    "mitigated": mitigated,
-                })
+        cum_abs_delta += abs(bar_delta_pct)
+        threshold = (cum_abs_delta / (i - 1)) * 2 if i > 1 else 0
+
+        current_low = lows[i]
+        current_high = highs[i]
+        last2_high = highs[i - 2]
+        last2_low = lows[i - 2]
+
+        # Bullish FVG
+        if current_low > last2_high and last_close > last2_high and bar_delta_pct > threshold:
+            mitigated = False
+            for k in range(i + 1, n):
+                if lows[k] < last2_high:  # low < FVG.bottom
+                    mitigated = True
+                    break
+            fvgs.append({
+                "bias": BULLISH,
+                "top": float(current_low),
+                "bottom": float(last2_high),
+                "index": i,
+                "mitigated": mitigated,
+            })
+
+        # Bearish FVG
+        if current_high < last2_low and last_close < last2_low and (-bar_delta_pct) > threshold:
+            mitigated = False
+            for k in range(i + 1, n):
+                if highs[k] > last2_low:  # high > FVG.top
+                    mitigated = True
+                    break
+            fvgs.append({
+                "bias": BEARISH,
+                "top": float(last2_low),
+                "bottom": float(current_high),
+                "index": i,
+                "mitigated": mitigated,
+            })
 
     return fvgs
 
 
-# ─── EQUAL HIGHS / LOWS ─────────────────────────────────────────────────────
+# ─── EQUAL HIGHS / LOWS (exact LuxAlgo) ─────────────────────────────────────
 
-def find_equal_highs_lows(df: pd.DataFrame, size: int = 3, threshold: float = 0.1) -> List[Dict]:
+def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
+                          threshold: float = 0.1) -> List[Dict]:
     """
-    Detect Equal Highs and Equal Lows.
-    Two swing points at approximately the same price level → liquidity pool.
-    """
-    pivoted = find_pivots(df, size)
-    highs = pivoted["high"].values
-    lows = pivoted["low"].values
-    n = len(pivoted)
+    Detect EQH and EQL from consecutive pivots at similar price levels.
 
-    # ATR for threshold
-    tr = np.maximum(highs - lows, np.maximum(np.abs(highs - np.roll(df["close"].values, 1)), np.abs(lows - np.roll(df["close"].values, 1))))
-    atr = pd.Series(tr).rolling(200, min_periods=1).mean().values
+    LuxAlgo: uses separate getCurrentStructure(equalHighsLowsLengthInput, true)
+    with threshold * ATR(200) for comparison.
+
+    Uses pivots already detected (avoids recomputation).
+    """
+    highs = df["high"].values
+    lows = df["low"].values
+    closes = df["close"].values
+    n = len(df)
+
+    # ATR(200)
+    tr = np.zeros(n)
+    tr[0] = highs[0] - lows[0]
+    for i in range(1, n):
+        tr[i] = max(highs[i] - lows[i],
+                     abs(highs[i] - closes[i - 1]),
+                     abs(lows[i] - closes[i - 1]))
+    atr200 = pd.Series(tr).rolling(200, min_periods=1).mean().values
 
     equals = []
 
-    # Collect pivot highs and lows
-    pivot_highs = [(i, highs[i]) for i in range(n) if pivoted["pivot_high"].iloc[i]]
-    pivot_lows = [(i, lows[i]) for i in range(n) if pivoted["pivot_low"].iloc[i]]
+    # Separate pivot highs and lows
+    pivot_highs = [p for p in pivots if p["type"] == "high"]
+    pivot_lows = [p for p in pivots if p["type"] == "low"]
 
-    # Check consecutive pivot highs for equal levels
+    # Consecutive pivot highs
     for j in range(1, len(pivot_highs)):
-        idx_prev, price_prev = pivot_highs[j - 1]
-        idx_curr, price_curr = pivot_highs[j]
-        if atr[idx_curr] > 0 and abs(price_curr - price_prev) < threshold * atr[idx_curr]:
-            equals.append({
-                "type": "EQH",
-                "price": round((price_curr + price_prev) / 2, 8),
-                "index1": idx_prev,
-                "index2": idx_curr,
-            })
+        prev = pivot_highs[j - 1]
+        curr = pivot_highs[j]
+        idx = curr["index"]
+        if idx < n and atr200[idx] > 0:
+            if abs(curr["price"] - prev["price"]) < threshold * atr200[idx]:
+                equals.append({
+                    "type": "EQH",
+                    "price": round((curr["price"] + prev["price"]) / 2, 8),
+                    "index1": prev["index"],
+                    "index2": curr["index"],
+                })
 
-    # Check consecutive pivot lows
+    # Consecutive pivot lows
     for j in range(1, len(pivot_lows)):
-        idx_prev, price_prev = pivot_lows[j - 1]
-        idx_curr, price_curr = pivot_lows[j]
-        if atr[idx_curr] > 0 and abs(price_curr - price_prev) < threshold * atr[idx_curr]:
-            equals.append({
-                "type": "EQL",
-                "price": round((price_curr + price_prev) / 2, 8),
-                "index1": idx_prev,
-                "index2": idx_curr,
-            })
+        prev = pivot_lows[j - 1]
+        curr = pivot_lows[j]
+        idx = curr["index"]
+        if idx < n and atr200[idx] > 0:
+            if abs(curr["price"] - prev["price"]) < threshold * atr200[idx]:
+                equals.append({
+                    "type": "EQL",
+                    "price": round((curr["price"] + prev["price"]) / 2, 8),
+                    "index1": prev["index"],
+                    "index2": curr["index"],
+                })
 
     return equals
 
 
-# ─── PREMIUM / DISCOUNT ZONES ───────────────────────────────────────────────
+# ─── TRAILING EXTREMES + STRONG/WEAK HIGH/LOW (exact LuxAlgo) ───────────────
 
-def get_premium_discount(df: pd.DataFrame, swing_size: int = 50) -> Dict:
+def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
+                              swing_trend: int) -> Dict:
     """
-    Calculate Premium/Discount/Equilibrium zones from trailing swing high/low.
-    Premium = top 5% (overpriced), Discount = bottom 5% (underpriced).
+    Port of LuxAlgo updateTrailingExtremes() + drawHighLowSwings().
+
+    trailing.top    = running max(high) since last swing pivot update
+    trailing.bottom = running min(low)  since last swing pivot update
+
+    Strong/Weak logic:
+    - swingTrend == BEARISH → top is 'Strong High', bottom is 'Weak Low'
+    - swingTrend == BULLISH → top is 'Weak High',   bottom is 'Strong Low'
     """
-    pivoted = find_pivots(df, swing_size)
-    n = len(pivoted)
+    highs = df["high"].values
+    lows = df["low"].values
+    n = len(df)
 
-    # Find the last swing high and swing low
-    trailing_high = df["high"].max()
-    trailing_low = df["low"].min()
+    # Find the last swing pivot (the point where trailing extremes reset)
+    last_swing_idx = 0
+    if swing_pivots:
+        last_swing_idx = max(p["index"] for p in swing_pivots)
 
-    # More precise: track from last significant swing
-    for i in range(n - 1, -1, -1):
-        if pivoted["pivot_high"].iloc[i]:
-            trailing_high = pivoted["high"].iloc[i]
-            break
+    # Track trailing high/low from last swing pivot to end
+    trailing_high = highs[last_swing_idx] if last_swing_idx < n else highs[-1]
+    trailing_low = lows[last_swing_idx] if last_swing_idx < n else lows[-1]
+    trailing_high_idx = last_swing_idx
+    trailing_low_idx = last_swing_idx
 
-    for i in range(n - 1, -1, -1):
-        if pivoted["pivot_low"].iloc[i]:
-            trailing_low = pivoted["low"].iloc[i]
-            break
+    for i in range(last_swing_idx, n):
+        if highs[i] >= trailing_high:
+            trailing_high = highs[i]
+            trailing_high_idx = i
+        if lows[i] <= trailing_low:
+            trailing_low = lows[i]
+            trailing_low_idx = i
 
-    equilibrium = (trailing_high + trailing_low) / 2
-    current_price = df["close"].iloc[-1]
-
-    if trailing_high == trailing_low:
-        zone = "Equilibrium"
-    elif current_price > equilibrium + (trailing_high - equilibrium) * 0.5:
-        zone = "Premium"
-    elif current_price < equilibrium - (equilibrium - trailing_low) * 0.5:
-        zone = "Discount"
+    # Strong/Weak labels (exact LuxAlgo logic)
+    if swing_trend == BEARISH:
+        high_label = "Strong High"
+        low_label = "Weak Low"
+    elif swing_trend == BULLISH:
+        high_label = "Weak High"
+        low_label = "Strong Low"
     else:
-        zone = "Equilibrium"
+        high_label = "High"
+        low_label = "Low"
 
     return {
-        "swing_high": round(trailing_high, 8),
-        "swing_low": round(trailing_low, 8),
+        "trailing_high": float(trailing_high),
+        "trailing_low": float(trailing_low),
+        "trailing_high_index": trailing_high_idx,
+        "trailing_low_index": trailing_low_idx,
+        "high_label": high_label,
+        "low_label": low_label,
+    }
+
+
+# ─── PREMIUM / DISCOUNT ZONES (exact LuxAlgo drawPremiumDiscountZones) ──────
+
+def get_premium_discount(trailing: Dict, current_price: float) -> Dict:
+    """
+    Exact LuxAlgo zones:
+    Premium:     [0.95*high + 0.05*low, high]           (top 5%)
+    Equilibrium: [0.525*low + 0.475*high, 0.525*high + 0.475*low]  (middle ~5%)
+    Discount:    [low, 0.95*low + 0.05*high]             (bottom 5%)
+    """
+    h = trailing["trailing_high"]
+    l = trailing["trailing_low"]
+
+    if h == l:
+        zone = "Equilibrium"
+    else:
+        premium_start = 0.95 * h + 0.05 * l
+        discount_end = 0.95 * l + 0.05 * h
+        eq_top = 0.525 * h + 0.475 * l
+        eq_bottom = 0.525 * l + 0.475 * h
+
+        if current_price >= premium_start:
+            zone = "Premium"
+        elif current_price <= discount_end:
+            zone = "Discount"
+        else:
+            zone = "Equilibrium"
+
+    equilibrium = (h + l) / 2
+
+    return {
+        "swing_high": round(h, 8),
+        "swing_low": round(l, 8),
         "equilibrium": round(equilibrium, 8),
-        "premium_start": round(0.95 * trailing_high + 0.05 * trailing_low, 8),
-        "discount_end": round(0.95 * trailing_low + 0.05 * trailing_high, 8),
+        "premium_start": round(0.95 * h + 0.05 * l, 8),
+        "discount_end": round(0.95 * l + 0.05 * h, 8),
         "current_zone": zone,
         "current_price": round(current_price, 8),
     }
@@ -365,119 +572,195 @@ def get_premium_discount(df: pd.DataFrame, swing_size: int = 50) -> Dict:
 # ─── MAIN ANALYSIS FUNCTION ─────────────────────────────────────────────────
 
 def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
-                internal_size: int = 5, swing_size: int = 50) -> Dict:
+                internal_size: int = 5, swing_size: int = 50,
+                ob_mitigation: str = "highlow") -> Dict:
     """
-    Full SMC analysis on a DataFrame.
-    
-    Returns dict with:
-    - structures: list of BOS/CHoCH events
-    - order_blocks: list of active (unmitigated) OBs
-    - fvgs: list of active FVGs
-    - equal_hl: list of EQH/EQL
-    - zones: premium/discount/equilibrium
-    - summary: formatted text for AI prompt
+    Full SMC analysis — exact LuxAlgo port.
+
+    Pipeline (matches LuxAlgo execution order):
+    1. getCurrentStructure(swingsLengthInput)     → swing pivots
+    2. getCurrentStructure(5, internal=True)       → internal pivots
+    3. getCurrentStructure(eqhlLength, eqhl=True)  → equal highs/lows pivots
+    4. displayStructure(internal=True)             → internal BOS/CHoCH + internal OBs
+    5. displayStructure()                          → swing BOS/CHoCH + swing OBs
+    6. deleteOrderBlocks (mitigation check)
+    7. updateTrailingExtremes + Strong/Weak High/Low
+    8. Premium/Discount zones
+    9. Fair Value Gaps
+
+    Returns dict with all SMC data + formatted text summary.
     """
     if df is None or len(df) < 30:
         return {"summary": f"[{tf_label}] Insufficient data for SMC analysis."}
 
     try:
-        # Ensure numeric types
+        # Ensure numeric and clean
         for col in ["open", "high", "low", "close"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
-        df = df.dropna(subset=["open", "high", "low", "close"])
+        df = df.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
 
         if len(df) < 30:
             return {"summary": f"[{tf_label}] Insufficient data for SMC analysis."}
 
-        # Internal structure (size=5 like LuxAlgo)
-        internal_structures = detect_structure(df, internal_size)
-        # Swing structure (size=50 like LuxAlgo default)
-        swing_structures = detect_structure(df, swing_size)
+        n = len(df)
+        current_price = float(df["close"].iloc[-1])
 
-        # Order blocks from both
-        internal_obs = find_order_blocks(df, internal_structures, max_blocks=5)
-        swing_obs = find_order_blocks(df, swing_structures, max_blocks=3)
+        # ── 1. SWING STRUCTURE ──
+        swing_structures, swing_pivots, swing_trend = detect_structure(
+            df, swing_size, internal=False
+        )
 
-        # Fair value gaps
-        fvgs = find_fair_value_gaps(df)
-        active_fvgs = [f for f in fvgs if not f["mitigated"]]
+        # Get last swing high/low levels for internal confluence filter
+        swing_high_level = None
+        swing_low_level = None
+        for p in reversed(swing_pivots):
+            if p["type"] == "high" and swing_high_level is None:
+                swing_high_level = p["price"]
+            if p["type"] == "low" and swing_low_level is None:
+                swing_low_level = p["price"]
+            if swing_high_level is not None and swing_low_level is not None:
+                break
 
-        # Equal highs/lows
-        equal_hl = find_equal_highs_lows(df, size=3, threshold=0.1)
+        # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
+        internal_structures, internal_pivots, internal_trend = detect_structure(
+            df, internal_size, internal=True,
+            swing_high_level=swing_high_level,
+            swing_low_level=swing_low_level
+        )
 
-        # Premium/Discount zones
-        zones = get_premium_discount(df, swing_size)
+        # ── 3. EQUAL HIGHS / LOWS (using size=3 pivots, like LuxAlgo default) ──
+        eqhl_legs = _compute_legs(df["high"].values, df["low"].values, 3)
+        eqhl_pivots = _detect_pivots_from_legs(
+            df["high"].values, df["low"].values, eqhl_legs, 3
+        )
+        equal_hl = find_equal_highs_lows(df, eqhl_pivots, threshold=0.1)
 
-        # ── BUILD TEXT SUMMARY ──
-        lines = [f"📐 SMC Indicator [{tf_label}]:"]
+        # ── 4-5. ORDER BLOCKS ──
+        internal_obs = find_order_blocks(
+            df, internal_structures, max_blocks=5, mitigation=ob_mitigation
+        )
+        swing_obs = find_order_blocks(
+            df, swing_structures, max_blocks=5, mitigation=ob_mitigation
+        )
 
-        # Bars since last structure
-        all_structures = swing_structures + internal_structures
-        bars_since_last_structure = 0
-        if all_structures:
-            all_structures.sort(key=lambda x: x["break_index"])
-            last_structure = all_structures[-1]
-            bars_since_last_structure = len(df) - 1 - last_structure["break_index"]
-            lines.append(f"Last Structure: {bars_since_last_structure} bars ago")
+        # ── 6. FAIR VALUE GAPS ──
+        all_fvgs = find_fair_value_gaps(df)
+        active_fvgs = [f for f in all_fvgs if not f["mitigated"]]
 
-        # Current trend from last swing structure
+        # ── 7. TRAILING EXTREMES + STRONG/WEAK HIGH/LOW ──
+        trailing = compute_trailing_extremes(df, swing_pivots, swing_trend)
+
+        # ── 8. PREMIUM / DISCOUNT ZONES ──
+        zones = get_premium_discount(trailing, current_price)
+
+        # ── BUILD TEXT SUMMARY FOR AI PROMPT ──
+        lines = [f"📐 SMC [{tf_label}]:"]
+
+        # Swing trend + last structure
         if swing_structures:
-            last_swing = swing_structures[-1]
-            trend_str = "BULLISH" if last_swing["bias"] == BULLISH else "BEARISH"
-            lines.append(f"Trend: {trend_str} (last: {last_swing['type']})")
+            last_swing_s = swing_structures[-1]
+            trend_str = "BULLISH" if last_swing_s["bias"] == BULLISH else "BEARISH"
+            bars_ago = n - 1 - last_swing_s["break_index"]
+            lines.append(f"Swing Trend: {trend_str} (last: {last_swing_s['type']} {bars_ago} bars ago)")
 
         # Internal trend
         if internal_structures:
-            last_internal = internal_structures[-1]
-            int_trend = "BULLISH" if last_internal["bias"] == BULLISH else "BEARISH"
-            lines.append(f"Internal: {int_trend} (last: {last_internal['type']})")
+            last_int_s = internal_structures[-1]
+            int_trend_str = "BULLISH" if last_int_s["bias"] == BULLISH else "BEARISH"
+            int_bars_ago = n - 1 - last_int_s["break_index"]
+            lines.append(f"Internal Trend: {int_trend_str} (last: {last_int_s['type']} {int_bars_ago} bars ago)")
 
-        # Recent structure breaks (last 3)
-        recent_breaks = (swing_structures + internal_structures)
-        recent_breaks.sort(key=lambda x: x["break_index"])
-        for s in recent_breaks[-3:]:
-            bias = "Bull" if s["bias"] == BULLISH else "Bear"
-            lines.append(f"  {s['type']} {bias} @ {s['price']:.6f}")
+        # Trend agreement / divergence
+        if swing_structures and internal_structures:
+            if last_swing_s["bias"] != last_int_s["bias"]:
+                lines.append("⚠️ DIVERGENCE: Swing vs Internal trend disagree!")
 
-        # Active Order Blocks (ranked by distance from current price)
-        current_price = df['close'].iloc[-1]
-        all_obs = swing_obs + internal_obs
+        # Strong/Weak High/Low
+        dist_high = abs(current_price - trailing["trailing_high"]) / current_price * 100
+        dist_low = abs(current_price - trailing["trailing_low"]) / current_price * 100
+        lines.append(
+            f"{trailing['high_label']}: {trailing['trailing_high']:.6f} ({dist_high:.1f}% away) | "
+            f"{trailing['low_label']}: {trailing['trailing_low']:.6f} ({dist_low:.1f}% away)"
+        )
+
+        # Recent structure breaks (last 5 combined, sorted by time)
+        all_structs = []
+        for s in swing_structures:
+            s["_source"] = "Swing"
+            all_structs.append(s)
+        for s in internal_structures:
+            s["_source"] = "Int"
+            all_structs.append(s)
+        all_structs.sort(key=lambda x: x["break_index"])
+
+        if all_structs:
+            lines.append("Recent Structures:")
+            for s in all_structs[-5:]:
+                bias_str = "Bull" if s["bias"] == BULLISH else "Bear"
+                bars = n - 1 - s["break_index"]
+                lines.append(f"  {s['_source']} {s['type']} {bias_str} @ {s['price']:.6f} ({bars} bars ago)")
+
+        # Active Order Blocks (sorted by distance)
+        all_obs = []
+        for ob in swing_obs:
+            ob["_source"] = "Swing"
+            all_obs.append(ob)
+        for ob in internal_obs:
+            ob["_source"] = "Int"
+            all_obs.append(ob)
+
         if all_obs:
-            # Calculate distance from current price
             for ob in all_obs:
-                ob_mid = (ob['high'] + ob['low']) / 2
-                ob['distance_pct'] = abs((current_price - ob_mid) / current_price) * 100
-            
-            # Sort by distance (closest first)
-            all_obs.sort(key=lambda x: x['distance_pct'])
-            
-            lines.append("Order Blocks (by distance):")
-            for ob in all_obs[:5]:  # Show top 5 closest
-                tag = "Bull OB" if ob["bias"] == BULLISH else "Bear OB"
-                source = "Swing" if ob in swing_obs else "Int"
-                lines.append(f"  {source} {tag}: {ob['low']:.6f}-{ob['high']:.6f} ({ob['distance_pct']:.1f}% away)")
+                ob_mid = (ob["high"] + ob["low"]) / 2
+                ob["_distance_pct"] = abs((current_price - ob_mid) / current_price) * 100
+                ob["_side"] = "below" if ob_mid < current_price else "above"
+            all_obs.sort(key=lambda x: x["_distance_pct"])
 
-        # Active FVGs (last 3)
+            lines.append("Order Blocks:")
+            for ob in all_obs[:6]:
+                tag = "🟦 Bull OB" if ob["bias"] == BULLISH else "🟥 Bear OB"
+                lines.append(
+                    f"  {ob['_source']} {tag}: {ob['low']:.6f}-{ob['high']:.6f} "
+                    f"({ob['_distance_pct']:.1f}% {ob['_side']})"
+                )
+
+        # Active FVGs (closest to price)
         if active_fvgs:
-            lines.append("FVG:")
-            for f in active_fvgs[-3:]:
+            for f in active_fvgs:
+                f_mid = (f["top"] + f["bottom"]) / 2
+                f["_distance_pct"] = abs((current_price - f_mid) / current_price) * 100
+            active_fvgs.sort(key=lambda x: x["_distance_pct"])
+
+            lines.append("Fair Value Gaps:")
+            for f in active_fvgs[:4]:
                 tag = "Bull" if f["bias"] == BULLISH else "Bear"
-                lines.append(f"  {tag} FVG: {f['bottom']:.6f}-{f['top']:.6f}")
+                lines.append(
+                    f"  {tag} FVG: {f['bottom']:.6f}-{f['top']:.6f} ({f['_distance_pct']:.1f}% away)"
+                )
 
-        # Equal Highs/Lows (last 2 each)
-        recent_eqh = [e for e in equal_hl if e["type"] == "EQH"][-2:]
-        recent_eql = [e for e in equal_hl if e["type"] == "EQL"][-2:]
-        if recent_eqh or recent_eql:
-            lines.append("Liquidity:")
-            for e in recent_eqh:
-                dist_pct = abs((current_price - e['price']) / current_price) * 100
-                lines.append(f"  EQH @ {e['price']:.6f} ({dist_pct:.1f}% away)")
-            for e in recent_eql:
-                dist_pct = abs((current_price - e['price']) / current_price) * 100
-                lines.append(f"  EQL @ {e['price']:.6f} ({dist_pct:.1f}% away)")
+        # Equal Highs/Lows (closest to price)
+        recent_eqh = [e for e in equal_hl if e["type"] == "EQH"]
+        recent_eql = [e for e in equal_hl if e["type"] == "EQL"]
+        for e in recent_eqh + recent_eql:
+            e["_distance_pct"] = abs((current_price - e["price"]) / current_price) * 100
 
-        # Zones
-        lines.append(f"Zone: {zones['current_zone']} (H:{zones['swing_high']:.6f} L:{zones['swing_low']:.6f} EQ:{zones['equilibrium']:.6f})")
+        eqh_close = sorted(recent_eqh, key=lambda x: x["_distance_pct"])[:2]
+        eql_close = sorted(recent_eql, key=lambda x: x["_distance_pct"])[:2]
+
+        if eqh_close or eql_close:
+            lines.append("Liquidity Pools:")
+            for e in eqh_close:
+                side = "above" if e["price"] > current_price else "below"
+                lines.append(f"  EQH @ {e['price']:.6f} ({e['_distance_pct']:.1f}% {side})")
+            for e in eql_close:
+                side = "above" if e["price"] > current_price else "below"
+                lines.append(f"  EQL @ {e['price']:.6f} ({e['_distance_pct']:.1f}% {side})")
+
+        # Premium/Discount zone
+        lines.append(
+            f"Zone: {zones['current_zone']} "
+            f"(H:{zones['swing_high']:.6f} L:{zones['swing_low']:.6f} EQ:{zones['equilibrium']:.6f})"
+        )
 
         summary = "\n".join(lines)
 
@@ -489,9 +772,14 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             "fvgs": active_fvgs,
             "equal_hl": equal_hl,
             "zones": zones,
+            "trailing": trailing,
+            "swing_trend": swing_trend,
+            "internal_trend": internal_trend,
             "summary": summary,
         }
 
     except Exception as e:
         logging.error(f"❌ SMC analysis error ({tf_label}): {e}")
+        import traceback
+        logging.error(traceback.format_exc())
         return {"summary": f"[{tf_label}] SMC error: {str(e)[:100]}"}
