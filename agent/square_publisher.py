@@ -161,11 +161,15 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 if raw_15m:
                     mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
-                # SMC Indicator (Structure, Order Blocks, FVG)
+                # SMC Indicator (500 candles for proper swing detection)
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
-                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                    raw_smc_4h = await fetch_klines(session, symbol, "4h", 500)
+                    if raw_smc_4h:
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                    else:
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
                     if raw_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
                     if raw_15m:

@@ -391,7 +391,9 @@ def save_monitors(monitors: list):
 
 def add_monitor(symbol: str, tf: str, direction: str, long_pct: float, 
                 short_pct: float, entry_price: float, reason: str,
-                recheck_sec: int = None):
+                recheck_sec: int = None,
+                rsi_4h: float = 0, rsi_1h: float = 0, rsi_15m: float = 0,
+                adx_4h: float = 0):
     """
     Add a signal to the monitor queue.
     
@@ -400,6 +402,14 @@ def add_monitor(symbol: str, tf: str, direction: str, long_pct: float,
     NOT all at once. This prevents API spikes when 100 breakouts happen.
     
     Monitors survive 03:00 trendline redraw — they live for 24h independently.
+    
+    reason types:
+    - "high_rsi"     → monitor RSI only, wait for RSI drop of 15-20 points
+    - "flat_market"  → monitor ADX only, wait for ADX > 20
+    - "low_confidence" → monitor full scorecard, wait for improvement
+    - "pump_15m"     → monitor 15m volatility, wait for calm down
+    
+    Saves initial RSI/ADX values so we can compare on recheck without AI.
     """
     monitors = load_monitors()
     
@@ -416,16 +426,21 @@ def add_monitor(symbol: str, tf: str, direction: str, long_pct: float,
         "long_pct": long_pct,
         "short_pct": short_pct,
         "entry_price": entry_price,
-        "reason": reason,  # "low_confidence" or "flat_market"
+        "reason": reason,
         "added_at": datetime.now(timezone.utc).isoformat(),
         "added_ts": now,
         "next_check_ts": now + (recheck_sec or RECHECK_INTERVAL_SEC),
-        "recheck_sec": recheck_sec or RECHECK_INTERVAL_SEC,  # custom interval per signal
-        "check_count": 0
+        "recheck_sec": recheck_sec or RECHECK_INTERVAL_SEC,
+        "check_count": 0,
+        # Snapshot values for lightweight recheck
+        "initial_rsi_4h": rsi_4h,
+        "initial_rsi_1h": rsi_1h,
+        "initial_rsi_15m": rsi_15m,
+        "initial_adx_4h": adx_4h,
     })
     
     save_monitors(monitors)
-    logging.info(f"🔵 MONITOR added: {symbol} {tf} {direction} ({reason}) — next check in 30min")
+    logging.info(f"🔵 MONITOR added: {symbol} {tf} {direction} ({reason}, RSI4H={rsi_4h:.0f}, ADX={adx_4h:.0f}) — next check in {(recheck_sec or RECHECK_INTERVAL_SEC)//60}min")
 
 
 def get_due_monitors() -> list:
@@ -546,6 +561,129 @@ def get_1d_emergency_warnings(indicators_1d: dict) -> list:
     return warnings
 
 
+async def _quick_rsi_check(session, symbol: str, intervals: list = None) -> dict:
+    """
+    Lightweight RSI-only check for monitors.
+    Fetches only 20 candles per TF (enough for RSI14) instead of 250.
+    Returns: {"4H": rsi_value, "1H": rsi_value, "15m": rsi_value}
+    
+    Cost: 3 tiny kline requests vs 3×250 + full indicator calculation.
+    """
+    import aiohttp
+    import asyncio
+
+    if intervals is None:
+        intervals = [("4h", "4H"), ("1h", "1H"), ("15m", "15m")]
+
+    results = {}
+
+    async def _fetch_rsi(interval_api, tf_label):
+        try:
+            url = (f"https://fapi.binance.com/fapi/v1/klines"
+                   f"?symbol={symbol}&interval={interval_api}&limit=20")
+            async with session.get(url, timeout=10) as resp:
+                if resp.status != 200:
+                    return
+                candles = await resp.json()
+                if not candles or len(candles) < 15:
+                    return
+                closes = [float(c[4]) for c in candles]
+                # RSI(14) calculation
+                deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+                gains = [d if d > 0 else 0 for d in deltas]
+                losses = [-d if d < 0 else 0 for d in deltas]
+                avg_gain = sum(gains[:14]) / 14
+                avg_loss = sum(losses[:14]) / 14
+                for i in range(14, len(deltas)):
+                    avg_gain = (avg_gain * 13 + gains[i]) / 14
+                    avg_loss = (avg_loss * 13 + losses[i]) / 14
+                if avg_loss == 0:
+                    rsi = 100.0
+                else:
+                    rs = avg_gain / avg_loss
+                    rsi = 100 - (100 / (1 + rs))
+                results[tf_label] = round(rsi, 1)
+        except Exception:
+            pass
+
+    tasks = [_fetch_rsi(api, label) for api, label in intervals]
+    await asyncio.gather(*tasks)
+    return results
+
+
+async def _quick_adx_check(session, symbol: str, interval: str = "4h") -> float:
+    """
+    Lightweight ADX-only check for monitors.
+    Fetches 30 candles (enough for ADX14).
+    Returns: ADX value or 0 on error.
+    """
+    try:
+        url = (f"https://fapi.binance.com/fapi/v1/klines"
+               f"?symbol={symbol}&interval={interval}&limit=30")
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                return 0
+            candles = await resp.json()
+            if not candles or len(candles) < 20:
+                return 0
+            highs = [float(c[2]) for c in candles]
+            lows = [float(c[3]) for c in candles]
+            closes = [float(c[4]) for c in candles]
+            
+            # True Range
+            tr_list = [highs[0] - lows[0]]
+            for i in range(1, len(candles)):
+                tr_list.append(max(
+                    highs[i] - lows[i],
+                    abs(highs[i] - closes[i-1]),
+                    abs(lows[i] - closes[i-1])
+                ))
+            
+            # +DM, -DM
+            plus_dm = [0.0]
+            minus_dm = [0.0]
+            for i in range(1, len(candles)):
+                up = highs[i] - highs[i-1]
+                down = lows[i-1] - lows[i]
+                plus_dm.append(up if up > down and up > 0 else 0)
+                minus_dm.append(down if down > up and down > 0 else 0)
+            
+            # Smoothed (Wilder, period 14)
+            period = 14
+            if len(tr_list) < period + 1:
+                return 0
+            atr = sum(tr_list[1:period+1]) / period
+            plus_di_smooth = sum(plus_dm[1:period+1]) / period
+            minus_di_smooth = sum(minus_dm[1:period+1]) / period
+            
+            dx_list = []
+            for i in range(period + 1, len(tr_list)):
+                atr = (atr * (period - 1) + tr_list[i]) / period
+                plus_di_smooth = (plus_di_smooth * (period - 1) + plus_dm[i]) / period
+                minus_di_smooth = (minus_di_smooth * (period - 1) + minus_dm[i]) / period
+                
+                if atr > 0:
+                    plus_di = (plus_di_smooth / atr) * 100
+                    minus_di = (minus_di_smooth / atr) * 100
+                else:
+                    plus_di = minus_di = 0
+                
+                di_sum = plus_di + minus_di
+                if di_sum > 0:
+                    dx_list.append(abs(plus_di - minus_di) / di_sum * 100)
+            
+            if len(dx_list) < period:
+                return sum(dx_list) / len(dx_list) if dx_list else 0
+            
+            adx = sum(dx_list[:period]) / period
+            for i in range(period, len(dx_list)):
+                adx = (adx * (period - 1) + dx_list[i]) / period
+            
+            return round(adx, 1)
+    except Exception:
+        return 0
+
+
 def _scorecard_looks_promising(indicators: dict, mtf_data: dict = None) -> tuple:
     """
     Quick indicator-only check: does the scorecard suggest improvement?
@@ -600,16 +738,20 @@ async def monitor_recheck_loop(session):
     """
     Background loop: every 60s checks if any monitors are due for re-analysis.
     
-    TWO-PHASE CHECK (saves API):
-    Phase 1: Indicators only (FREE) — fetch klines, calculate scorecard bull/bear %.
-             If scorecard doesn't look promising → skip AI, wait for next interval.
-    Phase 2: AI verdict (COSTS API) — only called when indicators show improvement.
-             If AI confirms FULL → send full signal with chart to group.
+    SMART TWO-PHASE CHECK (saves API + bandwidth):
     
-    This means 50 monitors = 50 kline fetches (free) but only 2-5 AI calls (only promising ones).
+    Phase 1 — LIGHTWEIGHT (reason-specific, ~20 candles per TF):
+      - high_rsi:       fetch RSI only (20 candles × 3 TFs). Check if RSI dropped 15-20 pts.
+      - flat_market:    fetch ADX only (30 candles × 1 TF). Check if ADX > 20.
+      - pump_15m:       fetch 15m close only (5 candles). Check if volatility calmed.
+      - low_confidence: fetch RSI + ADX lightweight. Check basic improvement.
+      If condition NOT improved → update timer, move on. NO full indicators, NO AI.
     
-    Each monitor has its OWN timer (staggered, not all at once).
-    Monitors live 24h, independent of 03:00 trendline redraw.
+    Phase 2 — FULL (only when Phase 1 passes):
+      Load full 250 candles, all indicators, funding, positioning, SMC (500 candles).
+      Call AI for verdict. If FULL → send signal with chart.
+    
+    This means 50 monitors = 50 tiny fetches (3-5 KB each) but only 2-5 full loads + AI calls.
     """
     import asyncio
     import aiohttp
@@ -626,7 +768,7 @@ async def monitor_recheck_loop(session):
                          OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR,
                          add_breakout_entry, upgrade_breakout_entry, add_monitor_breakout_entry, parse_ai_trade_params)
 
-    logging.info("🔄 Monitor recheck loop started (two-phase: indicators → AI)")
+    logging.info("🔄 Monitor recheck loop started (smart two-phase: lightweight → full + AI)")
 
     while True:
         try:
@@ -644,20 +786,92 @@ async def monitor_recheck_loop(session):
                     sym = m["symbol"]
                     tf = m["tf"]
                     interval = '1d' if tf == "1D" else '4h'
+                    reason = m.get("reason", "low_confidence")
 
-                    # === PHASE 1: INDICATORS ONLY (free, no API cost) ===
-                    # Fetch 4H + 1H + 15m in parallel for weighted scorecard
-                    phase1_tasks = [
+                    # ═══════════════════════════════════════════════════════
+                    # PHASE 1: LIGHTWEIGHT CHECK (reason-specific, no AI)
+                    # ═══════════════════════════════════════════════════════
+                    phase1_pass = False
+
+                    if reason == "high_rsi":
+                        # Only fetch RSI (20 candles × 3 TFs)
+                        rsi_now = await _quick_rsi_check(session, sym)
+                        rsi_4h_now = rsi_now.get("4H", 99)
+                        rsi_1h_now = rsi_now.get("1H", 99)
+                        initial_rsi = m.get("initial_rsi_4h", 99)
+                        rsi_drop = initial_rsi - rsi_4h_now
+
+                        if rsi_drop >= 15:
+                            phase1_pass = True
+                            logging.info(f"🔵 MONITOR RSI improved: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (dropped {rsi_drop:.0f} pts) → Phase 2")
+                        else:
+                            logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{15-rsi_drop:.0f} more)")
+
+                    elif reason == "flat_market":
+                        # Only fetch ADX (30 candles × 1 TF)
+                        adx_now = await _quick_adx_check(session, sym, interval)
+                        initial_adx = m.get("initial_adx_4h", 0)
+
+                        if adx_now >= ADX_TRENDING:
+                            phase1_pass = True
+                            logging.info(f"🔵 MONITOR ADX improved: {sym} ADX {initial_adx:.0f}→{adx_now:.0f} (≥{ADX_TRENDING}) → Phase 2")
+                        else:
+                            logging.info(f"🔵 MONITOR ADX still flat: {sym} ADX {initial_adx:.0f}→{adx_now:.0f} (need ≥{ADX_TRENDING})")
+
+                    elif reason == "pump_15m":
+                        # Check if 15m volatility calmed down
+                        try:
+                            url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=15m&limit=5"
+                            async with session.get(url, timeout=10) as resp:
+                                if resp.status == 200:
+                                    candles = await resp.json()
+                                    if candles and len(candles) >= 2:
+                                        last_open = float(candles[-1][1])
+                                        last_close = float(candles[-1][4])
+                                        change_pct = abs((last_close - last_open) / last_open * 100) if last_open > 0 else 0
+                                        if change_pct < 5:
+                                            phase1_pass = True
+                                            logging.info(f"🔵 MONITOR 15m calmed: {sym} candle {change_pct:.1f}% (<5%) → Phase 2")
+                                        else:
+                                            logging.info(f"🔵 MONITOR 15m still volatile: {sym} candle {change_pct:.1f}%")
+                        except Exception:
+                            pass
+
+                    else:  # "low_confidence" or unknown
+                        # Lightweight: check RSI + ADX together
+                        rsi_now = await _quick_rsi_check(session, sym)
+                        adx_now = await _quick_adx_check(session, sym, interval)
+                        rsi_4h_now = rsi_now.get("4H", 50)
+
+                        # Pass if: RSI not extreme AND ADX shows trend
+                        if 30 < rsi_4h_now < 75 and adx_now >= 18:
+                            phase1_pass = True
+                            logging.info(f"🔵 MONITOR conditions improved: {sym} RSI={rsi_4h_now:.0f} ADX={adx_now:.0f} → Phase 2")
+                        else:
+                            logging.info(f"🔵 MONITOR still weak: {sym} RSI={rsi_4h_now:.0f} ADX={adx_now:.0f}")
+
+                    if not phase1_pass:
+                        update_monitor_checked(m["key"])
+                        await asyncio.sleep(0.5)
+                        continue
+
+                    # ═══════════════════════════════════════════════════════
+                    # PHASE 2: FULL ANALYSIS + AI (only reached when improved)
+                    # ═══════════════════════════════════════════════════════
+                    logging.info(f"🔍 MONITOR → FULL analysis + AI: {sym} (was {reason})")
+
+                    # Full kline fetch (250 for indicators, chart stays 199)
+                    phase2_tasks = [
                         fetch_klines(session, sym, interval, 250),
                         fetch_klines(session, sym, "1h", 250),
                         fetch_klines(session, sym, "15m", 250),
                     ]
-                    phase1_results = await asyncio.gather(*phase1_tasks, return_exceptions=True)
-                    
-                    raw = phase1_results[0] if not isinstance(phase1_results[0], Exception) else None
-                    raw_1h = phase1_results[1] if not isinstance(phase1_results[1], Exception) else None
-                    raw_15m = phase1_results[2] if not isinstance(phase1_results[2], Exception) else None
-                    
+                    phase2_results = await asyncio.gather(*phase2_tasks, return_exceptions=True)
+
+                    raw = phase2_results[0] if not isinstance(phase2_results[0], Exception) else None
+                    raw_1h = phase2_results[1] if not isinstance(phase2_results[1], Exception) else None
+                    raw_15m = phase2_results[2] if not isinstance(phase2_results[2], Exception) else None
+
                     if not raw:
                         update_monitor_checked(m["key"])
                         continue
@@ -665,31 +879,22 @@ async def monitor_recheck_loop(session):
                     df = pd.DataFrame(raw)
                     indicators, _ = calculate_binance_indicators(df, tf)
 
-                    # MTF indicators for weighted scorecard (4H=50%, 1H=30%, 15m=20%)
                     mtf_data = {}
                     if raw_1h:
                         mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
                     if raw_15m:
                         mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
-                    # Check scorecard WITHOUT AI
-                    promising, bull_pct, adx_val, reason = _scorecard_looks_promising(indicators, mtf_data)
-
+                    # Double-check with full scorecard (belt and suspenders)
+                    promising, bull_pct, adx_val, sc_reason = _scorecard_looks_promising(indicators, mtf_data)
                     if not promising:
-                        # Not worth AI call — just update timer and move on
                         update_monitor_checked(m["key"])
-                        logging.info(f"🔵 MONITOR skip AI: {sym} (bull {bull_pct:.0f}%, ADX {adx_val:.0f}, {reason})")
-                        await asyncio.sleep(1)  # tiny delay between kline fetches
+                        logging.info(f"🔵 MONITOR scorecard still weak after Phase 1 pass: {sym} (bull {bull_pct:.0f}%, ADX {adx_val:.0f})")
+                        await asyncio.sleep(1)
                         continue
 
-                    # === PHASE 2: AI VERDICT (only for promising coins) ===
-                    logging.info(f"🔍 MONITOR → AI check: {sym} (bull {bull_pct:.0f}%, ADX {adx_val:.0f}, {reason})")
-
-                    # Fetch full MTF + SMC for proper AI analysis
+                    # Fetch funding + positioning
                     try:
-                        raw_15m = await fetch_klines(session, sym, "15m", 250)
-                        if raw_15m:
-                            mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
                         funding = await fetch_funding_history(session, sym)
                         indicators["funding_rate"] = funding
                         positioning = await fetch_market_positioning(session, sym)
@@ -699,11 +904,10 @@ async def monitor_recheck_loop(session):
 
                     from core.tg_listener import get_chat_lang
                     _lang = get_chat_lang(GROUP_CHAT_ID)
-                    # Use separate monitor API key if configured (parallel AI, no rate conflict)
                     _mon_key = OPENROUTER_API_KEY_MONITOR or None
                     _mon_model = OPENROUTER_MODEL_MONITOR or None
 
-                    # === 1D EMERGENCY CHECK (macro risk) ===
+                    # 1D emergency check
                     emergency_warnings = []
                     try:
                         raw_1d = await fetch_klines(session, sym, "1d", 250)
@@ -716,9 +920,24 @@ async def monitor_recheck_loop(session):
                     except Exception as e:
                         logging.error(f"❌ 1D emergency check failed for {sym}: {e}")
 
-                    # Single AI call: mode="scan" for full multi-TF verdict (no double call)
+                    # SMC analysis (500 candles for proper swing detection)
+                    smc_data = {}
+                    try:
+                        from core.smc import analyze_smc
+                        raw_smc = await fetch_klines(session, sym, interval, 500)
+                        if raw_smc:
+                            smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc), tf)
+                        if raw_1h:
+                            smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                        if raw_15m:
+                            smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                    except Exception as e:
+                        logging.error(f"❌ Monitor SMC error {sym}: {e}")
+
+                    # AI call
                     ai_text = await ask_ai_analysis(
                         sym, tf, indicators, mode="scan", lang=_lang, mtf_data=mtf_data,
+                        smc_data=smc_data,
                         api_key_override=_mon_key, model_override=_mon_model
                     )
                     ai_calls += 1

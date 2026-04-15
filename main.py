@@ -369,7 +369,12 @@ async def main():
                             smc_data = {}
                             try:
                                 from core.smc import analyze_smc
-                                smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf)
+                                # SMC needs 500 candles for proper swing detection (size=50)
+                                raw_smc_main = await fetch_klines(http_session, sym, interval_fetch, 500)
+                                if raw_smc_main:
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf)
+                                else:
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf)
                                 if raw_4h and tf == "1D":
                                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
                                 if raw_1h:
@@ -551,10 +556,28 @@ async def main():
 
                         if tier == "monitor" and not ai_has_error:
                             # 🔵 MONITOR — add to monitor queue + send full signal to monitor group
-                            reason = "flat_market" if adx_value < 20 else "low_confidence"
+                            # Determine specific reason for smart lightweight recheck
+                            _rsi_4h = last_indic_row.get("rsi14", 50)
+                            _rsi_1h = item.get("mtf_data", {}).get("1H", {}).get("rsi14", 50)
+                            _rsi_15m = item.get("mtf_data", {}).get("15m", {}).get("rsi14", 50)
+                            _adx = adx_value
+
+                            # Check 15m pump first (most specific)
+                            _change_15m = item.get("mtf_data", {}).get("15m", {}).get("change_recent", 0)
+                            if abs(_change_15m) > 10:
+                                reason = "pump_15m"
+                            elif _rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80):
+                                reason = "high_rsi"
+                            elif _adx < 20:
+                                reason = "flat_market"
+                            else:
+                                reason = "low_confidence"
+
                             direction = "LONG" if long_pct > short_pct else "SHORT"
                             add_monitor(sym, tf, direction, long_pct, short_pct,
-                                       item["current_price"], reason)
+                                       item["current_price"], reason,
+                                       rsi_4h=_rsi_4h, rsi_1h=_rsi_1h, rsi_15m=_rsi_15m,
+                                       adx_4h=_adx)
                             logging.info(f"🔵 MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
 
                             # Send full breakout with SKIP verdict to MAIN group (all breakouts go to main)

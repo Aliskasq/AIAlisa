@@ -1456,9 +1456,16 @@ async def handle_message(app_session, update):
             from core.smc import analyze_smc
             smc_data = {}
             try:
-                if raw_df_1d:
+                # SMC needs 500 candles for proper swing structure (size=50)
+                raw_smc_1d = await fetch_klines(app_session, symbol, "1d", 500) if raw_df_1d else None
+                raw_smc_4h = await fetch_klines(app_session, symbol, "4h", 500) if raw_df_4h else None
+                if raw_smc_1d:
+                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D")
+                elif raw_df_1d:
                     smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D")
-                if raw_df_4h:
+                if raw_smc_4h:
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                elif raw_df_4h:
                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H")
                 if raw_df_1h:
                     smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H")
@@ -1632,9 +1639,16 @@ async def handle_message(app_session, update):
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
-                    if raw_1d:
+                    # SMC needs 500 candles for proper swing structure
+                    raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 500) if raw_1d else None
+                    raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 500) if raw_4h else None
+                    if raw_smc_1d:
+                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D")
+                    elif raw_1d:
                         smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D")
-                    if raw_4h:
+                    if raw_smc_4h:
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                    elif raw_4h:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
                     if raw_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
