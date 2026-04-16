@@ -462,6 +462,7 @@ async def handle_message(app_session, update):
             if 0 <= new_h < 24 and 0 <= new_m < 60:
                 SCAN_SCHEDULE["hour"] = new_h
                 SCAN_SCHEDULE["minute"] = new_m
+                SCAN_SCHEDULE["force_rescan"] = True
                 _save_scan_schedule()
                 msg_text = f"✅ Global scan time successfully changed to *{new_h:02d}:{new_m:02d}* (UTC+3)"
             else:

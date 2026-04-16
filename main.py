@@ -162,7 +162,8 @@ async def main():
             # BLOCK 1: GLOBAL RECALCULATION (1D, 4H)
             # =========================================================
             # Dynamic launch time controlled via Telegram /time command
-            if last_full_calc_date != now_msk.date() and now_msk.hour == SCAN_SCHEDULE["hour"] and now_msk.minute == SCAN_SCHEDULE["minute"]:
+            force_rescan = SCAN_SCHEDULE.pop("force_rescan", False)
+            if (last_full_calc_date != now_msk.date() or force_rescan) and now_msk.hour == SCAN_SCHEDULE["hour"] and now_msk.minute == SCAN_SCHEDULE["minute"]:
                 await asyncio.sleep(2)
                 clear_breakout_log()
                 logging.info("🚀 STARTING GLOBAL GEOMETRIC ANALYSIS AND DRAWING (1D, 4H)...")
@@ -727,22 +728,28 @@ async def main():
             vol_waitlist = get_volume_waitlist()
             if vol_waitlist:
                 logging.info(f"📊 Volume waitlist: rechecking {len(vol_waitlist)} coins")
-                for vw in vol_waitlist:
-                    try:
-                        vol_result = await check_volume_pass(session, vw["symbol"])
-                        if vol_result["pass"]:
-                            remove_from_volume_waitlist(vw["key"])
-                            logging.info(f"📊✅ VOL PASS: {vw['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
-                            # Re-add alert so next cycle picks it up for AI processing
-                            alerts = load_alerts()
-                            if vw.get("alert") and vw["alert"] not in alerts:
-                                alerts.append(vw["alert"])
-                                save_alerts(alerts)
-                        else:
-                            logging.info(f"📊 VOL WAIT: {vw['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                batch_size = 30
+                for batch_start in range(0, len(vol_waitlist), batch_size):
+                    batch = vol_waitlist[batch_start:batch_start + batch_size]
+
+                    async def _check_one_vw(vw_item):
+                        try:
+                            vol_result = await check_volume_pass(session, vw_item["symbol"])
+                            if vol_result["pass"]:
+                                remove_from_volume_waitlist(vw_item["key"])
+                                logging.info(f"📊✅ VOL PASS: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
+                                alerts = load_alerts()
+                                if vw_item.get("alert") and vw_item["alert"] not in alerts:
+                                    alerts.append(vw_item["alert"])
+                                    save_alerts(alerts)
+                            else:
+                                logging.info(f"📊 VOL WAIT: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                        except Exception as e:
+                            logging.error(f"❌ Vol waitlist recheck {vw_item.get('symbol', '?')}: {e}")
+
+                    await asyncio.gather(*[_check_one_vw(vw) for vw in batch])
+                    if batch_start + batch_size < len(vol_waitlist):
                         await asyncio.sleep(1)
-                    except Exception as e:
-                        logging.error(f"❌ Vol waitlist recheck {vw.get('symbol', '?')}: {e}")
 
             # Cleanup volume waitlist at 23:58 UTC (full rescan at 00:00)
             if now_utc.hour == 23 and now_utc.minute == 58:
