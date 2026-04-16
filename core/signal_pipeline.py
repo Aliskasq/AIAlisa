@@ -20,7 +20,7 @@ RECHECK_INTERVAL_SEC = 1800  # 30 minutes from each signal's OWN detection time
 MAX_MONITOR_HOURS = 24  # expire signal monitors after 24h
 
 # --- Confidence threshold ---
-CONFIDENCE_FULL = 65      # % to issue full signal
+CONFIDENCE_FULL = 60      # % to issue full signal (consensus across TFs can go as low as 60%)
 ADX_TRENDING = 20         # minimum ADX for trending market
 
 # --- Fixed risk params ---

@@ -271,7 +271,7 @@ RISK: [1 sentence — main risk to watch]
 
 Rules:
 - Weights: 4H=50%, 1H=30%, 15m=20%. 1D is context-only (risk warnings like overbought RSI) — do NOT include 1D in the weighted score.
-- If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
+- If ALL TFs agree and Overall ≥ 60% → SIGNAL. If TFs conflict and overriding TFs < 65% → SKIP. If ADX<20 → SKIP (FLAT).
 - Leverage: always 1x. Deposit: always 2%.
 - Do NOT assume direction from indicators alone. When 8+ indicators are bullish, ACTIVELY look for exhaustion signals:
   * RSI > 70 on ANY timeframe = potential reversal, consider SHORT or SKIP
@@ -299,7 +299,7 @@ FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик.
 
 Правила:
 - Веса: 4H=50%, 1H=30%, 15m=20%. 1D — только контекст (предупреждения о рисках, перекупленность RSI) — НЕ включай 1D в взвешенный счёт.
-- Если оба ниже 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
+- Если ВСЕ таймфреймы согласны и Overall ≥ 60% → СИГНАЛ. Если таймфреймы конфликтуют и перевешивающие < 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
 - Плечо: всегда 1x. Депозит: всегда 2%.
 - НЕ следуй за большинством индикаторов слепо. Когда 8+ индикаторов бычьи, АКТИВНО ищи сигналы истощения:
   * RSI > 70 на ЛЮБОМ таймфрейме = потенциальный разворот, рассмотри ШОРТ или ПРОПУСК
@@ -371,18 +371,17 @@ def _has_placeholder_percentages(text: str) -> bool:
 
 
 def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: dict = None, tf_key: str = "4H") -> str:
-    """Replace literal X%/Y% placeholders in AI response with real scorecard percentages.
+    """Fix percentages in AI response: replace placeholders, enforce weighted average, apply consensus rules.
     
     Extracts LONG/SHORT % from format_tf_summary scorecard for each TF,
-    then substitutes them into the AI text.
+    then substitutes them into the AI text and enforces verdict consensus.
     """
     import re
     from core.indicators import format_tf_summary
 
-    if not _has_placeholder_percentages(text):
-        return text
-
-    logging.warning("⚠️ AI returned literal X%/Y% placeholders — substituting from scorecard")
+    has_placeholders = _has_placeholder_percentages(text)
+    if has_placeholders:
+        logging.warning("⚠️ AI returned literal X%/Y% placeholders — substituting from scorecard")
 
     # Collect scorecard percentages per TF
     tf_pcts = {}
@@ -405,16 +404,15 @@ def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: d
     if not tf_pcts:
         return text
 
-    # Replace per-TF placeholders: "⏱ 4H: LONG X% / SHORT Y%" → "⏱ 4H: LONG 72% / SHORT 28%"
-    # Also handle Russian variants: ДЛГО/КОРОТКО, ЛОНГ/ШОРТ
-    for tf_label, (long_pct, short_pct) in tf_pcts.items():
-        for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
-            # Pattern: TF label followed by LONG X% / SHORT Y%
-            pattern = rf'(⏱\s*{re.escape(tf_label)}[:\s]*){long_word}\s+X%\s*/\s*{short_word}\s+Y%'
-            replacement = rf'\g<1>{long_word} {long_pct}% / {short_word} {short_pct}%'
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # Replace per-TF placeholders (only if AI used literal X%/Y%)
+    if has_placeholders:
+        for tf_label, (long_pct, short_pct) in tf_pcts.items():
+            for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
+                pattern = rf'(⏱\s*{re.escape(tf_label)}[:\s]*){long_word}\s+X%\s*/\s*{short_word}\s+Y%'
+                replacement = rf'\g<1>{long_word} {long_pct}% / {short_word} {short_pct}%'
+                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
-    # Replace "Overall" / "Общий" line placeholder
+    # Always fix Overall line and enforce consensus (even when AI used real numbers)
     if tf_pcts:
         # Weighted average: 4H=50%, 1H=30%, 15m=20% (1D is context-only, not a voting TF)
         weights = {"4H": 0.50, "1H": 0.30, "15m": 0.20}
@@ -444,6 +442,125 @@ def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: d
                     pattern_wv = rf'((?:Weighted verdict|Взвешенный вердикт)[:\s]*){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
                     replacement_wv = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
                     text = re.sub(pattern_wv, replacement_wv, text, flags=re.IGNORECASE)
+
+    # --- Enforce consensus-based verdict rules ---
+    if tf_pcts and total_w > 0:
+        text = _enforce_verdict_consensus(text, tf_pcts, overall_long, overall_short)
+
+    return text
+
+
+def _enforce_verdict_consensus(text: str, tf_pcts: dict, overall_long: int, overall_short: int) -> str:
+    """Override AI verdict based on timeframe consensus rules.
+    
+    Rules:
+    1. ALL TFs agree on direction + overall ≥ 60% → SIGNAL (not SKIP)
+    2. Conflict: 4H disagrees but 1H+15m both ≥ 65% → follow 1H+15m (4H may lag)
+    3. Conflict: 4H disagrees, 1H+15m only ~60% → SKIP (not enough conviction)
+    4. Conflict: 1H disagrees but 4H+15m both ≥ 65% → follow 4H+15m
+    5. Overall < 60% → SKIP regardless
+    """
+    import re
+
+    voting_tfs = {tf: pcts for tf, pcts in tf_pcts.items() if tf in ("4H", "1H", "15m")}
+    if len(voting_tfs) < 2:
+        return text  # Not enough data to enforce rules
+
+    # Direction per TF: True = LONG, False = SHORT
+    tf_dirs = {}
+    for tf, (lp, sp) in voting_tfs.items():
+        tf_dirs[tf] = lp > sp  # True = LONG
+
+    # Determine correct verdict
+    dir_4h = tf_dirs.get("4H")
+    dir_1h = tf_dirs.get("1H")
+    dir_15m = tf_dirs.get("15m")
+    pct_4h = voting_tfs.get("4H", (50, 50))
+    pct_1h = voting_tfs.get("1H", (50, 50))
+    pct_15m = voting_tfs.get("15m", (50, 50))
+
+    def strength(pcts, is_long):
+        """Get confidence % in the dominant direction."""
+        return pcts[0] if is_long else pcts[1]
+
+    correct_verdict = None  # None = don't override
+
+    all_same = (dir_4h is not None and dir_1h is not None and dir_15m is not None
+                and dir_4h == dir_1h == dir_15m)
+
+    if all_same:
+        # Rule 1: All agree — 60% is enough
+        if overall_long >= 60 or overall_short >= 60:
+            correct_verdict = "LONG" if dir_4h else "SHORT"
+        else:
+            correct_verdict = "SKIP"
+    elif dir_4h is not None and dir_1h is not None and dir_15m is not None:
+        # Conflict between TFs
+        if dir_1h == dir_15m and dir_1h != dir_4h:
+            # 4H disagrees with 1H+15m — check if 1H+15m are strong enough
+            s_1h = strength(pct_1h, dir_1h)
+            s_15m = strength(pct_15m, dir_15m)
+            if s_1h >= 65 and s_15m >= 65:
+                # Rule 2: 1H+15m override 4H (strong conviction on both)
+                correct_verdict = "LONG" if dir_1h else "SHORT"
+            else:
+                # Rule 3: not strong enough to override 4H
+                correct_verdict = "SKIP"
+        elif dir_4h == dir_15m and dir_4h != dir_1h:
+            # 1H disagrees with 4H+15m
+            s_4h = strength(pct_4h, dir_4h)
+            s_15m = strength(pct_15m, dir_15m)
+            if s_4h >= 65 and s_15m >= 65:
+                # Rule 4: 4H+15m override 1H
+                correct_verdict = "LONG" if dir_4h else "SHORT"
+            else:
+                correct_verdict = "SKIP"
+        elif dir_4h == dir_1h and dir_4h != dir_15m:
+            # 15m disagrees with 4H+1H
+            s_4h = strength(pct_4h, dir_4h)
+            s_1h = strength(pct_1h, dir_1h)
+            if s_4h >= 65 and s_1h >= 65:
+                correct_verdict = "LONG" if dir_4h else "SHORT"
+            else:
+                correct_verdict = "SKIP"
+
+    if correct_verdict is None:
+        return text
+
+    # Check what AI currently has
+    current_m = re.search(r'(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК|MONITOR|МОНИТОРИНГ)',
+                          text, re.IGNORECASE)
+    if not current_m:
+        return text
+
+    current = current_m.group(1).upper()
+    # Normalize Russian
+    current_norm = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP", "МОНИТОРИНГ": "MONITOR"}.get(current, current)
+
+    if correct_verdict == "SKIP" and current_norm in ("LONG", "SHORT"):
+        # AI gave signal but consensus says SKIP — override
+        logging.info(f"⚠️ Verdict override: AI said {current_norm} but TF consensus → SKIP")
+        text = re.sub(
+            r'((?:VERDICT|ВЕРДИКТ)[:\s]*)(?:LONG|SHORT|ЛОНГ|ШОРТ)',
+            rf'\g<1>SKIP',
+            text, count=1, flags=re.IGNORECASE
+        )
+    elif correct_verdict in ("LONG", "SHORT") and current_norm in ("SKIP", "MONITOR"):
+        # AI said SKIP/MONITOR but consensus says signal — override
+        logging.info(f"⚠️ Verdict override: AI said {current_norm} but TF consensus → {correct_verdict}")
+        text = re.sub(
+            r'((?:VERDICT|ВЕРДИКТ)[:\s]*)(?:SKIP|ПРОПУСК|MONITOR|МОНИТОРИНГ)(?:\s*\([^)]*\))?',
+            rf'\g<1>{correct_verdict}',
+            text, count=1, flags=re.IGNORECASE
+        )
+    elif correct_verdict in ("LONG", "SHORT") and current_norm in ("LONG", "SHORT") and correct_verdict != current_norm:
+        # AI got direction wrong — override
+        logging.info(f"⚠️ Verdict override: AI said {current_norm} but TF consensus → {correct_verdict}")
+        text = re.sub(
+            r'((?:VERDICT|ВЕРДИКТ)[:\s]*)(?:LONG|SHORT|ЛОНГ|ШОРТ)',
+            rf'\g<1>{correct_verdict}',
+            text, count=1, flags=re.IGNORECASE
+        )
 
     return text
 
@@ -792,7 +909,11 @@ CRITICAL — REAL NUMBERS ONLY:
 - If you output "X%" or "Y%" literally, your response will be REJECTED.
 
 SKIP RULES:
-- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- CONSENSUS CHECK: Look at each TF direction (LONG or SHORT majority) separately:
+  * ALL 3 TFs (4H, 1H, 15m) agree on direction AND Overall ≥ 60% → SIGNAL (not SKIP)
+  * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
+  * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
+  * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
 - If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
 - SKIP signals go to hourly monitoring and may upgrade later
 """
@@ -886,7 +1007,11 @@ CRITICAL — REAL NUMBERS ONLY:
 - If you output "X%" or "Y%" literally, your response will be REJECTED.
 
 SKIP RULES:
-- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- CONSENSUS CHECK: Look at each TF direction (LONG or SHORT majority) separately:
+  * ALL 3 TFs (4H, 1H, 15m) agree on direction AND Overall ≥ 60% → SIGNAL (not SKIP)
+  * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
+  * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
+  * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
 - If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
 - SKIP signals go to hourly monitoring and may upgrade later
 """
@@ -953,7 +1078,11 @@ CRITICAL — REAL NUMBERS ONLY:
 - If you output "X%" or "Y%" literally, your response will be REJECTED.
 
 SKIP RULES:
-- If Overall LONG% and SHORT% are both below 65%, set VERDICT: SKIP (LONG X% / SHORT Y%)
+- CONSENSUS CHECK: Look at each TF direction (LONG or SHORT majority) separately:
+  * ALL 3 TFs (4H, 1H, 15m) agree on direction AND Overall ≥ 60% → SIGNAL (not SKIP)
+  * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
+  * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
+  * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
 - If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
 - SKIP signals go to hourly monitoring and may upgrade later
 """
