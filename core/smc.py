@@ -810,7 +810,7 @@ def score_smc(smc_data: dict, current_price: float) -> dict:
     if swing_structs:
         last_swing = swing_structs[-1]
         swing_type = last_swing.get("type", "")  # "BOS" or "CHoCH"
-        swing_bias = last_swing.get("bias", "")   # "Bullish" or "Bearish"
+        swing_bias = last_swing.get("bias", 0)
         bars_since = last_swing.get("bars_since", 999)
 
         # Freshness multiplier
@@ -821,13 +821,13 @@ def score_smc(smc_data: dict, current_price: float) -> dict:
         else:
             fresh_mult = 0.3
 
-        base_pts = 3 if "CHoCH" in swing_type else 2
+        base_pts = 3 if "CHoCH" in str(swing_type) else 2
 
-        if "Bullish" in swing_bias or "bullish" in swing_bias:
+        if swing_bias == BULLISH:
             pts = round(base_pts * fresh_mult, 1)
             long_pts += pts
             details.append(f"Swing {swing_type} Bullish ({bars_since}b ago) → LONG +{pts}")
-        elif "Bearish" in swing_bias or "bearish" in swing_bias:
+        elif swing_bias == BEARISH:
             pts = round(base_pts * fresh_mult, 1)
             short_pts += pts
             details.append(f"Swing {swing_type} Bearish ({bars_since}b ago) → SHORT +{pts}")
@@ -840,7 +840,7 @@ def score_smc(smc_data: dict, current_price: float) -> dict:
     if internal_structs:
         last_internal = internal_structs[-1]
         int_type = last_internal.get("type", "")
-        int_bias = last_internal.get("bias", "")
+        int_bias = last_internal.get("bias", 0)
         int_bars = last_internal.get("bars_since", 999)
 
         if int_bars < 10:
@@ -850,25 +850,25 @@ def score_smc(smc_data: dict, current_price: float) -> dict:
         else:
             int_fresh = 0.15
 
-        int_base = 1.5 if "CHoCH" in int_type else 1.0
+        int_base = 1.5 if "CHoCH" in str(int_type) else 1.0
 
-        if "Bullish" in int_bias or "bullish" in int_bias:
+        if int_bias == BULLISH:
             pts = round(int_base * int_fresh / 0.5, 1)  # normalized
             long_pts += pts
             details.append(f"Internal {int_type} Bullish ({int_bars}b) → LONG +{pts}")
-        elif "Bearish" in int_bias or "bearish" in int_bias:
+        elif int_bias == BEARISH:
             pts = round(int_base * int_fresh / 0.5, 1)
             short_pts += pts
             details.append(f"Internal {int_type} Bearish ({int_bars}b) → SHORT +{pts}")
 
     # Internal vs Swing conflict
     if swing_structs and internal_structs:
-        swing_bias = swing_structs[-1].get("bias", "")
-        int_bias = internal_structs[-1].get("bias", "")
-        if ("Bullish" in swing_bias and "Bearish" in int_bias):
+        swing_bias = swing_structs[-1].get("bias", 0)
+        int_bias = internal_structs[-1].get("bias", 0)
+        if swing_bias == BULLISH and int_bias == BEARISH:
             long_pts -= 1
             details.append("⚠️ Swing↑ vs Internal↓ conflict → LONG -1")
-        elif ("Bearish" in swing_bias and "Bullish" in int_bias):
+        elif swing_bias == BEARISH and int_bias == BULLISH:
             short_pts -= 1
             details.append("⚠️ Swing↓ vs Internal↑ conflict → SHORT -1")
 
