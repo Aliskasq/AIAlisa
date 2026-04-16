@@ -1552,7 +1552,30 @@ async def handle_message(app_session, update):
                         data.add_field('reply_markup', json.dumps(scan_markup))
                         data.add_field('photo', f, filename=f"{symbol}.png", content_type='image/png')
                         async with app_session.post(photo_url, data=data, timeout=30) as resp:
-                            if resp.status != 200:
+                            if resp.status == 429:
+                                resp_json = await resp.json()
+                                retry_after = resp_json.get("parameters", {}).get("retry_after", 15)
+                                logging.warning(f"⚠️ Scan photo 429 — waiting {retry_after}s then retrying...")
+                                await asyncio.sleep(retry_after + 1)
+                                # Retry: re-open file and resend
+                                try:
+                                    with open(chart_path, 'rb') as f2:
+                                        data2 = aiohttp.FormData()
+                                        data2.add_field('chat_id', str(chat_id))
+                                        data2.add_field('caption', caption)
+                                        data2.add_field('parse_mode', 'Markdown')
+                                        data2.add_field('reply_to_message_id', str(msg_id))
+                                        data2.add_field('reply_markup', json.dumps(scan_markup))
+                                        data2.add_field('photo', f2, filename=f"{symbol}.png", content_type='image/png')
+                                        async with app_session.post(photo_url, data=data2, timeout=30) as resp2:
+                                            if resp2.status != 200:
+                                                resp_text2 = await resp2.text()
+                                                logging.error(f"❌ Scan photo retry failed: {resp2.status} - {resp_text2}")
+                                                await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
+                                except Exception as e2:
+                                    logging.error(f"❌ Scan photo retry error: {e2}")
+                                    await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
+                            elif resp.status != 200:
                                 resp_text = await resp.text()
                                 logging.error(f"❌ Scan photo send error: {resp.status} - {resp_text}")
                                 await send_response(app_session, chat_id, ai_brief, msg_id, reply_markup=scan_markup)
