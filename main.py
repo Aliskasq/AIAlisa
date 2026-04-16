@@ -565,10 +565,16 @@ async def main():
 
                             # Check 15m pump first (most specific)
                             _change_15m = item.get("mtf_data", {}).get("15m", {}).get("change_recent", 0)
+                            _prelim_dir = "LONG" if long_pct > short_pct else "SHORT"
                             if abs(_change_15m) > 10:
                                 reason = "pump_15m"
-                            elif _rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80):
+                            elif _prelim_dir == "LONG" and (_rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80)):
+                                # High RSI is only a problem for LONG (overbought → reversal risk)
+                                # For SHORT, high RSI actually CONFIRMS the short direction
                                 reason = "high_rsi"
+                            elif _prelim_dir == "SHORT" and (_rsi_4h < 25 or (_rsi_1h < 20 and _rsi_15m < 20)):
+                                # Low RSI is a problem for SHORT (oversold → bounce risk)
+                                reason = "low_rsi"
                             elif _adx < 20:
                                 reason = "flat_market"
                             else:

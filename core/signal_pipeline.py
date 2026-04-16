@@ -794,10 +794,9 @@ async def monitor_recheck_loop(session):
                     phase1_pass = False
 
                     if reason == "high_rsi":
-                        # Only fetch RSI (20 candles × 3 TFs)
+                        # LONG signal with high RSI — wait for RSI to drop 10+ pts
                         rsi_now = await _quick_rsi_check(session, sym)
                         rsi_4h_now = rsi_now.get("4H", 99)
-                        rsi_1h_now = rsi_now.get("1H", 99)
                         initial_rsi = m.get("initial_rsi_4h", 99)
                         rsi_drop = initial_rsi - rsi_4h_now
 
@@ -806,6 +805,19 @@ async def monitor_recheck_loop(session):
                             logging.info(f"🔵 MONITOR RSI improved: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (dropped {rsi_drop:.0f} pts) → Phase 2")
                         else:
                             logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{10-rsi_drop:.0f} more)")
+
+                    elif reason == "low_rsi":
+                        # SHORT signal with low RSI — wait for RSI to rise 10+ pts
+                        rsi_now = await _quick_rsi_check(session, sym)
+                        rsi_4h_now = rsi_now.get("4H", 1)
+                        initial_rsi = m.get("initial_rsi_4h", 1)
+                        rsi_rise = rsi_4h_now - initial_rsi
+
+                        if rsi_rise >= 10:
+                            phase1_pass = True
+                            logging.info(f"🔵 MONITOR RSI recovered: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (rose {rsi_rise:.0f} pts) → Phase 2")
+                        else:
+                            logging.info(f"🔵 MONITOR RSI still low: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need +{10-rsi_rise:.0f} more)")
 
                     elif reason == "flat_market":
                         # Only fetch ADX (30 candles × 1 TF)
