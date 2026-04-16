@@ -779,7 +779,7 @@ async def monitor_recheck_loop(session):
                 continue
 
             logging.info(f"🔄 Monitor: {len(due)} due for re-check")
-            ai_calls = 0
+            # No AI calls in monitor — auto-trade mode
 
             for m in due:
                 try:
@@ -801,11 +801,11 @@ async def monitor_recheck_loop(session):
                         initial_rsi = m.get("initial_rsi_4h", 99)
                         rsi_drop = initial_rsi - rsi_4h_now
 
-                        if rsi_drop >= 15:
+                        if rsi_drop >= 10:
                             phase1_pass = True
                             logging.info(f"🔵 MONITOR RSI improved: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (dropped {rsi_drop:.0f} pts) → Phase 2")
                         else:
-                            logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{15-rsi_drop:.0f} more)")
+                            logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{10-rsi_drop:.0f} more)")
 
                     elif reason == "flat_market":
                         # Only fetch ADX (30 candles × 1 TF)
@@ -856,216 +856,102 @@ async def monitor_recheck_loop(session):
                         continue
 
                     # ═══════════════════════════════════════════════════════
-                    # PHASE 2: FULL ANALYSIS + AI (only reached when improved)
+                    # PHASE 2: AUTO-TRADE (no AI — use stored direction)
                     # ═══════════════════════════════════════════════════════
-                    logging.info(f"🔍 MONITOR → FULL analysis + AI: {sym} (was {reason})")
+                    # Direction comes from the original AI analysis when signal entered monitor
+                    direction = m.get("direction", "LONG")
+                    conf = max(m.get("long_pct", 50), m.get("short_pct", 50))
 
-                    # Full kline fetch (250 for indicators, chart stays 199)
-                    phase2_tasks = [
-                        fetch_klines(session, sym, interval, 250),
-                        fetch_klines(session, sym, "1h", 250),
-                        fetch_klines(session, sym, "15m", 250),
-                    ]
-                    phase2_results = await asyncio.gather(*phase2_tasks, return_exceptions=True)
-
-                    raw = phase2_results[0] if not isinstance(phase2_results[0], Exception) else None
-                    raw_1h = phase2_results[1] if not isinstance(phase2_results[1], Exception) else None
-                    raw_15m = phase2_results[2] if not isinstance(phase2_results[2], Exception) else None
-
-                    if not raw:
-                        update_monitor_checked(m["key"])
-                        continue
-
-                    df = pd.DataFrame(raw)
-                    indicators, _ = calculate_binance_indicators(df, tf)
-
-                    mtf_data = {}
-                    if raw_1h:
-                        mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
-                    if raw_15m:
-                        mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
-
-                    # Double-check with full scorecard (belt and suspenders)
-                    promising, bull_pct, adx_val, sc_reason = _scorecard_looks_promising(indicators, mtf_data)
-                    if not promising:
-                        update_monitor_checked(m["key"])
-                        logging.info(f"🔵 MONITOR scorecard still weak after Phase 1 pass: {sym} (bull {bull_pct:.0f}%, ADX {adx_val:.0f})")
-                        await asyncio.sleep(1)
-                        continue
-
-                    # Fetch funding + positioning
+                    # Fetch current price (lightweight — just 1 candle)
                     try:
-                        funding = await fetch_funding_history(session, sym)
-                        indicators["funding_rate"] = funding
-                        positioning = await fetch_market_positioning(session, sym)
-                        indicators["positioning"] = positioning
-                    except Exception:
-                        pass
-
-                    from core.tg_listener import get_chat_lang
-                    _lang = get_chat_lang(GROUP_CHAT_ID)
-                    _mon_key = OPENROUTER_API_KEY_MONITOR or None
-                    _mon_model = OPENROUTER_MODEL_MONITOR or None
-
-                    # 1D emergency check
-                    emergency_warnings = []
-                    try:
-                        raw_1d = await fetch_klines(session, sym, "1d", 250)
-                        if raw_1d:
-                            indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
-                            emergency_warnings = get_1d_emergency_warnings(indic_1d)
-                            if emergency_warnings:
-                                logging.warning(f"⚠️ 1D EMERGENCY for {sym}: {emergency_warnings}")
-                                indicators["_1d_emergency_warnings"] = emergency_warnings
-                    except Exception as e:
-                        logging.error(f"❌ 1D emergency check failed for {sym}: {e}")
-
-                    # SMC analysis (500 candles for proper swing detection)
-                    smc_data = {}
-                    try:
-                        from core.smc import analyze_smc
-                        raw_smc = await fetch_klines(session, sym, interval, 500)
-                        if raw_smc:
-                            smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc), tf)
-                        if raw_1h:
-                            smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
-                        if raw_15m:
-                            smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
-                    except Exception as e:
-                        logging.error(f"❌ Monitor SMC error {sym}: {e}")
-
-                    # AI call
-                    ai_text = await ask_ai_analysis(
-                        sym, tf, indicators, mode="scan", lang=_lang, mtf_data=mtf_data,
-                        smc_data=smc_data,
-                        api_key_override=_mon_key, model_override=_mon_model
-                    )
-                    ai_calls += 1
-
-                    long_pct, short_pct = parse_confidence_from_ai(ai_text or "")
-                    adx_trend_val = indicators.get("adx_trend", "stable")
-                    adx_avg_val = indicators.get("adx_avg_50", 0)
-                    new_tier = classify_signal(long_pct, short_pct, adx_val,
-                                             adx_trend=adx_trend_val, adx_avg_50=adx_avg_val,
-                                             mtf_data=mtf_data, indicators=indicators)
-
-                    if new_tier == "full":
-                        remove_monitor(m["key"])
-                        direction = "LONG" if long_pct > short_pct else "SHORT"
-                        conf = max(long_pct, short_pct)
-                        current_price = indicators.get("close", 0)
-
-                        logging.info(f"🟢 UPGRADED: {sym} → {direction} {conf}% (was {m.get('reason','?')})")
-
-                        # Use the full AI text we already have (no second call needed)
-                        ai_brief = ai_text or f"🟢 UPGRADED: {sym} {tf} {direction} {conf}%"
-                        if ai_brief and "---" in ai_brief:
-                            ai_brief = ai_brief.split("---", 1)[0].strip()
-                        if not ai_brief or ai_brief.startswith("❌"):
-                            ai_brief = f"🟢 UPGRADED: {sym} {tf} {direction} {conf}%"
-
-                        # Draw chart
-                        chart_path = None
-                        try:
-                            line_data, _ = await find_trend_line(df, tf, sym)
-                            if line_data:
-                                chart_path = await draw_scan_chart(sym, df, line_data, tf)
+                        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval={interval}&limit=5"
+                        async with session.get(url, timeout=10) as resp:
+                            if resp.status == 200:
+                                candles = await resp.json()
+                                current_price = float(candles[-1][4]) if candles else m.get("entry_price", 0)
                             else:
-                                chart_path = await draw_simple_chart(sym, df, tf)
-                        except Exception as e:
-                            logging.error(f"❌ Monitor chart error: {e}")
+                                current_price = m.get("entry_price", 0)
+                    except Exception:
+                        current_price = m.get("entry_price", 0)
 
-                        # Send to monitor group (or main group if not configured)
-                        _upgrade_chat = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
-                        if chart_path:
-                            try:
-                                import os as _os
-                                _MON_AI_LIMIT = 813
-                                overflow_mon = ""
-                                if len(ai_brief) > _MON_AI_LIMIT:
-                                    _cut = ai_brief[:_MON_AI_LIMIT]
-                                    # Try newline first, then space — don't break words
-                                    _nl = _cut.rfind('\n')
-                                    if _nl > _MON_AI_LIMIT // 2:
-                                        _cp = _nl
-                                    else:
-                                        _sp = _cut.rfind(' ')
-                                        _cp = _sp if _sp > _MON_AI_LIMIT // 2 else _MON_AI_LIMIT
-                                    safe_brief = ai_brief[:_cp]
-                                    overflow_mon = ai_brief[_cp:].strip()
-                                else:
-                                    safe_brief = ai_brief
-                                photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-                                msg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                                with open(chart_path, 'rb') as f:
-                                    data = aiohttp.FormData()
-                                    data.add_field('chat_id', str(_upgrade_chat))
-                                    data.add_field('caption', f"🟢 UPGRADED from MONITOR\n{safe_brief}")
-                                    data.add_field('photo', f, filename=f"{sym}.png", content_type='image/png')
-                                    await session.post(photo_url, data=data, timeout=30)
-                                # Send overflow as second message
-                                if overflow_mon:
-                                    await session.post(msg_url, json={
-                                        "chat_id": str(_upgrade_chat),
-                                        "text": overflow_mon
-                                    }, timeout=10)
-                                _os.remove(chart_path)
-                            except Exception as e:
-                                logging.error(f"❌ Monitor photo send: {e}")
-                        else:
-                            # No chart — text only
-                            try:
-                                tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                                text = f"🟢 UPGRADED from MONITOR\n\n{ai_brief[:4000]}"
-                                await session.post(tg_url, json={
-                                    "chat_id": _upgrade_chat, "text": text
-                                }, timeout=10)
-                            except Exception as e:
-                                logging.error(f"❌ Monitor upgrade send: {e}")
-
-                        # Also notify main group about monitor upgrade (info only, not added to main bank)
-                        if MONITOR_GROUP_CHAT_ID and MONITOR_GROUP_CHAT_ID != GROUP_CHAT_ID:
-                            try:
-                                tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                                brief_text = f"ℹ️ Monitor upgrade: {sym} {tf} {direction} {conf}%\n💰 Entry: {current_price}"
-                                await session.post(tg_url, json={
-                                    "chat_id": GROUP_CHAT_ID, "text": brief_text
-                                }, timeout=10)
-                            except Exception:
-                                pass
-
-                        # Parse trade params from AI text
-                        ai_params = parse_ai_trade_params(ai_brief) if ai_brief else {}
-
-                        # Add to MONITOR bank log FIRST (independent, own try/except)
-                        try:
-                            add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
-                                              "monitor_upgrade",
-                                              ai_direction=direction,
-                                              ai_entry=ai_params.get("ai_entry", current_price),
-                                              ai_sl=ai_params.get("ai_sl"),
-                                              ai_tp=ai_params.get("ai_tp"),
-                                              ai_leverage=FIXED_LEVERAGE,
-                                              ai_deposit_pct=FIXED_DEPOSIT_PCT)
-                            logging.info(f"✅ Monitor bank entry added: {sym} {tf} {direction} @ {ai_params.get('ai_entry', current_price)}")
-                        except Exception as e:
-                            logging.error(f"❌ Failed to add monitor bank entry for {sym}: {e}")
-
-                        # NOTE: Monitor upgrades do NOT go into main breakout_log.
-                        # They only appear in monitor bank (breakout_log_monitor.json).
-                        # The original entry in main log keeps is_monitor=True.
-                    else:
+                    if current_price <= 0:
                         update_monitor_checked(m["key"])
-                        logging.info(f"🔵 MONITOR still: {sym} (AI: {max(long_pct,short_pct):.0f}%, ADX {adx_val:.0f})")
+                        continue
 
-                    await asyncio.sleep(20)  # rate limit between AI calls (20s cooldown)
+                    # Fetch full indicators for ATR calculation (250 candles)
+                    try:
+                        raw = await fetch_klines(session, sym, interval, 250)
+                        if raw:
+                            df = pd.DataFrame(raw)
+                            indicators, _ = calculate_binance_indicators(df, tf)
+                        else:
+                            indicators = {}
+                    except Exception:
+                        indicators = {}
+
+                    # Calculate SL/TP from ATR (SL max 10%, TP = 2:1)
+                    atr_params = calculate_atr_sl_tp(indicators, direction, current_price)
+                    sl = atr_params["sl"]
+                    tp = atr_params["tp"]
+                    sl_pct = atr_params["sl_pct"]
+
+                    # Cap SL at 10% max
+                    if sl_pct > 10:
+                        sl_distance = current_price * 0.10
+                        if direction == "LONG":
+                            sl = current_price - sl_distance
+                            tp = current_price + sl_distance * 2
+                        else:
+                            sl = current_price + sl_distance
+                            tp = current_price - sl_distance * 2
+                        sl_pct = 10.0
+
+                    tp_pct = abs(tp - current_price) / current_price * 100
+
+                    remove_monitor(m["key"])
+                    logging.info(f"🟢 MONITOR AUTO-TRADE: {sym} {tf} {direction} {conf:.0f}% | Entry: {current_price} | SL: {sl} ({sl_pct:.1f}%) | TP: {tp} ({tp_pct:.1f}%)")
+
+                    # Send simple text push to monitor group
+                    _upgrade_chat = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
+                    short_sym = sym.replace("USDT", "")
+                    push_text = (
+                        f"🟢 MONITOR → TRADE\n"
+                        f"${short_sym} | {tf} | {direction} {conf:.0f}%\n"
+                        f"💰 Entry: {current_price}\n"
+                        f"🚫 SL: {sl} ({sl_pct:.1f}%)\n"
+                        f"🎯 TP: {tp} ({tp_pct:.1f}%)\n"
+                        f"📊 Was: {reason} | Original: {m.get('entry_price', 0)}"
+                    )
+                    try:
+                        tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                        await session.post(tg_url, json={
+                            "chat_id": _upgrade_chat, "text": push_text
+                        }, timeout=10)
+                    except Exception as e:
+                        logging.error(f"❌ Monitor trade push: {e}")
+
+                    # Add to MONITOR bank (bankm) — NOT to signals close
+                    try:
+                        add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
+                                          "monitor_auto_trade",
+                                          ai_direction=direction,
+                                          ai_entry=current_price,
+                                          ai_sl=sl,
+                                          ai_tp=tp,
+                                          ai_leverage=FIXED_LEVERAGE,
+                                          ai_deposit_pct=FIXED_DEPOSIT_PCT)
+                        logging.info(f"✅ Monitor bank entry: {sym} {direction} @ {current_price}")
+                    except Exception as e:
+                        logging.error(f"❌ Monitor bank entry failed for {sym}: {e}")
+
+                    await asyncio.sleep(2)  # small cooldown between checks (no AI needed)
 
                 except Exception as e:
                     logging.error(f"❌ Monitor {m.get('symbol','?')}: {e}")
                     update_monitor_checked(m["key"])
 
-            if ai_calls > 0:
-                logging.info(f"🔄 Monitor cycle done: {len(due)} checked, {ai_calls} AI calls")
+            if len(due) > 0:
+                logging.info(f"🔄 Monitor cycle done: {len(due)} checked (no AI — auto-trade mode)")
 
         except Exception as e:
             logging.error(f"❌ Monitor loop error: {e}")
