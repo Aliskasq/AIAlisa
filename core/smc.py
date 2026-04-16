@@ -968,9 +968,17 @@ def score_smc(smc_data: dict, current_price: float) -> dict:
     # 6. EQH / EQL (liquidity magnets)
     # ============================================
     max_possible += 1
-    equal_hl = smc_data.get("equal_hl", {})
-    eqh_list = equal_hl.get("eqh", [])
-    eql_list = equal_hl.get("eql", [])
+    equal_hl = smc_data.get("equal_hl", [])
+    # equal_hl is a flat list of dicts with "type" = "EQH" or "EQL"
+    if isinstance(equal_hl, list):
+        eqh_list = [e for e in equal_hl if isinstance(e, dict) and e.get("type") == "EQH"]
+        eql_list = [e for e in equal_hl if isinstance(e, dict) and e.get("type") == "EQL"]
+    elif isinstance(equal_hl, dict):
+        eqh_list = equal_hl.get("eqh", [])
+        eql_list = equal_hl.get("eql", [])
+    else:
+        eqh_list = []
+        eql_list = []
 
     for eqh in (eqh_list if isinstance(eqh_list, list) else []):
         eqh_price = eqh.get("price", 0) if isinstance(eqh, dict) else 0
