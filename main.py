@@ -311,8 +311,8 @@ async def main():
                                     "current_price": current_price,
                                 })
                             else:
-                                # Line not in memory cache (bug). Delete to avoid infinite loop.
-                                alerts_to_remove.append(alert)
+                                # Line not in memory cache — skip this cycle but keep alert
+                                logging.warning(f"⚠️ {symbol} {tf_key} triggered but no line_data in stored_lines (keys: {list(stored_lines.get(tf_key, {}).keys())[:5]}...)")
 
                     await wait_for_weight(session, 1800)
                     await asyncio.sleep(3.0)
