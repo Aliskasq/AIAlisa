@@ -270,7 +270,7 @@ LOGIC: [2-3 sentences — key factors driving the verdict]
 RISK: [1 sentence — main risk to watch]
 
 Rules:
-- Weights: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
+- Weights: 4H=50%, 1H=30%, 15m=20%. 1D is context-only (risk warnings like overbought RSI) — do NOT include 1D in the weighted score.
 - If both below 65% → SKIP. If ADX<20 → SKIP (FLAT).
 - Leverage: always 1x. Deposit: always 2%.
 - Do NOT assume direction from indicators alone. When 8+ indicators are bullish, ACTIVELY look for exhaustion signals:
@@ -298,7 +298,7 @@ FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик.
 РИСК: [1 предложение — главный риск]
 
 Правила:
-- Веса: 4H=50%, 1H=30%, 15m=10%, 1D=10%.
+- Веса: 4H=50%, 1H=30%, 15m=20%. 1D — только контекст (предупреждения о рисках, перекупленность RSI) — НЕ включай 1D в взвешенный счёт.
 - Если оба ниже 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
 - Плечо: всегда 1x. Депозит: всегда 2%.
 - НЕ следуй за большинством индикаторов слепо. Когда 8+ индикаторов бычьи, АКТИВНО ищи сигналы истощения:
@@ -416,21 +416,34 @@ def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: d
 
     # Replace "Overall" / "Общий" line placeholder
     if tf_pcts:
-        # Weighted average: 4H=50%, 1H=30%, 15m=10%, 1D=10%
-        weights = {"4H": 0.50, "1H": 0.30, "15m": 0.10, "1D": 0.10}
+        # Weighted average: 4H=50%, 1H=30%, 15m=20% (1D is context-only, not a voting TF)
+        weights = {"4H": 0.50, "1H": 0.30, "15m": 0.20}
         total_w = 0
         weighted_long = 0
         for tf_label, (long_pct, short_pct) in tf_pcts.items():
-            w = weights.get(tf_label, 0.1)
+            if tf_label not in weights:
+                continue  # Skip 1D and any unknown TFs — context only
+            w = weights[tf_label]
             weighted_long += long_pct * w
             total_w += w
         if total_w > 0:
             overall_long = round(weighted_long / total_w)
             overall_short = 100 - overall_long
             for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
-                pattern = rf'((?:Overall|Общий)[:\s]*){long_word}\s+X%\s*/\s*{short_word}\s+Y%'
-                replacement = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
-                text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                # Match both placeholders (X%/Y%) and any numbers AI may have inserted
+                for pct_pat in [r'X%', r'\d+%']:
+                    # Fix "Overall" / "Общий" line
+                    pattern = rf'((?:Overall|Общий)[:\s]*){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
+                    replacement = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
+                    text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+                    # Fix VERDICT / ВЕРДИКТ line parenthetical: e.g. "SKIP (LONG 56% / SHORT 34%)"
+                    pattern_v = rf'((?:VERDICT|ВЕРДИКТ)[:\s]*(?:LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК|MONITOR|МОНИТОРИНГ)[^(]*\(){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
+                    replacement_v = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
+                    text = re.sub(pattern_v, replacement_v, text, flags=re.IGNORECASE)
+                    # Fix "Weighted verdict" / "Взвешенный вердикт" line
+                    pattern_wv = rf'((?:Weighted verdict|Взвешенный вердикт)[:\s]*){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
+                    replacement_wv = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
+                    text = re.sub(pattern_wv, replacement_wv, text, flags=re.IGNORECASE)
 
     return text
 
@@ -677,8 +690,8 @@ TWO-STEP ANALYSIS:
 STEP 1 — DIRECTION (which way to trade):
 - 4H = 50% weight (PRIMARY — breakout detected here)
 - 1H = 30% weight (CONFIRMATION — momentum developing?)
-- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
-- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+- 15m = 20% weight (ENTRY TIMING — confirms momentum, if 1H+15m disagree with 4H, lean toward 1H+15m as 4H may lag)
+- 1D = CONTEXT ONLY (NOT included in weighted score — use for risk warnings: overbought RSI, macro trend, etc.)
 
 CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
 Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
@@ -797,8 +810,8 @@ TWO-STEP ANALYSIS:
 STEP 1 — DIRECTION (which way to trade):
 - 4H = 50% weight (PRIMARY — breakout detected here)
 - 1H = 30% weight (CONFIRMATION — momentum developing?)
-- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
-- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+- 15m = 20% weight (ENTRY TIMING — confirms momentum, if 1H+15m disagree with 4H, lean toward 1H+15m as 4H may lag)
+- 1D = CONTEXT ONLY (NOT included in weighted score — use for risk warnings: overbought RSI, macro trend, etc.)
 
 CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
 Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
@@ -891,8 +904,8 @@ TWO-STEP ANALYSIS:
 STEP 1 — DIRECTION (which way to trade):
 - 4H = 50% weight (PRIMARY — breakout detected here)
 - 1H = 30% weight (CONFIRMATION — momentum developing?)
-- 15m = 10% weight (WARNING ONLY — don't override 4H+1H)
-- 1D = 10% weight (CONTEXT ONLY — it LAGS, don't let it override fresh breakout)
+- 15m = 20% weight (ENTRY TIMING — confirms momentum, if 1H+15m disagree with 4H, lean toward 1H+15m as 4H may lag)
+- 1D = CONTEXT ONLY (NOT included in weighted score — use for risk warnings: overbought RSI, macro trend, etc.)
 
 CRITICAL: 1D is LAGGING! 1D uptrend may mean coin is at the TOP. 1D downtrend may mean reversal JUST started.
 Do NOT let 1D override a fresh 4H breakout. Use 1D only for risk notes.
