@@ -165,13 +165,13 @@ def _get_keys_for_provider(provider):
     return []
 
 async def call_ai_with_fallback(messages, timeout_sec=240):
-    """Main AI call — uses the SAVED active provider/key first, then full fallback.
+    """Main AI call — uses the SAVED active provider/key. No auto-rotation.
     
-    Step 1: Try current active provider+key
-    Step 2: If failed — ALWAYS full chain: Gemini (8 keys) → Groq (3) → OpenRouter
-            Skip keys already tried in step 1 to avoid double-calling.
+    Chain depends on active provider:
+    - Gemini active: Gemini keys forward → after #8 try #1 only → Groq → OpenRouter
+    - Groq active: Groq keys forward → OpenRouter (NO Gemini fallback)
+    - OpenRouter active: try saved model → openai/gpt-oss-120b:free → openrouter/free
     
-    Gemini rotation: forward from active key, after #8 → try #1 ONE time only.
     Daily reset at 03:05 MSK sets Gemini #1 as active (see main.py).
     Whatever works gets SAVED and used for all subsequent calls.
     
@@ -180,28 +180,23 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
     s = _get_ai_settings()
     provider = s.get("active_provider", "gemini")
     key_idx = s.get("active_key_index", 0)
-    _tried_gemini = set()  # track tried Gemini key indices
-    _tried_groq = set()    # track tried Groq key indices
-    _tried_or = set()      # track tried OpenRouter models
 
-    # === Step 1: Try current active provider ===
+    # === Try current active provider ===
     if provider == "gemini" and GEMINI_API_KEYS:
         gemini_model = s.get("gemini_model", "gemini-2.5-flash")
         if key_idx < len(GEMINI_API_KEYS):
             logging.info(f"🔄 Trying active Gemini #{key_idx+1} ({KEY_ACCOUNT_LABELS.get(key_idx, '?')}) model={gemini_model}")
             result = await _call_gemini(messages, GEMINI_API_KEYS[key_idx], gemini_model, timeout_sec)
-            _tried_gemini.add(key_idx)
             if result:
                 return result, "gemini", gemini_model
 
             # Active key failed — try next keys forward
             logging.warning(f"⚠️ Gemini #{key_idx+1} failed, trying next...")
 
-            # After key #8 (index 7) → try key #1 (index 0) ONE time, then fallback
+            # After key #8 (index 7) → try key #1 (index 0) ONE time, then Groq
             if key_idx == len(GEMINI_API_KEYS) - 1:
                 logging.info(f"🔄 After Gemini #8, trying Gemini #1 ({KEY_ACCOUNT_LABELS.get(0, '?')})")
                 result = await _call_gemini(messages, GEMINI_API_KEYS[0], gemini_model, timeout_sec)
-                _tried_gemini.add(0)
                 if result:
                     s["active_provider"] = "gemini"
                     s["active_key_index"] = 0
@@ -209,13 +204,12 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                     _save_and_cache_settings(s)
                     logging.info(f"✅ Gemini #1 succeeded after #8, saved as active")
                     return result, "gemini", gemini_model
-                logging.warning("⚠️ Gemini #1 also failed after #8, falling back...")
+                logging.warning("⚠️ Gemini #1 also failed after #8, falling back to Groq...")
             else:
                 # Try remaining keys forward (not wrapping)
                 for next_idx in range(key_idx + 1, len(GEMINI_API_KEYS)):
                     logging.info(f"🔄 Trying Gemini #{next_idx+1} ({KEY_ACCOUNT_LABELS.get(next_idx, '?')})")
                     result = await _call_gemini(messages, GEMINI_API_KEYS[next_idx], gemini_model, timeout_sec)
-                    _tried_gemini.add(next_idx)
                     if result:
                         s["active_provider"] = "gemini"
                         s["active_key_index"] = next_idx
@@ -225,10 +219,9 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                         return result, "gemini", gemini_model
                 
                 # All forward exhausted, try #1
-                if 0 not in _tried_gemini:
+                if key_idx > 0:
                     logging.info(f"🔄 All forward Gemini failed, trying #1")
                     result = await _call_gemini(messages, GEMINI_API_KEYS[0], gemini_model, timeout_sec)
-                    _tried_gemini.add(0)
                     if result:
                         s["active_provider"] = "gemini"
                         s["active_key_index"] = 0
@@ -237,21 +230,19 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                         logging.info(f"✅ Gemini #1 succeeded, saved as active")
                         return result, "gemini", gemini_model
 
-                logging.warning("⚠️ All Gemini keys failed, falling back...")
+                logging.warning("⚠️ All Gemini keys failed, falling back to Groq...")
 
     elif provider == "groq" and GROQ_API_KEYS:
         groq_model = s.get("groq_model", "llama-3.3-70b-versatile")
         if key_idx < len(GROQ_API_KEYS):
             logging.info(f"🔄 Trying active Groq #{key_idx+1} model={groq_model}")
             result = await _call_groq(messages, GROQ_API_KEYS[key_idx], groq_model, timeout_sec)
-            _tried_groq.add(key_idx)
             if result:
                 return result, "groq", groq_model
             # Try remaining Groq keys forward
             for next_idx in range(key_idx + 1, len(GROQ_API_KEYS)):
                 logging.info(f"🔄 Trying Groq #{next_idx+1}")
                 result = await _call_groq(messages, GROQ_API_KEYS[next_idx], groq_model, timeout_sec)
-                _tried_groq.add(next_idx)
                 if result:
                     s["active_provider"] = "groq"
                     s["active_key_index"] = next_idx
@@ -259,42 +250,20 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                     _save_and_cache_settings(s)
                     logging.info(f"✅ Groq #{next_idx+1} succeeded, saved as active")
                     return result, "groq", groq_model
-            logging.warning("⚠️ Active Groq keys failed, falling back...")
+            logging.warning("⚠️ All Groq keys failed, falling back to OpenRouter...")
 
     elif provider == "openrouter" and OPENROUTER_API_KEY:
         or_model = s.get("openrouter_model", "openai/gpt-oss-120b:free")
         logging.info(f"🔄 Trying active OpenRouter model={or_model}")
         result = await _call_openrouter(messages, OPENROUTER_API_KEY, or_model, timeout_sec)
-        _tried_or.add(or_model)
         if result:
             return result, "openrouter", or_model
-        logging.warning(f"⚠️ OpenRouter {or_model} failed, falling back...")
+        logging.warning(f"⚠️ OpenRouter {or_model} failed, trying fallbacks...")
 
-    # === Step 2: FULL fallback chain (skip already tried) ===
-    # Always: Gemini → Groq → OpenRouter
-
-    # Gemini fallback (skip tried keys)
-    if GEMINI_API_KEYS:
-        gemini_model = s.get("gemini_model", "gemini-2.5-flash")
-        for i in range(len(GEMINI_API_KEYS)):
-            if i in _tried_gemini:
-                continue
-            logging.info(f"🔄 Fallback: Gemini #{i+1} ({KEY_ACCOUNT_LABELS.get(i, '?')})")
-            result = await _call_gemini(messages, GEMINI_API_KEYS[i], gemini_model, timeout_sec)
-            if result:
-                s["active_provider"] = "gemini"
-                s["active_key_index"] = i
-                s["gemini_model"] = gemini_model
-                _save_and_cache_settings(s)
-                logging.info(f"✅ Gemini fallback #{i+1} succeeded, saved as active")
-                return result, "gemini", gemini_model
-
-    # Groq fallback (skip tried keys)
-    if GROQ_API_KEYS:
+    # === Fallback: Groq → OpenRouter (NO Gemini here — Gemini only from daily reset) ===
+    if GROQ_API_KEYS and provider != "groq":
         groq_model = "llama-3.3-70b-versatile"
         for i, key in enumerate(GROQ_API_KEYS):
-            if i in _tried_groq:
-                continue
             logging.info(f"🔄 Fallback: Groq #{i+1}")
             result = await _call_groq(messages, key, groq_model, timeout_sec)
             if result:
@@ -305,11 +274,10 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                 logging.info(f"✅ Groq fallback #{i+1} succeeded, saved as active")
                 return result, "groq", groq_model
 
-    # OpenRouter fallback (skip tried models)
     if OPENROUTER_API_KEY:
         for or_model in ["openai/gpt-oss-120b:free", "openrouter/free"]:
-            if or_model in _tried_or:
-                continue
+            if provider == "openrouter" and or_model == s.get("openrouter_model"):
+                continue  # already tried above
             logging.info(f"🔄 Fallback: OpenRouter model={or_model}")
             result = await _call_openrouter(messages, OPENROUTER_API_KEY, or_model, timeout_sec)
             if result:
