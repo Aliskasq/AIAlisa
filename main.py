@@ -742,6 +742,9 @@ async def main():
             vol_waitlist = get_volume_waitlist()
             if vol_waitlist:
                 logging.info(f"📊 Volume waitlist: rechecking {len(vol_waitlist)} coins")
+
+                # Phase 1: Check which coins passed volume
+                vol_passed = []
                 batch_size = 30
                 for batch_start in range(0, len(vol_waitlist), batch_size):
                     batch = vol_waitlist[batch_start:batch_start + batch_size]
@@ -752,18 +755,252 @@ async def main():
                             if vol_result["pass"]:
                                 remove_from_volume_waitlist(vw_item["key"])
                                 logging.info(f"📊✅ VOL PASS: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
-                                alerts = load_alerts()
-                                if vw_item.get("alert") and vw_item["alert"] not in alerts:
-                                    alerts.append(vw_item["alert"])
-                                    save_alerts(alerts)
+                                return vw_item
                             else:
                                 logging.info(f"📊 VOL WAIT: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                                return None
                         except Exception as e:
                             logging.error(f"❌ Vol waitlist recheck {vw_item.get('symbol', '?')}: {e}")
+                            return None
 
-                    await asyncio.gather(*[_check_one_vw(vw) for vw in batch])
+                    results = await asyncio.gather(*[_check_one_vw(vw) for vw in batch])
+                    vol_passed.extend([r for r in results if r is not None])
                     if batch_start + batch_size < len(vol_waitlist):
                         await asyncio.sleep(1)
+
+                # Phase 2: Full pipeline for passed coins (fetch data → AI → classify → send)
+                if vol_passed:
+                    logging.info(f"📊🚀 VOL PASS pipeline: {len(vol_passed)} coins to process")
+
+                    # Load stored_lines for line_data
+                    _vp_stored_lines = {"1D": {}, "4H": {}}
+                    if os.path.exists(TREND_STATE_FILE):
+                        try:
+                            with open(TREND_STATE_FILE, 'r') as f:
+                                _vp_state = json.load(f)
+                                _vp_stored_lines = _vp_state.get("lines", {"1D": {}, "4H": {}})
+                        except Exception as e:
+                            logging.error(f"❌ VOL PASS: can't load stored_lines: {e}")
+
+                    for vw_item in vol_passed:
+                        sym = vw_item["symbol"]
+                        tf = vw_item.get("tf", "4H")
+                        logging.info(f"📊🤖 VOL PASS pipeline: {sym} {tf}")
+
+                        try:
+                            await wait_for_weight(session, 2350)
+
+                            # Get line_data from stored_lines
+                            line_data = _vp_stored_lines.get(tf, {}).get(sym)
+                            if not line_data:
+                                logging.warning(f"⚠️ VOL PASS {sym}: no line_data in stored_lines for {tf}, skipping")
+                                continue
+
+                            # Fetch klines + MTF data (same as _prepare_breakout_data)
+                            interval_fetch = '1d' if tf == "1D" else '4h'
+                            full_raw = await fetch_klines(session, sym, interval_fetch, 250)
+                            if not full_raw:
+                                logging.error(f"❌ VOL PASS {sym}: no klines")
+                                continue
+
+                            full_df = pd.DataFrame(full_raw)
+                            last_indic_row, _ = calculate_binance_indicators(full_df, tf)
+
+                            # Parallel fetch: funding + positioning + MTF klines
+                            _vp_mtf_tasks = [
+                                fetch_funding_history(session, sym),
+                                fetch_market_positioning(session, sym),
+                                fetch_klines(session, sym, "1h", 250),
+                                fetch_klines(session, sym, "15m", 250),
+                            ]
+                            if tf == "1D":
+                                _vp_mtf_tasks.append(fetch_klines(session, sym, "4h", 250))
+
+                            _vp_mtf_results = await asyncio.gather(*_vp_mtf_tasks, return_exceptions=True)
+
+                            funding = _vp_mtf_results[0] if not isinstance(_vp_mtf_results[0], Exception) else "Unknown"
+                            positioning = _vp_mtf_results[1] if not isinstance(_vp_mtf_results[1], Exception) else {}
+                            raw_1h = _vp_mtf_results[2] if not isinstance(_vp_mtf_results[2], Exception) else None
+                            raw_15m = _vp_mtf_results[3] if not isinstance(_vp_mtf_results[3], Exception) else None
+                            raw_4h = _vp_mtf_results[4] if len(_vp_mtf_results) > 4 and not isinstance(_vp_mtf_results[4], Exception) else None
+
+                            last_indic_row["funding_rate"] = funding
+                            last_indic_row["positioning"] = positioning
+
+                            mtf_data = {}
+                            if raw_4h:
+                                mtf_data["4H"] = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")[0]
+                            if raw_1h:
+                                mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
+                            if raw_15m:
+                                mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+
+                            # SMC analysis
+                            smc_data = {}
+                            try:
+                                from core.smc import analyze_smc
+                                raw_smc_main = await fetch_klines(session, sym, interval_fetch, 500)
+                                if raw_smc_main:
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf)
+                                else:
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf)
+                                if raw_4h and tf == "1D":
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                                if raw_1h:
+                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                                if raw_15m:
+                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                            except Exception as e:
+                                logging.error(f"❌ VOL PASS SMC error for {sym}: {e}")
+
+                            # AI analysis
+                            ai_indic = last_indic_row
+                            ai_tf = tf
+                            if tf == "1D" and "4H" in mtf_data:
+                                ai_indic = mtf_data["4H"]
+                                ai_tf = "4H"
+
+                            current_price = float(full_df.iloc[-1]['close'])
+                            dynamic_trigger = line_data.get('trigger_price', current_price)
+
+                            ai_verdict_full = await ask_ai_analysis(
+                                sym, ai_tf, ai_indic, dynamic_trigger,
+                                mode="scan", lang=get_chat_lang(GROUP_CHAT_ID),
+                                mtf_data=mtf_data, smc_data=smc_data
+                            )
+
+                            if ai_verdict_full and "---" in ai_verdict_full:
+                                ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                            else:
+                                ai_verdict = ai_verdict_full
+
+                            # Parse AI direction
+                            import re as _re
+                            _ai_dir = ""
+                            _ai_params = parse_ai_trade_params(ai_verdict) if ai_verdict else {}
+                            _verdict_map = {
+                                "ЛОНГ": "LONG", "ДЛГО": "LONG",
+                                "ШОРТ": "SHORT", "КОРОТКО": "SHORT",
+                                "ПРОПУСК": "SKIP"
+                            }
+                            if ai_verdict:
+                                _verdict_match = _re.search(
+                                    r"(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ДЛГО|КОРОТКО|ПРОПУСК)",
+                                    ai_verdict, _re.IGNORECASE
+                                )
+                                if _verdict_match:
+                                    _raw_dir = _verdict_match.group(1).upper()
+                                    _ai_dir = _verdict_map.get(_raw_dir, _raw_dir)
+                                else:
+                                    _line_verdict = _re.search(
+                                        r"(?:^|\n)\s*(?:🏆\s*)?(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ДЛГО|КОРОТКО|ПРОПУСК)\b",
+                                        ai_verdict, _re.IGNORECASE
+                                    )
+                                    if _line_verdict:
+                                        _raw = _line_verdict.group(1).upper()
+                                        _ai_dir = _verdict_map.get(_raw, _raw)
+
+                            # Classify signal
+                            long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
+                            adx_value = last_indic_row.get("adx", 0)
+                            adx_trend = last_indic_row.get("adx_trend", "stable")
+                            adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
+
+                            _change_24h = last_indic_row.get("change_24h", 0)
+                            _is_pump_filter = abs(_change_24h) > 100
+
+                            tier = classify_signal(long_pct, short_pct, adx_value,
+                                                  adx_trend=adx_trend, adx_avg_50=adx_avg_50,
+                                                  mtf_data=mtf_data,
+                                                  indicators=last_indic_row)
+
+                            alert_type = vw_item.get("alert", "").split("_")[-1] if vw_item.get("alert") else "resistance"
+
+                            if tier == "monitor":
+                                # Monitor — same logic as main pipeline
+                                _rsi_4h = last_indic_row.get("rsi14", 50)
+                                _rsi_1h = mtf_data.get("1H", {}).get("rsi14", 50)
+                                _rsi_15m = mtf_data.get("15m", {}).get("rsi14", 50)
+                                _adx = adx_value
+                                _change_15m = mtf_data.get("15m", {}).get("change_recent", 0)
+                                _prelim_dir = "LONG" if long_pct > short_pct else "SHORT"
+
+                                if abs(_change_15m) > 10:
+                                    reason = "pump_15m"
+                                elif _prelim_dir == "LONG" and (_rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80)):
+                                    reason = "high_rsi"
+                                elif _prelim_dir == "SHORT" and (_rsi_4h < 25 or (_rsi_1h < 20 and _rsi_15m < 20)):
+                                    reason = "low_rsi"
+                                elif _adx < 20:
+                                    reason = "flat_market"
+                                else:
+                                    reason = "low_confidence"
+
+                                direction = "LONG" if long_pct > short_pct else "SHORT"
+                                add_monitor(sym, tf, direction, long_pct, short_pct,
+                                           current_price, reason,
+                                           rsi_4h=_rsi_4h, rsi_1h=_rsi_1h, rsi_15m=_rsi_15m,
+                                           adx_4h=_adx)
+                                logging.info(f"🔵 VOL PASS MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
+
+                                # Send to main group with MONITOR tag
+                                _skip_caption = ai_verdict or ""
+                                if not _skip_caption:
+                                    _skip_caption = f"🏆 ВЕРДИКТ: SKIP ({direction})\n📊 Общий: LONG {long_pct:.0f}% / SHORT {short_pct:.0f}%"
+                                _skip_caption = f"🔵 MONITOR (SKIP) [VOL PASS]\n{_skip_caption}"
+                                await send_breakout_notification(
+                                    sym, full_df, line_data, tf, alert_type, session,
+                                    dynamic_trigger, _skip_caption
+                                )
+                                add_breakout_entry(sym, tf, dynamic_trigger, current_price, alert_type,
+                                                   ai_direction=_ai_dir,
+                                                   ai_entry=_ai_params.get("ai_entry") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
+                                                   ai_sl=_ai_params.get("ai_sl") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
+                                                   ai_tp=_ai_params.get("ai_tp") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
+                                                   ai_leverage=1, ai_deposit_pct=2.0,
+                                                   is_monitor=True, is_pump_filter=_is_pump_filter)
+                            else:
+                                # 🟢 FULL SIGNAL
+                                # 1D emergency warnings
+                                emergency_warnings = []
+                                try:
+                                    raw_1d = await fetch_klines(session, sym, "1d", 250)
+                                    if raw_1d:
+                                        indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
+                                        emergency_warnings = get_1d_emergency_warnings(indic_1d)
+                                        if emergency_warnings:
+                                            warn_text = "\n".join(emergency_warnings)
+                                            if ai_verdict:
+                                                ai_verdict = ai_verdict + f"\n\n📊 1D MACRO:\n{warn_text}"
+                                except Exception as e:
+                                    logging.error(f"❌ VOL PASS 1D emergency check for {sym}: {e}")
+
+                                is_sent, _ = await send_breakout_notification(
+                                    sym, full_df, line_data, tf, alert_type, session,
+                                    dynamic_trigger, ai_verdict or ""
+                                )
+                                logging.info(f"🟢 VOL PASS FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
+
+                                if is_sent:
+                                    add_breakout_entry(sym, tf, dynamic_trigger, current_price, alert_type,
+                                                       ai_direction=_ai_dir,
+                                                       ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
+                                                       ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
+                                                       ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
+                                                       ai_leverage=FIXED_LEVERAGE,
+                                                       ai_deposit_pct=FIXED_DEPOSIT_PCT,
+                                                       is_pump_filter=_is_pump_filter)
+
+                            # Remove alert if it was stored
+                            alerts = load_alerts()
+                            if vw_item.get("alert") and vw_item["alert"] in alerts:
+                                alerts = [a for a in alerts if a != vw_item["alert"]]
+                                save_alerts(alerts)
+
+                        except Exception as e:
+                            logging.error(f"❌ VOL PASS pipeline error for {sym}: {e}")
+                            import traceback
+                            logging.error(traceback.format_exc())
 
             # Cleanup volume waitlist at 23:58 UTC (full rescan at 00:00)
             if now_utc.hour == 23 and now_utc.minute == 58:
