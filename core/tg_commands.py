@@ -451,6 +451,29 @@ async def handle_message(app_session, update):
         await send_response(app_session, chat_id, result_text, msg_id, parse_mode="Markdown")
         return
 
+    if text == "/time":
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+            return
+        import datetime as _dt
+        _h = SCAN_SCHEDULE["hour"]
+        _m = SCAN_SCHEDULE["minute"]
+        _now_msk = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=3)))
+        _scan_today = _now_msk.replace(hour=_h, minute=_m, second=0, microsecond=0)
+        if _now_msk >= _scan_today:
+            _next_scan = _scan_today + _dt.timedelta(days=1)
+        else:
+            _next_scan = _scan_today
+        _delta = _next_scan - _now_msk
+        _hours_left = int(_delta.total_seconds() // 3600)
+        _mins_left = int((_delta.total_seconds() % 3600) // 60)
+        msg_text = (
+            f"⏰ Текущее время скана: *{_h:02d}:{_m:02d}* (UTC+3)\n"
+            f"🕐 Следующий скан: *{_next_scan.strftime('%d.%m %H:%M')}* (через {_hours_left}ч {_mins_left}м)"
+        )
+        await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+        return
+
     if text.startswith("/time "):
         if not is_admin(msg):
             await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
