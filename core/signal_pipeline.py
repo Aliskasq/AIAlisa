@@ -792,7 +792,7 @@ async def monitor_recheck_loop(session):
             async def _process_one_monitor(m):
                 async with sem:
                     # Check weight before starting (shared across coroutines)
-                    await wait_for_weight(session, 1800)
+                    await wait_for_weight(session, 2350)
                     sym = m["symbol"]
                     tf = m["tf"]
                     interval = '1d' if tf == "1D" else '4h'

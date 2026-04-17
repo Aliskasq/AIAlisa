@@ -15,7 +15,7 @@ async def send_status_msg(text):
     except Exception as e:
         logging.error(f"Failed to send status message: {e}")
 
-async def wait_for_weight(session, threshold=1800):
+async def wait_for_weight(session, threshold=2350):
     """Wait until API weight drops below threshold. Checks every 5s."""
     weight = getattr(session, 'last_weight', 0)
     if isinstance(weight, str):
@@ -34,7 +34,7 @@ async def fetch_klines(session, symbol, interval, limit=199):
             weight = int(weight_str) if weight_str.isdigit() else 0
             session.last_weight = weight
             
-            if weight > 2000:
+            if weight > 2350:
                 current_time = time.time()
                 if current_time - LAST_WEIGHT_WARNING > 60:
                     LAST_WEIGHT_WARNING = current_time
@@ -46,7 +46,7 @@ async def fetch_klines(session, symbol, interval, limit=199):
                     ))
                 # Wait for next minute to reset weight
                 wait_secs = 60 - (time.time() % 60) + 2
-                logging.info(f"⏸️ Weight {weight} > 2000 — waiting {wait_secs:.0f}s for reset...")
+                logging.info(f"⏸️ Weight {weight} > 2350 — waiting {wait_secs:.0f}s for reset...")
                 await asyncio.sleep(wait_secs)
             
             if resp.status == 200:
