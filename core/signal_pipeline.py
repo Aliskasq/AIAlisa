@@ -763,7 +763,7 @@ async def monitor_recheck_loop(session):
     import pandas as pd
 
     # Delayed imports to avoid circular dependency
-    from core.binance_api import fetch_klines, fetch_funding_history, fetch_market_positioning
+    from core.binance_api import fetch_klines, fetch_funding_history, fetch_market_positioning, wait_for_weight
     from core.indicators import calculate_binance_indicators
     from agent.analyzer import ask_ai_analysis
     from core.chart_drawer import send_breakout_notification
@@ -787,10 +787,12 @@ async def monitor_recheck_loop(session):
             # No AI calls in monitor — auto-trade mode
 
             # Semaphore limits concurrent Binance API requests (avoid 429)
-            sem = asyncio.Semaphore(5)
+            sem = asyncio.Semaphore(20)
 
             async def _process_one_monitor(m):
                 async with sem:
+                    # Check weight before starting (shared across coroutines)
+                    await wait_for_weight(session, 1800)
                     sym = m["symbol"]
                     tf = m["tf"]
                     interval = '1d' if tf == "1D" else '4h'
@@ -1041,7 +1043,7 @@ async def monitor_recheck_loop(session):
                     logging.error(f"❌ Monitor {due[i].get('symbol','?')}: {r}")
 
             if len(due) > 0:
-                logging.info(f"🔄 Monitor cycle done: {len(due)} checked async (no AI — auto-trade mode)")
+                logging.info(f"🔄 Monitor cycle done: {len(due)} checked async ×20 (no AI — auto-trade mode)")
 
         except Exception as e:
             logging.error(f"❌ Monitor loop error: {e}")
