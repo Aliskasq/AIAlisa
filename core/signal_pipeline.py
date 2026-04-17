@@ -786,8 +786,11 @@ async def monitor_recheck_loop(session):
             logging.info(f"🔄 Monitor: {len(due)} due for re-check")
             # No AI calls in monitor — auto-trade mode
 
-            for m in due:
-                try:
+            # Semaphore limits concurrent Binance API requests (avoid 429)
+            sem = asyncio.Semaphore(5)
+
+            async def _process_one_monitor(m):
+                async with sem:
                     sym = m["symbol"]
                     tf = m["tf"]
                     interval = '1d' if tf == "1D" else '4h'
@@ -811,7 +814,7 @@ async def monitor_recheck_loop(session):
 
                     if current_price <= 0 or entry_price <= 0:
                         update_monitor_checked(m["key"])
-                        continue
+                        return
 
                     # ═══════════════════════════════════════════════════════
                     # COUNTER-TRADE CHECK: price moved 5%+ against direction
@@ -820,12 +823,10 @@ async def monitor_recheck_loop(session):
                     counter_trade = False
 
                     if direction == "LONG" and price_change_pct <= -5:
-                        # Was LONG but price dropped 5%+ → flip to SHORT
                         direction = "SHORT"
                         counter_trade = True
                         logging.info(f"⚠️ COUNTER-TRADE: {sym} was LONG but price {price_change_pct:+.1f}% → flipping to SHORT")
                     elif direction == "SHORT" and price_change_pct >= 5:
-                        # Was SHORT but price rose 5%+ → flip to LONG
                         direction = "LONG"
                         counter_trade = True
                         logging.info(f"⚠️ COUNTER-TRADE: {sym} was SHORT but price {price_change_pct:+.1f}% → flipping to LONG")
@@ -836,7 +837,6 @@ async def monitor_recheck_loop(session):
                     phase1_pass = counter_trade  # counter-trade always passes
 
                     if not phase1_pass and reason == "high_rsi":
-                        # LONG signal with high RSI — wait for RSI 4H to drop 10+ pts
                         rsi_now = await _quick_rsi_check(session, sym)
                         rsi_4h_now = rsi_now.get("4H", 99)
                         initial_rsi = m.get("initial_rsi_4h", 99)
@@ -849,7 +849,6 @@ async def monitor_recheck_loop(session):
                             logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{10-rsi_drop:.0f} more)")
 
                     elif not phase1_pass and reason == "low_rsi":
-                        # SHORT signal with low RSI — wait for RSI 4H to rise 10+ pts
                         rsi_now = await _quick_rsi_check(session, sym)
                         rsi_4h_now = rsi_now.get("4H", 1)
                         initial_rsi = m.get("initial_rsi_4h", 1)
@@ -862,10 +861,8 @@ async def monitor_recheck_loop(session):
                             logging.info(f"🔵 MONITOR RSI still low: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need +{10-rsi_rise:.0f} more)")
 
                     elif not phase1_pass and reason == "flat_market":
-                        # Wait for ADX ≥ 20 AND consensus ≥ 60% across 3 TFs
                         adx_now = await _quick_adx_check(session, sym, interval)
                         if adx_now >= ADX_TRENDING:
-                            # ADX improved — now check consensus across 3 TFs
                             try:
                                 from core.indicators import format_tf_summary
                                 import re as _re
@@ -900,7 +897,6 @@ async def monitor_recheck_loop(session):
                             logging.info(f"🔵 MONITOR ADX still flat: {sym} ADX {adx_now:.0f} (need ≥{ADX_TRENDING})")
 
                     elif not phase1_pass and reason == "pump_15m":
-                        # Wait for 15m volatility to calm down (<5%)
                         try:
                             url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=15m&limit=5"
                             async with session.get(url, timeout=10) as resp:
@@ -919,7 +915,6 @@ async def monitor_recheck_loop(session):
                             pass
 
                     elif not phase1_pass:  # "low_confidence" or unknown
-                        # Check consensus across 3 TFs (scorecard ≥ 60%)
                         try:
                             from core.indicators import format_tf_summary
                             import re as _re
@@ -951,8 +946,7 @@ async def monitor_recheck_loop(session):
 
                     if not phase1_pass:
                         update_monitor_checked(m["key"])
-                        await asyncio.sleep(0.5)
-                        continue
+                        return
 
                     # ═══════════════════════════════════════════════════════
                     # PHASE 2: AUTO-TRADE (open position, no AI)
@@ -1036,14 +1030,18 @@ async def monitor_recheck_loop(session):
                     except Exception as e:
                         logging.error(f"❌ Monitor bank entry failed for {sym}: {e}")
 
-                    await asyncio.sleep(2)  # small cooldown between checks (no AI needed)
-
-                except Exception as e:
-                    logging.error(f"❌ Monitor {m.get('symbol','?')}: {e}")
-                    update_monitor_checked(m["key"])
+            # Run all monitors concurrently (max 5 parallel via semaphore)
+            results = await asyncio.gather(
+                *[_process_one_monitor(m) for m in due],
+                return_exceptions=True
+            )
+            # Log any unexpected exceptions
+            for i, r in enumerate(results):
+                if isinstance(r, Exception):
+                    logging.error(f"❌ Monitor {due[i].get('symbol','?')}: {r}")
 
             if len(due) > 0:
-                logging.info(f"🔄 Monitor cycle done: {len(due)} checked (no AI — auto-trade mode)")
+                logging.info(f"🔄 Monitor cycle done: {len(due)} checked async (no AI — auto-trade mode)")
 
         except Exception as e:
             logging.error(f"❌ Monitor loop error: {e}")
