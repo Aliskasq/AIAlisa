@@ -220,7 +220,8 @@ async def main():
             # =========================================================
             alerts = load_alerts()
             alerts_to_remove = []
-            processed_symbols = set()  # Prevent duplicate processing of same symbol in one cycle
+            processed_symbols = set()  # Track symbol+tf pairs already queued
+            traded_symbols = set()    # Symbols with FULL trade — skip further TFs
             breakout_queue = []  # Collect all breakouts, then prep data in parallel, AI in queue
 
             if alerts:
@@ -296,8 +297,9 @@ async def main():
                                 trigger_hit = True
 
                         # --- COLLECT BREAKOUTS FOR PARALLEL PREP ---
-                        if trigger_hit and symbol not in processed_symbols:
-                            processed_symbols.add(symbol)
+                        _sym_tf_key = f"{symbol}_{tf_key}"
+                        if trigger_hit and _sym_tf_key not in processed_symbols:
+                            processed_symbols.add(_sym_tf_key)
                             logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price})")
                             line_data = stored_lines.get(tf_key, {}).get(symbol)
                             if line_data:
@@ -456,6 +458,11 @@ async def main():
                         full_df = item["full_df"]
                         line_data = item["line_data"]
                         last_indic_row = item["last_indic_row"]
+
+                        # Skip if this symbol already got a FULL trade on another TF
+                        if sym in traded_symbols:
+                            logging.info(f"⏭️ Skip {sym} {tf} — already traded on another TF")
+                            continue
 
                         logging.info(f"🤖 AI queue [{idx+1}/{len(breakout_queue)}]: {sym} {tf}")
 
@@ -708,6 +715,7 @@ async def main():
                             logging.info(f"🟢 FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
 
                         if is_sent:
+                            traded_symbols.add(sym)  # Block further TFs for this symbol
                             add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
                                                ai_direction=_ai_dir,
                                                ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
