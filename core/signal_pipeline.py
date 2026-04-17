@@ -18,7 +18,7 @@ MONITOR_FILE = "data/signal_monitor.json"
 VOLUME_WAITLIST_FILE = "data/volume_waitlist.json"
 RECHECK_INTERVAL_SEC = 1800  # 30 minutes default (flat_market, low_confidence)
 RECHECK_FAST_SEC = 900       # 15 minutes for high_rsi, low_rsi, pump_15m
-MAX_MONITOR_HOURS = 48       # expire signal monitors after 48h
+MAX_MONITOR_HOURS = 24       # expire signal monitors after 24h
 
 # --- Confidence threshold ---
 CONFIDENCE_FULL = 60      # % to issue full signal (consensus across TFs can go as low as 60%)
