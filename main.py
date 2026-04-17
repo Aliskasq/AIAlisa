@@ -1006,6 +1006,12 @@ async def main():
                 clear_volume_waitlist()
                 logging.info("🧹 Volume waitlist cleared (23:58 UTC, full rescan at 00:00)")
 
+            # Daily AI reset: 03:05 MSK = 00:05 UTC → Gemini #1
+            if now_utc.hour == 0 and now_utc.minute == 5:
+                from agent.analyzer import daily_reset_to_gemini_1
+                daily_reset_to_gemini_1()
+                logging.info("🔄 Daily AI reset: Gemini #1 (03:05 MSK)")
+
             # =========================================================
             # BLOCK 3: SMART TIMER (Sleep until exact time XX:05:02, XX:10:02)
             # =========================================================

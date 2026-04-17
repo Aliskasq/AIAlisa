@@ -369,7 +369,8 @@ async def handle_message(app_session, update):
                 "💼 `/paper close 1` — close position\n"
                 "💼 `/paper history` — trade history + winrate\n"
                 "💼 `/paper clear` — reset all\n"
-                "🔑 `/testapi AIzaSy...` — test Gemini key"
+                "🔑 `/testapi AIzaSy...` — test Gemini key\n"
+                "🔑 `/testall` — test all AI keys"
             )
         await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
         return
@@ -448,6 +449,102 @@ async def handle_message(app_session, update):
         else:
             header = "✅ *Key works!*" if _any_ok else "⚠️ *Key valid but no model responded*"
             result_text = f"🔑 {header}\n\n" + "\n".join(_test_results)
+        await send_response(app_session, chat_id, result_text, msg_id, parse_mode="Markdown")
+        return
+
+    # ==========================================
+    # TEST ALL KEYS (/testall)
+    # ==========================================
+    if text.startswith("/testall"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+            return
+
+        from config import GEMINI_API_KEYS, GROQ_API_KEYS, OPENROUTER_API_KEY, KEY_ACCOUNT_LABELS
+        from agent.analyzer import get_active_provider_info
+
+        prov, mdl, kidx = get_active_provider_info()
+        await send_response(app_session, chat_id,
+            f"🔑 Тестирую все ключи...\n"
+            f"Активный: `{prov}` #{kidx+1} ({KEY_ACCOUNT_LABELS.get(kidx, '?')})\n"
+            f"Модель: `{mdl}`", msg_id, parse_mode="Markdown")
+
+        _results = []
+        req_timeout = aiohttp.ClientTimeout(total=15)
+        test_payload = {"contents": [{"parts": [{"text": "Say OK"}]}]}
+        gemini_model = "gemini-2.5-flash"
+
+        # Test Gemini keys
+        async with aiohttp.ClientSession() as test_session:
+            for i, key in enumerate(GEMINI_API_KEYS):
+                label = KEY_ACCOUNT_LABELS.get(i, f"#{i+1}")
+                active_mark = " 👈" if prov == "gemini" and kidx == i else ""
+                try:
+                    test_url = f"https://botgem.zhoriha.workers.dev/v1beta/models/{gemini_model}:generateContent?key={key}"
+                    async with test_session.post(test_url, json=test_payload, timeout=req_timeout) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            if data.get("candidates"):
+                                _results.append(f"✅ Gemini #{i+1} ({label}){active_mark}")
+                            else:
+                                _results.append(f"⚠️ Gemini #{i+1} ({label}) — пустой ответ{active_mark}")
+                        elif resp.status == 429:
+                            _results.append(f"⏳ Gemini #{i+1} ({label}) — лимит{active_mark}")
+                        elif resp.status == 400:
+                            body = await resp.text()
+                            if "API_KEY_INVALID" in body:
+                                _results.append(f"❌ Gemini #{i+1} ({label}) — невалидный{active_mark}")
+                            else:
+                                _results.append(f"❌ Gemini #{i+1} ({label}) — 400{active_mark}")
+                        else:
+                            _results.append(f"❌ Gemini #{i+1} ({label}) — HTTP {resp.status}{active_mark}")
+                except asyncio.TimeoutError:
+                    _results.append(f"⏰ Gemini #{i+1} ({label}) — таймаут{active_mark}")
+                except Exception as e:
+                    _results.append(f"❌ Gemini #{i+1} ({label}) — {str(e)[:40]}{active_mark}")
+                await asyncio.sleep(0.3)
+
+            # Test Groq keys
+            groq_headers = {"Content-Type": "application/json"}
+            groq_payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Say OK"}], "temperature": 0.1}
+            for i, key in enumerate(GROQ_API_KEYS):
+                active_mark = " 👈" if prov == "groq" and kidx == i else ""
+                try:
+                    _h = {**groq_headers, "Authorization": f"Bearer {key}"}
+                    async with test_session.post("https://api.groq.com/openai/v1/chat/completions",
+                                                  json=groq_payload, headers=_h, timeout=req_timeout) as resp:
+                        if resp.status == 200:
+                            _results.append(f"✅ Groq #{i+1}{active_mark}")
+                        elif resp.status == 429:
+                            _results.append(f"⏳ Groq #{i+1} — лимит{active_mark}")
+                        else:
+                            _results.append(f"❌ Groq #{i+1} — HTTP {resp.status}{active_mark}")
+                except asyncio.TimeoutError:
+                    _results.append(f"⏰ Groq #{i+1} — таймаут{active_mark}")
+                except Exception as e:
+                    _results.append(f"❌ Groq #{i+1} — {str(e)[:40]}{active_mark}")
+                await asyncio.sleep(0.3)
+
+            # Test OpenRouter
+            if OPENROUTER_API_KEY:
+                for or_model in ["openai/gpt-oss-120b:free", "openrouter/free"]:
+                    active_mark = " 👈" if prov == "openrouter" and mdl == or_model else ""
+                    try:
+                        _h = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+                        _p = {"model": or_model, "messages": [{"role": "user", "content": "Say OK"}], "temperature": 0.1}
+                        async with test_session.post("https://openrouter.ai/api/v1/chat/completions",
+                                                      json=_p, headers=_h, timeout=req_timeout) as resp:
+                            if resp.status == 200:
+                                _results.append(f"✅ OpenRouter `{or_model}`{active_mark}")
+                            else:
+                                _results.append(f"❌ OpenRouter `{or_model}` — HTTP {resp.status}{active_mark}")
+                    except asyncio.TimeoutError:
+                        _results.append(f"⏰ OpenRouter `{or_model}` — таймаут{active_mark}")
+                    except Exception as e:
+                        _results.append(f"❌ OpenRouter `{or_model}` — {str(e)[:40]}{active_mark}")
+                    await asyncio.sleep(0.3)
+
+        result_text = "🔑 *Результаты тестирования:*\n\n" + "\n".join(_results)
         await send_response(app_session, chat_id, result_text, msg_id, parse_mode="Markdown")
         return
 
