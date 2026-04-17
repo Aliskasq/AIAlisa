@@ -16,8 +16,9 @@ from datetime import datetime, timezone
 
 MONITOR_FILE = "data/signal_monitor.json"
 VOLUME_WAITLIST_FILE = "data/volume_waitlist.json"
-RECHECK_INTERVAL_SEC = 1800  # 30 minutes from each signal's OWN detection time
-MAX_MONITOR_HOURS = 24  # expire signal monitors after 24h
+RECHECK_INTERVAL_SEC = 1800  # 30 minutes default (flat_market, low_confidence)
+RECHECK_FAST_SEC = 900       # 15 minutes for high_rsi, low_rsi, pump_15m
+MAX_MONITOR_HOURS = 48       # expire signal monitors after 48h
 
 # --- Confidence threshold ---
 CONFIDENCE_FULL = 60      # % to issue full signal (consensus across TFs can go as low as 60%)
@@ -418,6 +419,10 @@ def add_monitor(symbol: str, tf: str, direction: str, long_pct: float,
     monitors = [m for m in monitors if m.get("key") != key]
     
     now = time.time()
+    # Fast reasons (15min): high_rsi, low_rsi, pump_15m. Others: 30min.
+    fast_reasons = ("high_rsi", "low_rsi", "pump_15m")
+    default_interval = RECHECK_FAST_SEC if reason in fast_reasons else RECHECK_INTERVAL_SEC
+    effective_recheck = recheck_sec or default_interval
     monitors.append({
         "key": key,
         "symbol": symbol,
@@ -429,8 +434,8 @@ def add_monitor(symbol: str, tf: str, direction: str, long_pct: float,
         "reason": reason,
         "added_at": datetime.now(timezone.utc).isoformat(),
         "added_ts": now,
-        "next_check_ts": now + (recheck_sec or RECHECK_INTERVAL_SEC),
-        "recheck_sec": recheck_sec or RECHECK_INTERVAL_SEC,
+        "next_check_ts": now + effective_recheck,
+        "recheck_sec": effective_recheck,
         "check_count": 0,
         # Snapshot values for lightweight recheck
         "initial_rsi_4h": rsi_4h,
@@ -440,7 +445,7 @@ def add_monitor(symbol: str, tf: str, direction: str, long_pct: float,
     })
     
     save_monitors(monitors)
-    logging.info(f"🔵 MONITOR added: {symbol} {tf} {direction} ({reason}, RSI4H={rsi_4h:.0f}, ADX={adx_4h:.0f}) — next check in {(recheck_sec or RECHECK_INTERVAL_SEC)//60}min")
+    logging.info(f"🔵 MONITOR added: {symbol} {tf} {direction} ({reason}, RSI4H={rsi_4h:.0f}, ADX={adx_4h:.0f}) — next check in {effective_recheck//60}min")
 
 
 def get_due_monitors() -> list:
@@ -787,14 +792,51 @@ async def monitor_recheck_loop(session):
                     tf = m["tf"]
                     interval = '1d' if tf == "1D" else '4h'
                     reason = m.get("reason", "low_confidence")
+                    direction = m.get("direction", "LONG")
+                    entry_price = m.get("entry_price", 0)
 
                     # ═══════════════════════════════════════════════════════
-                    # PHASE 1: LIGHTWEIGHT CHECK (reason-specific, no AI)
+                    # PRE-CHECK: Get current price (needed for counter-trade)
                     # ═══════════════════════════════════════════════════════
-                    phase1_pass = False
+                    try:
+                        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval={interval}&limit=5"
+                        async with session.get(url, timeout=10) as resp:
+                            if resp.status == 200:
+                                candles = await resp.json()
+                                current_price = float(candles[-1][4]) if candles else entry_price
+                            else:
+                                current_price = entry_price
+                    except Exception:
+                        current_price = entry_price
 
-                    if reason == "high_rsi":
-                        # LONG signal with high RSI — wait for RSI to drop 10+ pts
+                    if current_price <= 0 or entry_price <= 0:
+                        update_monitor_checked(m["key"])
+                        continue
+
+                    # ═══════════════════════════════════════════════════════
+                    # COUNTER-TRADE CHECK: price moved 5%+ against direction
+                    # ═══════════════════════════════════════════════════════
+                    price_change_pct = ((current_price - entry_price) / entry_price) * 100
+                    counter_trade = False
+
+                    if direction == "LONG" and price_change_pct <= -5:
+                        # Was LONG but price dropped 5%+ → flip to SHORT
+                        direction = "SHORT"
+                        counter_trade = True
+                        logging.info(f"⚠️ COUNTER-TRADE: {sym} was LONG but price {price_change_pct:+.1f}% → flipping to SHORT")
+                    elif direction == "SHORT" and price_change_pct >= 5:
+                        # Was SHORT but price rose 5%+ → flip to LONG
+                        direction = "LONG"
+                        counter_trade = True
+                        logging.info(f"⚠️ COUNTER-TRADE: {sym} was SHORT but price {price_change_pct:+.1f}% → flipping to LONG")
+
+                    # ═══════════════════════════════════════════════════════
+                    # PHASE 1: CONDITION CHECK (reason-specific, no AI)
+                    # ═══════════════════════════════════════════════════════
+                    phase1_pass = counter_trade  # counter-trade always passes
+
+                    if not phase1_pass and reason == "high_rsi":
+                        # LONG signal with high RSI — wait for RSI 4H to drop 10+ pts
                         rsi_now = await _quick_rsi_check(session, sym)
                         rsi_4h_now = rsi_now.get("4H", 99)
                         initial_rsi = m.get("initial_rsi_4h", 99)
@@ -802,12 +844,12 @@ async def monitor_recheck_loop(session):
 
                         if rsi_drop >= 10:
                             phase1_pass = True
-                            logging.info(f"🔵 MONITOR RSI improved: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (dropped {rsi_drop:.0f} pts) → Phase 2")
+                            logging.info(f"🔵 MONITOR RSI improved: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (dropped {rsi_drop:.0f} pts)")
                         else:
                             logging.info(f"🔵 MONITOR RSI still high: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need -{10-rsi_drop:.0f} more)")
 
-                    elif reason == "low_rsi":
-                        # SHORT signal with low RSI — wait for RSI to rise 10+ pts
+                    elif not phase1_pass and reason == "low_rsi":
+                        # SHORT signal with low RSI — wait for RSI 4H to rise 10+ pts
                         rsi_now = await _quick_rsi_check(session, sym)
                         rsi_4h_now = rsi_now.get("4H", 1)
                         initial_rsi = m.get("initial_rsi_4h", 1)
@@ -815,52 +857,97 @@ async def monitor_recheck_loop(session):
 
                         if rsi_rise >= 10:
                             phase1_pass = True
-                            logging.info(f"🔵 MONITOR RSI recovered: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (rose {rsi_rise:.0f} pts) → Phase 2")
+                            logging.info(f"🔵 MONITOR RSI recovered: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (rose {rsi_rise:.0f} pts)")
                         else:
                             logging.info(f"🔵 MONITOR RSI still low: {sym} RSI {initial_rsi:.0f}→{rsi_4h_now:.0f} (need +{10-rsi_rise:.0f} more)")
 
-                    elif reason == "flat_market":
-                        # Only fetch ADX (30 candles × 1 TF)
+                    elif not phase1_pass and reason == "flat_market":
+                        # Wait for ADX ≥ 20 AND consensus ≥ 60% across 3 TFs
                         adx_now = await _quick_adx_check(session, sym, interval)
-                        initial_adx = m.get("initial_adx_4h", 0)
-
                         if adx_now >= ADX_TRENDING:
-                            phase1_pass = True
-                            logging.info(f"🔵 MONITOR ADX improved: {sym} ADX {initial_adx:.0f}→{adx_now:.0f} (≥{ADX_TRENDING}) → Phase 2")
-                        else:
-                            logging.info(f"🔵 MONITOR ADX still flat: {sym} ADX {initial_adx:.0f}→{adx_now:.0f} (need ≥{ADX_TRENDING})")
+                            # ADX improved — now check consensus across 3 TFs
+                            try:
+                                from core.indicators import format_tf_summary
+                                import re as _re
+                                _consensus_ok = False
+                                raw_4h = await fetch_klines(session, sym, interval, 250)
+                                raw_1h = await fetch_klines(session, sym, "1h", 250)
+                                raw_15m = await fetch_klines(session, sym, "15m", 250)
+                                if raw_4h:
+                                    ind_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), tf)
+                                    ind_1h = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0] if raw_1h else {}
+                                    ind_15m = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0] if raw_15m else {}
 
-                    elif reason == "pump_15m":
-                        # Check if 15m volatility calmed down
+                                    def _bull_pct(ind, lbl):
+                                        s = format_tf_summary(ind, lbl)
+                                        mm = _re.search(r'LONG\s+(\d+)%', s)
+                                        return int(mm.group(1)) if mm else 50
+
+                                    b4 = _bull_pct(ind_4h, tf)
+                                    b1 = _bull_pct(ind_1h, "1H") if ind_1h else 50
+                                    b15 = _bull_pct(ind_15m, "15m") if ind_15m else 50
+                                    w_long = b4 * 0.50 + b1 * 0.30 + b15 * 0.20
+                                    if max(w_long, 100 - w_long) >= 60:
+                                        _consensus_ok = True
+                                if _consensus_ok:
+                                    phase1_pass = True
+                                    logging.info(f"🔵 MONITOR flat resolved: {sym} ADX {adx_now:.0f} + consensus {max(w_long, 100-w_long):.0f}%")
+                                else:
+                                    logging.info(f"🔵 MONITOR ADX ok but consensus weak: {sym} ADX {adx_now:.0f}, L:{w_long:.0f}%")
+                            except Exception as e:
+                                logging.error(f"❌ Monitor flat_market consensus check: {e}")
+                        else:
+                            logging.info(f"🔵 MONITOR ADX still flat: {sym} ADX {adx_now:.0f} (need ≥{ADX_TRENDING})")
+
+                    elif not phase1_pass and reason == "pump_15m":
+                        # Wait for 15m volatility to calm down (<5%)
                         try:
                             url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval=15m&limit=5"
                             async with session.get(url, timeout=10) as resp:
                                 if resp.status == 200:
-                                    candles = await resp.json()
-                                    if candles and len(candles) >= 2:
-                                        last_open = float(candles[-1][1])
-                                        last_close = float(candles[-1][4])
+                                    candles_15m = await resp.json()
+                                    if candles_15m and len(candles_15m) >= 2:
+                                        last_open = float(candles_15m[-1][1])
+                                        last_close = float(candles_15m[-1][4])
                                         change_pct = abs((last_close - last_open) / last_open * 100) if last_open > 0 else 0
                                         if change_pct < 5:
                                             phase1_pass = True
-                                            logging.info(f"🔵 MONITOR 15m calmed: {sym} candle {change_pct:.1f}% (<5%) → Phase 2")
+                                            logging.info(f"🔵 MONITOR 15m calmed: {sym} candle {change_pct:.1f}% (<5%)")
                                         else:
                                             logging.info(f"🔵 MONITOR 15m still volatile: {sym} candle {change_pct:.1f}%")
                         except Exception:
                             pass
 
-                    else:  # "low_confidence" or unknown
-                        # Lightweight: check RSI + ADX together
-                        rsi_now = await _quick_rsi_check(session, sym)
-                        adx_now = await _quick_adx_check(session, sym, interval)
-                        rsi_4h_now = rsi_now.get("4H", 50)
+                    elif not phase1_pass:  # "low_confidence" or unknown
+                        # Check consensus across 3 TFs (scorecard ≥ 60%)
+                        try:
+                            from core.indicators import format_tf_summary
+                            import re as _re
+                            raw_4h = await fetch_klines(session, sym, interval, 250)
+                            raw_1h = await fetch_klines(session, sym, "1h", 250)
+                            raw_15m = await fetch_klines(session, sym, "15m", 250)
+                            if raw_4h:
+                                ind_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), tf)
+                                ind_1h = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0] if raw_1h else {}
+                                ind_15m = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0] if raw_15m else {}
 
-                        # Pass if: RSI not extreme AND ADX shows trend
-                        if 30 < rsi_4h_now < 75 and adx_now >= 18:
-                            phase1_pass = True
-                            logging.info(f"🔵 MONITOR conditions improved: {sym} RSI={rsi_4h_now:.0f} ADX={adx_now:.0f} → Phase 2")
-                        else:
-                            logging.info(f"🔵 MONITOR still weak: {sym} RSI={rsi_4h_now:.0f} ADX={adx_now:.0f}")
+                                def _bull_pct2(ind, lbl):
+                                    s = format_tf_summary(ind, lbl)
+                                    mm = _re.search(r'LONG\s+(\d+)%', s)
+                                    return int(mm.group(1)) if mm else 50
+
+                                b4 = _bull_pct2(ind_4h, tf)
+                                b1 = _bull_pct2(ind_1h, "1H") if ind_1h else 50
+                                b15 = _bull_pct2(ind_15m, "15m") if ind_15m else 50
+                                w_long = b4 * 0.50 + b1 * 0.30 + b15 * 0.20
+                                conf_now = max(w_long, 100 - w_long)
+                                if conf_now >= 60:
+                                    phase1_pass = True
+                                    logging.info(f"🔵 MONITOR confidence improved: {sym} consensus {conf_now:.0f}% (L:{w_long:.0f}%)")
+                                else:
+                                    logging.info(f"🔵 MONITOR still low confidence: {sym} consensus {conf_now:.0f}% (L:{w_long:.0f}%)")
+                        except Exception as e:
+                            logging.error(f"❌ Monitor low_confidence check: {e}")
 
                     if not phase1_pass:
                         update_monitor_checked(m["key"])
@@ -868,38 +955,18 @@ async def monitor_recheck_loop(session):
                         continue
 
                     # ═══════════════════════════════════════════════════════
-                    # PHASE 2: AUTO-TRADE (no AI — use stored direction)
+                    # PHASE 2: AUTO-TRADE (open position, no AI)
                     # ═══════════════════════════════════════════════════════
-                    # Direction comes from the original AI analysis when signal entered monitor
-                    direction = m.get("direction", "LONG")
                     conf = max(m.get("long_pct", 50), m.get("short_pct", 50))
 
-                    # Fetch current price (lightweight — just 1 candle)
+                    # Fetch full indicators for ATR calculation
+                    indicators = {}
                     try:
-                        url = f"https://fapi.binance.com/fapi/v1/klines?symbol={sym}&interval={interval}&limit=5"
-                        async with session.get(url, timeout=10) as resp:
-                            if resp.status == 200:
-                                candles = await resp.json()
-                                current_price = float(candles[-1][4]) if candles else m.get("entry_price", 0)
-                            else:
-                                current_price = m.get("entry_price", 0)
+                        raw_atr = await fetch_klines(session, sym, interval, 250)
+                        if raw_atr:
+                            indicators, _ = calculate_binance_indicators(pd.DataFrame(raw_atr), tf)
                     except Exception:
-                        current_price = m.get("entry_price", 0)
-
-                    if current_price <= 0:
-                        update_monitor_checked(m["key"])
-                        continue
-
-                    # Fetch full indicators for ATR calculation (250 candles)
-                    try:
-                        raw = await fetch_klines(session, sym, interval, 250)
-                        if raw:
-                            df = pd.DataFrame(raw)
-                            indicators, _ = calculate_binance_indicators(df, tf)
-                        else:
-                            indicators = {}
-                    except Exception:
-                        indicators = {}
+                        pass
 
                     # Calculate SL/TP from ATR (SL max 10%, TP = 2:1)
                     atr_params = calculate_atr_sl_tp(indicators, direction, current_price)
@@ -921,19 +988,31 @@ async def monitor_recheck_loop(session):
                     tp_pct = abs(tp - current_price) / current_price * 100
 
                     remove_monitor(m["key"])
-                    logging.info(f"🟢 MONITOR AUTO-TRADE: {sym} {tf} {direction} {conf:.0f}% | Entry: {current_price} | SL: {sl} ({sl_pct:.1f}%) | TP: {tp} ({tp_pct:.1f}%)")
+                    trade_type = "COUNTER-TRADE" if counter_trade else "AUTO-TRADE"
+                    logging.info(f"🟢 MONITOR {trade_type}: {sym} {tf} {direction} {conf:.0f}% | Entry: {current_price} | SL: {sl} ({sl_pct:.1f}%) | TP: {tp} ({tp_pct:.1f}%)")
 
                     # Send simple text push to monitor group
                     _upgrade_chat = MONITOR_GROUP_CHAT_ID or GROUP_CHAT_ID
                     short_sym = sym.replace("USDT", "")
-                    push_text = (
-                        f"🟢 MONITOR → TRADE\n"
-                        f"${short_sym} | {tf} | {direction} {conf:.0f}%\n"
-                        f"💰 Entry: {current_price}\n"
-                        f"🚫 SL: {sl} ({sl_pct:.1f}%)\n"
-                        f"🎯 TP: {tp} ({tp_pct:.1f}%)\n"
-                        f"📊 Was: {reason} | Original: {m.get('entry_price', 0)}"
-                    )
+                    if counter_trade:
+                        orig_dir = "SHORT" if direction == "LONG" else "LONG"
+                        push_text = (
+                            f"⚠️ MONITOR → СМЕНА НАПРАВЛЕНИЯ\n"
+                            f"${short_sym} | {tf} | {orig_dir} → {direction}\n"
+                            f"📉 Цена {price_change_pct:+.1f}% от входа\n"
+                            f"💰 Entry: {current_price}\n"
+                            f"🚫 SL: {sl} ({sl_pct:.1f}%)\n"
+                            f"🎯 TP: {tp} ({tp_pct:.1f}%)"
+                        )
+                    else:
+                        push_text = (
+                            f"🟢 MONITOR → TRADE\n"
+                            f"${short_sym} | {tf} | {direction} {conf:.0f}%\n"
+                            f"💰 Entry: {current_price}\n"
+                            f"🚫 SL: {sl} ({sl_pct:.1f}%)\n"
+                            f"🎯 TP: {tp} ({tp_pct:.1f}%)\n"
+                            f"📊 Was: {reason}"
+                        )
                     try:
                         tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                         await session.post(tg_url, json={
@@ -944,15 +1023,16 @@ async def monitor_recheck_loop(session):
 
                     # Add to MONITOR bank (bankm) — NOT to signals close
                     try:
-                        add_monitor_breakout_entry(sym, tf, m.get("entry_price", 0), current_price,
-                                          "monitor_auto_trade",
+                        _entry_type = "counter_trade" if counter_trade else "monitor_auto_trade"
+                        add_monitor_breakout_entry(sym, tf, entry_price, current_price,
+                                          _entry_type,
                                           ai_direction=direction,
                                           ai_entry=current_price,
                                           ai_sl=sl,
                                           ai_tp=tp,
                                           ai_leverage=FIXED_LEVERAGE,
                                           ai_deposit_pct=FIXED_DEPOSIT_PCT)
-                        logging.info(f"✅ Monitor bank entry: {sym} {direction} @ {current_price}")
+                        logging.info(f"✅ Monitor bank entry: {sym} {direction} @ {current_price} ({_entry_type})")
                     except Exception as e:
                         logging.error(f"❌ Monitor bank entry failed for {sym}: {e}")
 
