@@ -810,19 +810,18 @@ async def main():
                             _vp_mtf_tasks = [
                                 fetch_funding_history(session, sym),
                                 fetch_market_positioning(session, sym),
+                                fetch_klines(session, sym, "4h", 250),
                                 fetch_klines(session, sym, "1h", 250),
                                 fetch_klines(session, sym, "15m", 250),
                             ]
-                            if tf == "1D":
-                                _vp_mtf_tasks.append(fetch_klines(session, sym, "4h", 250))
 
                             _vp_mtf_results = await asyncio.gather(*_vp_mtf_tasks, return_exceptions=True)
 
                             funding = _vp_mtf_results[0] if not isinstance(_vp_mtf_results[0], Exception) else "Unknown"
                             positioning = _vp_mtf_results[1] if not isinstance(_vp_mtf_results[1], Exception) else {}
-                            raw_1h = _vp_mtf_results[2] if not isinstance(_vp_mtf_results[2], Exception) else None
-                            raw_15m = _vp_mtf_results[3] if not isinstance(_vp_mtf_results[3], Exception) else None
-                            raw_4h = _vp_mtf_results[4] if len(_vp_mtf_results) > 4 and not isinstance(_vp_mtf_results[4], Exception) else None
+                            raw_4h = _vp_mtf_results[2] if not isinstance(_vp_mtf_results[2], Exception) else None
+                            raw_1h = _vp_mtf_results[3] if not isinstance(_vp_mtf_results[3], Exception) else None
+                            raw_15m = _vp_mtf_results[4] if not isinstance(_vp_mtf_results[4], Exception) else None
 
                             last_indic_row["funding_rate"] = funding
                             last_indic_row["positioning"] = positioning
