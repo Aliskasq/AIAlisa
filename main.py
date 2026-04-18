@@ -209,6 +209,21 @@ async def main():
                     last_full_calc_date = now_msk.date()
                     with open(TREND_STATE_FILE, 'w') as f:
                         json.dump({"lines": stored_lines}, f)
+
+                    # Cleanup stale alerts right after rescan
+                    _post_alerts = load_alerts() or []
+                    _post_valid = set()
+                    for _tf_key in stored_lines:
+                        for _sym, _line in stored_lines[_tf_key].items():
+                            if _line and _line.get("status") in ("WAITING_2_PERCENT", "WAITING_RED_CLOSE"):
+                                _post_valid.add((_sym, _tf_key))
+                    _post_before = len(_post_alerts)
+                    _post_alerts = [a for a in _post_alerts if (a["symbol"], a["tf"]) in _post_valid]
+                    _post_removed = _post_before - len(_post_alerts)
+                    if _post_removed > 0:
+                        save_alerts(_post_alerts)
+                    logging.info(f"🧹 Post-scan: cleaned {_post_removed} stale alerts")
+
                     logging.info("✅ Global recalculation completed successfully!")
                 else:
                     logging.error("❌ Symbol list is empty, retrying in 60 seconds...")
