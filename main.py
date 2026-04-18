@@ -1021,20 +1021,6 @@ async def main():
                 clear_volume_waitlist()
                 logging.info("🧹 Volume waitlist cleared (23:58 UTC, full rescan at 00:00)")
 
-                # Cleanup stale alerts: remove alerts for coins no longer in stored_lines
-                _cleanup_alerts = load_alerts() or []
-                _valid_symbols = set()
-                for _tf_key in stored_lines:
-                    for _sym, _line in stored_lines[_tf_key].items():
-                        if _line and _line.get("status") in ("WAITING_2_PERCENT", "WAITING_RED_CLOSE"):
-                            _valid_symbols.add((_sym, _tf_key))
-                _before = len(_cleanup_alerts)
-                _cleanup_alerts = [a for a in _cleanup_alerts if (a["symbol"], a["tf"]) in _valid_symbols]
-                _removed = _before - len(_cleanup_alerts)
-                if _removed > 0:
-                    save_alerts(_cleanup_alerts)
-                logging.info(f"🧹 Cleaned {_removed} stale alerts (23:58 UTC, pre-rescan)")
-
             # Daily AI reset: 03:05 MSK = 00:05 UTC → Gemini #1
             if now_utc.hour == 0 and now_utc.minute == 5:
                 from agent.analyzer import daily_reset_to_gemini_1
