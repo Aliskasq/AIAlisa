@@ -84,8 +84,7 @@ async def _call_openrouter(messages, api_key, model, timeout_sec=240):
     return None
 
 async def _call_gemini(messages, api_key, model, timeout_sec=240):
-    """Call Gemini REST API. Converts OpenAI-style messages to Gemini format.
-    Retries once on 503 (overloaded) with 5s delay."""
+    """Call Gemini REST API. Converts OpenAI-style messages to Gemini format."""
     # Extract system instruction and user messages
     system_text = ""
     contents = []
@@ -104,30 +103,22 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
 
     url = f"https://botgem.zhoriha.workers.dev/v1beta/models/{model}:generateContent?key={api_key}"
     req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
-    
-    max_retries = 2  # 1 original + 1 retry on 503
-    for attempt in range(max_retries):
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=req_timeout) as resp:
-                    if resp.status == 200:
-                        data = await resp.json(content_type=None)
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            text = "".join(p.get("text", "") for p in parts)
-                            if text.strip():
-                                return text.strip()
-                    elif resp.status == 503 and attempt < max_retries - 1:
-                        logging.warning(f"⚠️ Gemini 503 overloaded, retrying in 5s (attempt {attempt+1})...")
-                        await asyncio.sleep(5)
-                        continue
-                    else:
-                        body = await resp.text()
-                        logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
-        except Exception as e:
-            logging.warning(f"⚠️ Gemini error: {type(e).__name__}: {e}")
-        break  # don't retry on non-503 errors
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=req_timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        text = "".join(p.get("text", "") for p in parts)
+                        if text.strip():
+                            return text.strip()
+                else:
+                    body = await resp.text()
+                    logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
+    except Exception as e:
+        logging.warning(f"⚠️ Gemini error: {type(e).__name__}: {e}")
     return None
 
 async def _call_groq(messages, api_key, model, timeout_sec=240):
