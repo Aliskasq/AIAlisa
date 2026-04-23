@@ -231,42 +231,56 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     
     start_time = time.time()
     
-    # Phase 1: Collect features from all pairs (sequential, memory-efficient)
+    # Phase 1: Collect features — batch API calls (10 parallel), sequential processing
     all_features = []
     all_labels = []
     pairs_ok = 0
     pairs_fail = 0
     total_samples = 0
     
-    for i, symbol in enumerate(symbols):
-        # Fetch candles
-        await asyncio.sleep(API_DELAY_SEC)
-        candles = await fetch_klines_multi(session, symbol, 
-                                           config["interval"],
-                                           config["limit"],
-                                           config["requests"])
-        if not candles:
-            pairs_fail += 1
-            continue
+    FETCH_BATCH = 10  # parallel API fetches (RAM safe — raw candles are tiny)
+    
+    for batch_start in range(0, len(symbols), FETCH_BATCH):
+        batch_symbols = symbols[batch_start:batch_start + FETCH_BATCH]
         
-        # Process pair
-        features, labels = process_pair(candles, tf_key, config)
-        if features is None:
-            pairs_fail += 1
-            continue
+        # Parallel fetch for batch
+        async def _fetch_one(sym):
+            await asyncio.sleep(API_DELAY_SEC * (batch_symbols.index(sym) % 5))
+            return sym, await fetch_klines_multi(
+                session, sym, config["interval"], config["limit"], config["requests"]
+            )
         
-        all_features.append(features.values)
-        all_labels.append(labels.values)
-        total_samples += len(features)
-        pairs_ok += 1
+        results = await asyncio.gather(*[_fetch_one(s) for s in batch_symbols],
+                                        return_exceptions=True)
         
-        # Free memory
-        del candles, features, labels
+        # Sequential processing (indicator calc is CPU-bound)
+        for result in results:
+            if isinstance(result, Exception):
+                pairs_fail += 1
+                continue
+            sym, candles = result
+            if not candles:
+                pairs_fail += 1
+                continue
+            
+            features, labels = process_pair(candles, tf_key, config)
+            if features is None:
+                pairs_fail += 1
+                del candles
+                continue
+            
+            all_features.append(features.values)
+            all_labels.append(labels.values)
+            total_samples += len(features)
+            pairs_ok += 1
+            
+            del candles, features, labels
         
-        # Periodic GC
-        if (i + 1) % BATCH_SIZE == 0:
+        # Periodic GC + progress
+        i = batch_start + len(batch_symbols)
+        if i % BATCH_SIZE == 0 or i >= len(symbols):
             gc.collect()
-            logging.info(f"   Progress: {i+1}/{len(symbols)} pairs, "
+            logging.info(f"   Progress: {i}/{len(symbols)} pairs, "
                         f"{total_samples} samples, {pairs_ok} ok / {pairs_fail} fail")
     
     if not all_features:
