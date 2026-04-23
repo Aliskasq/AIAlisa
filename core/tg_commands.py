@@ -370,7 +370,14 @@ async def handle_message(app_session, update):
                 "💼 `/paper history` — trade history + winrate\n"
                 "💼 `/paper clear` — reset all\n"
                 "🔑 `/testapi AIzaSy...` — test Gemini key\n"
-                "🔑 `/testall` — test all AI keys"
+                "🔑 `/testall` — test all AI keys\n\n"
+                "🧠 *ML (XGBoost):*\n"
+                "🧠 `/mltrain` — обучить все 3 модели\n"
+                "🧠 `/mltrain --tf 4h` — только 4H\n"
+                "🧠 `/mltrain --dry-run` — статистика без обучения\n"
+                "📊 `/mlstatus` — модели, точность, cron\n"
+                "⏰ `/mlcron ср+вс 04:00` — расписание\n"
+                "⏰ `/mlcron off` — отключить cron"
             )
         await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
         return

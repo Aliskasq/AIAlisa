@@ -103,16 +103,27 @@ async def fetch_klines_raw(session: aiohttp.ClientSession, symbol: str,
     if end_time:
         url += f"&endTime={end_time}"
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            # Track API weight
+            weight = resp.headers.get('X-MBX-USED-WEIGHT-1M', '0')
+            weight_int = int(weight) if weight.isdigit() else 0
+            
+            if weight_int > 2000:
+                wait_sec = 62 - (time.time() % 60)
+                logging.warning(f"⚠️ API weight {weight_int}/2400 — pausing {wait_sec:.0f}s")
+                await asyncio.sleep(wait_sec)
+            
             if resp.status == 429:
                 retry = int(resp.headers.get("Retry-After", "30"))
                 logging.warning(f"⚠️ 429 rate limited on {symbol}, waiting {retry}s...")
                 await asyncio.sleep(retry + 1)
                 return None
             if resp.status != 200:
+                logging.warning(f"⚠️ Klines {symbol} {interval}: HTTP {resp.status}")
                 return None
             raw = await resp.json()
             if not raw:
+                logging.warning(f"⚠️ Klines {symbol} {interval}: empty response")
                 return None
             return [
                 {
@@ -125,8 +136,11 @@ async def fetch_klines_raw(session: aiohttp.ClientSession, symbol: str,
                 }
                 for c in raw
             ]
+    except asyncio.TimeoutError:
+        logging.warning(f"⚠️ Timeout fetching {symbol} {interval}")
+        return None
     except Exception as e:
-        logging.debug(f"Fetch error {symbol} {interval}: {e}")
+        logging.warning(f"⚠️ Fetch error {symbol} {interval}: {type(e).__name__}: {e}")
         return None
 
 
@@ -194,7 +208,14 @@ def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
     
     try:
         df = pd.DataFrame(candles)
-        _, df_with_indicators = calculate_binance_indicators(df, tf_key)
+        result = calculate_binance_indicators(df, tf_key)
+        
+        # calculate_binance_indicators returns (last_row_dict, df) or just dict
+        if isinstance(result, tuple):
+            _, df_with_indicators = result
+        else:
+            logging.warning(f"Unexpected return type from calculate_binance_indicators: {type(result)}")
+            return None, None
         
         features = extract_features_from_df(df_with_indicators)
         labels = create_labels(df_with_indicators, 
@@ -210,8 +231,11 @@ def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
             return None, None
         
         return features, labels
+    except KeyError as e:
+        logging.warning(f"Missing column in df: {e}")
+        return None, None
     except Exception as e:
-        logging.debug(f"Process error: {e}")
+        logging.warning(f"Process error: {type(e).__name__}: {e}")
         return None, None
 
 
@@ -238,25 +262,31 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     pairs_fail = 0
     total_samples = 0
     
-    FETCH_BATCH = 10  # parallel API fetches (RAM safe — raw candles are tiny)
+    FETCH_BATCH = 5   # parallel API fetches (conservative for weight limits)
+    _first_errors_logged = 0
     
     for batch_start in range(0, len(symbols), FETCH_BATCH):
         batch_symbols = symbols[batch_start:batch_start + FETCH_BATCH]
         
         # Parallel fetch for batch
-        async def _fetch_one(sym):
-            await asyncio.sleep(API_DELAY_SEC * (batch_symbols.index(sym) % 5))
-            return sym, await fetch_klines_multi(
-                session, sym, config["interval"], config["limit"], config["requests"]
-            )
+        fetch_tasks = []
+        for idx, sym in enumerate(batch_symbols):
+            async def _fetch_one(_sym=sym, _delay=idx * 0.2):
+                await asyncio.sleep(_delay)
+                return _sym, await fetch_klines_multi(
+                    session, _sym, config["interval"], config["limit"], config["requests"]
+                )
+            fetch_tasks.append(_fetch_one())
         
-        results = await asyncio.gather(*[_fetch_one(s) for s in batch_symbols],
-                                        return_exceptions=True)
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
         
         # Sequential processing (indicator calc is CPU-bound)
         for result in results:
             if isinstance(result, Exception):
                 pairs_fail += 1
+                if _first_errors_logged < 3:
+                    logging.warning(f"⚠️ Fetch exception: {type(result).__name__}: {result}")
+                    _first_errors_logged += 1
                 continue
             sym, candles = result
             if not candles:
