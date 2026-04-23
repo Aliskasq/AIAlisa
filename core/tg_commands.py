@@ -1537,6 +1537,214 @@ async def handle_message(app_session, update):
     # ==========================================
     # CHART ANALYSIS (scan / check / посмотри …)
     # ==========================================
+    # ==========================================
+    # ML TRAINING COMMANDS (/mltrain, /mlstatus, /mlcron)
+    # ==========================================
+    if text.startswith("/mltrain"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔ Admin only", msg_id)
+            return
+        
+        parts = text.split()
+        tf_arg = None
+        dry_run = "--dry-run" in text or "--dry" in text
+        for p in parts[1:]:
+            if p.lower() in ("4h", "1h", "15m"):
+                tf_arg = p.lower()
+        
+        status_text = "🧠 ML обучение запущено"
+        if tf_arg:
+            status_text += f" (только {tf_arg.upper()})"
+        if dry_run:
+            status_text += " [dry-run]"
+        status_text += "\n⏳ Это займёт 5-15 минут..."
+        await send_response(app_session, chat_id, status_text, msg_id)
+        
+        # Run trainer in background subprocess
+        import subprocess
+        cmd = ["python3", "-m", "ml.trainer"]
+        if tf_arg:
+            cmd.extend(["--tf", tf_arg])
+        if dry_run:
+            cmd.append("--dry-run")
+        
+        async def _run_ml_train():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, cwd="/root/AIAlisa",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1800)
+                output = stdout.decode("utf-8", errors="ignore") if stdout else ""
+                
+                # Parse last lines for summary
+                lines = output.strip().split("\n")
+                summary_lines = [l for l in lines[-15:] if any(k in l for k in ["Training complete", "acc", "pairs", "samples", "DRY RUN", "error", "❌"])]
+                summary = "\n".join(summary_lines[-8:]) if summary_lines else "Завершено (детали в ml/train.log)"
+                
+                if proc.returncode == 0:
+                    result_text = f"✅ ML обучение завершено!\n\n{summary}"
+                    # Reload models in running bot
+                    try:
+                        from ml.engine import get_ml_engine
+                        engine = get_ml_engine()
+                        engine.load_models()
+                        result_text += "\n\n🔄 Модели перезагружены в боте"
+                    except Exception:
+                        result_text += "\n\n⚠️ Рестартни бота чтобы подхватить модели"
+                else:
+                    result_text = f"❌ ML обучение завершилось с ошибкой (код {proc.returncode})\n\n{summary}"
+                
+                await send_response(app_session, chat_id, result_text, msg_id)
+            except asyncio.TimeoutError:
+                await send_response(app_session, chat_id, "❌ ML обучение: timeout (>30 мин)", msg_id)
+            except Exception as e:
+                await send_response(app_session, chat_id, f"❌ ML ошибка: {e}", msg_id)
+        
+        asyncio.create_task(_run_ml_train())
+        return
+
+    if text.startswith("/mlstatus"):
+        import json as _json
+        stats_path = "/root/AIAlisa/ml/models/train_stats.json"
+        try:
+            from ml.engine import get_ml_engine
+            engine = get_ml_engine()
+            
+            status_lines = ["🧠 *ML Status*\n"]
+            
+            if engine.is_ready:
+                status_lines.append(f"✅ Модели загружены: {', '.join(engine.models.keys())}")
+            else:
+                status_lines.append("⚠️ Модели не загружены (обучение не запускалось)")
+            
+            if os.path.exists(stats_path):
+                with open(stats_path) as f:
+                    stats = _json.load(f)
+                status_lines.append(f"\n📅 Последнее обучение: {stats.get('trained_at', '?')}")
+                status_lines.append(f"⏱ Время: {stats.get('total_elapsed_min', '?')} мин")
+                for tf, s in stats.get("timeframes", {}).items():
+                    if "error" in s:
+                        status_lines.append(f"  {tf}: ❌ {s['error']}")
+                    elif s.get("dry_run"):
+                        status_lines.append(f"  {tf}: {s['pairs']} пар, {s['samples']} сэмплов (dry-run)")
+                    else:
+                        status_lines.append(f"  {tf}: {s['accuracy']}% точность, {s['pairs']} пар, {s['samples_total']} сэмплов")
+                        top = s.get("top_features", {})
+                        if top:
+                            top3 = ", ".join(list(top.keys())[:3])
+                            status_lines.append(f"      топ фичи: {top3}")
+            else:
+                status_lines.append("\n📊 Статистика обучения: нет данных")
+            
+            # Cron info
+            try:
+                import subprocess
+                cron_out = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
+                ml_cron = [l.strip() for l in cron_out.split("\n") if "ml.trainer" in l and not l.startswith("#")]
+                if ml_cron:
+                    status_lines.append(f"\n⏰ Cron: `{ml_cron[0]}`")
+                else:
+                    status_lines.append("\n⏰ Cron: не настроен")
+            except Exception:
+                status_lines.append("\n⏰ Cron: не удалось проверить")
+            
+            await send_response(app_session, chat_id, "\n".join(status_lines), msg_id, parse_mode="Markdown")
+        except Exception as e:
+            await send_response(app_session, chat_id, f"❌ ML status error: {e}", msg_id)
+        return
+
+    if text.startswith("/mlcron"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔ Admin only", msg_id)
+            return
+        
+        parts = text.split()
+        
+        if len(parts) == 1:
+            # Show current cron
+            help_text = (
+                "⏰ *ML Cron — расписание обучения*\n\n"
+                "Установить: `/mlcron wed+sun 04:00`\n"
+                "Только воскресенье: `/mlcron sun 04:00`\n"
+                "Каждый день: `/mlcron daily 04:00`\n"
+                "Отключить: `/mlcron off`\n\n"
+                "Текущее расписание: проверь `/mlstatus`"
+            )
+            await send_response(app_session, chat_id, help_text, msg_id, parse_mode="Markdown")
+            return
+        
+        import subprocess
+        
+        if parts[1].lower() == "off":
+            # Remove ML cron
+            try:
+                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
+                new_cron = "\n".join(l for l in current.split("\n") if "ml.trainer" not in l)
+                subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
+                await send_response(app_session, chat_id, "✅ ML cron отключён", msg_id)
+            except subprocess.CalledProcessError:
+                await send_response(app_session, chat_id, "✅ Cron уже пуст", msg_id)
+            return
+        
+        # Parse schedule: /mlcron wed+sun 04:00
+        schedule = parts[1].lower()
+        time_str = parts[2] if len(parts) > 2 else "04:00"
+        
+        try:
+            hour, minute = time_str.split(":")
+            hour, minute = int(hour), int(minute)
+        except (ValueError, IndexError):
+            await send_response(app_session, chat_id, "❌ Формат времени: HH:MM (UTC)", msg_id)
+            return
+        
+        day_map = {
+            "mon": "1", "tue": "2", "wed": "3", "thu": "4",
+            "fri": "5", "sat": "6", "sun": "0",
+            "пн": "1", "вт": "2", "ср": "3", "чт": "4",
+            "пт": "5", "сб": "6", "вс": "0",
+            "daily": "*",
+        }
+        
+        if schedule == "daily":
+            dow = "*"
+        else:
+            days = schedule.replace("+", ",").split(",")
+            dow_parts = []
+            for d in days:
+                d = d.strip().lower()
+                if d in day_map:
+                    dow_parts.append(day_map[d])
+                else:
+                    await send_response(app_session, chat_id, f"❌ Неизвестный день: {d}\nДопустимо: mon,tue,wed,thu,fri,sat,sun (или пн,вт,ср,чт,пт,сб,вс)", msg_id)
+                    return
+            dow = ",".join(dow_parts)
+        
+        cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && python3 -m ml.trainer >> ml/train.log 2>&1"
+        
+        try:
+            # Get current crontab, remove old ML entries, add new
+            try:
+                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
+            except subprocess.CalledProcessError:
+                current = ""
+            
+            lines = [l for l in current.split("\n") if "ml.trainer" not in l and l.strip()]
+            lines.append(cron_line)
+            new_cron = "\n".join(lines) + "\n"
+            subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
+            
+            await send_response(app_session, chat_id, 
+                f"✅ ML cron установлен!\n\n`{cron_line}`\n\nОбучение: {time_str} UTC по {schedule}", 
+                msg_id, parse_mode="Markdown")
+        except Exception as e:
+            await send_response(app_session, chat_id, f"❌ Cron ошибка: {e}", msg_id)
+        return
+
+    # ==========================================
+    # COIN ANALYSIS (посмотри/scan/check...)
+    # ==========================================
     analysis_prefixes = [
         "scan ", "check ", "look ", "analyze ",
         "посмотри ", "посмотри на ", "глянь ", "чекни ", "анализ "
