@@ -84,7 +84,8 @@ async def _call_openrouter(messages, api_key, model, timeout_sec=240):
     return None
 
 async def _call_gemini(messages, api_key, model, timeout_sec=240):
-    """Call Gemini REST API. Converts OpenAI-style messages to Gemini format."""
+    """Call Gemini REST API. Converts OpenAI-style messages to Gemini format.
+    Retries once on 503 (overloaded) with 5s delay."""
     # Extract system instruction and user messages
     system_text = ""
     contents = []
@@ -103,22 +104,30 @@ async def _call_gemini(messages, api_key, model, timeout_sec=240):
 
     url = f"https://botgem.zhoriha.workers.dev/v1beta/models/{model}:generateContent?key={api_key}"
     req_timeout = aiohttp.ClientTimeout(total=timeout_sec)
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=req_timeout) as resp:
-                if resp.status == 200:
-                    data = await resp.json(content_type=None)
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        text = "".join(p.get("text", "") for p in parts)
-                        if text.strip():
-                            return text.strip()
-                else:
-                    body = await resp.text()
-                    logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
-    except Exception as e:
-        logging.warning(f"⚠️ Gemini error: {type(e).__name__}: {e}")
+    
+    max_retries = 2  # 1 original + 1 retry on 503
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=req_timeout) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            parts = candidates[0].get("content", {}).get("parts", [])
+                            text = "".join(p.get("text", "") for p in parts)
+                            if text.strip():
+                                return text.strip()
+                    elif resp.status == 503 and attempt < max_retries - 1:
+                        logging.warning(f"⚠️ Gemini 503 overloaded, retrying in 5s (attempt {attempt+1})...")
+                        await asyncio.sleep(5)
+                        continue
+                    else:
+                        body = await resp.text()
+                        logging.warning(f"⚠️ Gemini HTTP {resp.status}: {body[:200]}")
+        except Exception as e:
+            logging.warning(f"⚠️ Gemini error: {type(e).__name__}: {e}")
+        break  # don't retry on non-503 errors
     return None
 
 async def _call_groq(messages, api_key, model, timeout_sec=240):
@@ -747,7 +756,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None) -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None, ml_data: dict = None) -> str:
     """
     AI Agent: Executes Binance Market Intelligence Skills
     and sends aggregated context to OpenRouter.
@@ -1239,6 +1248,15 @@ SKIP RULES:
     positioning = clean_indic.get("positioning", {})
     positioning_text = format_positioning_text(positioning, price) if positioning else ""
 
+    # ML predictions block (if available)
+    ml_prompt_block = ""
+    if ml_data and ml_data.get("available"):
+        try:
+            from ml.inject import format_ml_for_prompt
+            ml_prompt_block = format_ml_for_prompt(ml_data)
+        except Exception:
+            pass
+
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
 [MULTI-TIMEFRAME DATA — check SCORECARD per TF]
@@ -1250,10 +1268,11 @@ SKIP RULES:
 
 [ADDITIONAL]
 {funding_text}
-
+{ml_prompt_block}
 INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
 SMC SCORECARD counts structure, order blocks, FVG, zones separately.
 MARKET POSITIONING shows crowd behavior (OI, L/S ratio, taker volume) — use to confirm or question your direction.
+{('ML MODEL provides XGBoost statistical predictions — if ML strongly disagrees with indicator consensus, mention the divergence in your analysis.' if ml_prompt_block else '')}
 Combine ALL scorecards to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
 For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels. Use liquidation zones to identify potential price magnets.

@@ -6,4 +6,7 @@ numpy
 mplfinance
 matplotlib
 beautifulsoup4
+xgboost
+scikit-learn
+joblib
 

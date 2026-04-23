@@ -29,6 +29,10 @@ from core.signal_pipeline import (
     get_1d_emergency_warnings
 )
 
+# ML Engine — XGBoost "second opinion"
+from ml.engine import MLEngine
+ml_engine = MLEngine()  # loads models from ml/models/ (graceful if missing)
+
 # Setup logging
 # File handler: only coin/trade-related messages (no sleep, progress, loop noise)
 class TradeLogFilter(logging.Filter):
@@ -475,10 +479,24 @@ async def main():
                             ai_tf = "4H"
                             logging.info(f"📊 1D breakout {sym}: using 4H indicators for AI (1D = geometry only)")
 
-                        # AI call — mode="scan" for full multi-TF analysis
+                        # === ML PREDICTION (before AI call — can be added to prompt) ===
+                        _ml_result = None
+                        if ml_engine.is_ready:
+                            try:
+                                _ind_4h = item.get("mtf_data", {}).get("4H", last_indic_row if ai_tf == "4H" else None)
+                                _ind_1h = item.get("mtf_data", {}).get("1H")
+                                _ind_15m = item.get("mtf_data", {}).get("15m")
+                                _ml_result = ml_engine.predict_all(_ind_4h, _ind_1h, _ind_15m)
+                                if _ml_result.get("available"):
+                                    logging.info(f"🧠 ML: {sym} → {_ml_result['direction']} {max(_ml_result['weighted_long_pct'], _ml_result['weighted_short_pct']):.0f}% (consensus={'Y' if _ml_result.get('consensus') else 'N'})")
+                            except Exception as _ml_err:
+                                logging.error(f"❌ ML predict error for {sym}: {_ml_err}")
+
+                        # AI call — mode="scan" for full multi-TF analysis (with ML data)
                         ai_verdict_full = await ask_ai_analysis(
                             sym, ai_tf, ai_indic, item.get("dynamic_trigger"),
-                            mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                            mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"],
+                            ml_data=_ml_result
                         )
 
                         # Extract Part 1 only (before ---) for chart caption
@@ -486,6 +504,14 @@ async def main():
                             ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
                         else:
                             ai_verdict = ai_verdict_full
+
+                        # === INJECT ML SCORES INTO CAPTION ===
+                        if ai_verdict and _ml_result and _ml_result.get("available"):
+                            try:
+                                from ml.inject import inject_ml_into_caption
+                                ai_verdict = inject_ml_into_caption(ai_verdict, _ml_result)
+                            except Exception as _inj_err:
+                                logging.error(f"❌ ML inject error for {sym}: {_inj_err}")
 
                         # Check for AI errors — retry once
                         ai_has_error = False
@@ -501,7 +527,8 @@ async def main():
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, tf, last_indic_row, dynamic_trigger,
-                                mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"]
+                                mode="scan", lang=get_chat_lang(GROUP_CHAT_ID), mtf_data=item["mtf_data"], smc_data=item["smc_data"],
+                                ml_data=_ml_result
                             )
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
@@ -514,6 +541,13 @@ async def main():
                             else:
                                 logging.info(f"✅ AI retry succeeded for {sym}, will replace error chart after new one sent")
                                 # Don't delete error_msg_id here — delete AFTER new message is sent successfully
+                                # Re-inject ML into retried verdict
+                                if ai_verdict and _ml_result and _ml_result.get("available"):
+                                    try:
+                                        from ml.inject import inject_ml_into_caption
+                                        ai_verdict = inject_ml_into_caption(ai_verdict, _ml_result)
+                                    except Exception:
+                                        pass
 
                         # === SIGNAL PIPELINE CLASSIFICATION ===
                         _ai_dir = ""
@@ -862,14 +896,34 @@ async def main():
                             current_price = float(full_df.iloc[-1]['close'])
                             dynamic_trigger = line_data.get('trigger_price', current_price)
 
+                            # ML prediction for volume waitlist pipeline
+                            _ml_result_vol = None
+                            if ml_engine.is_ready:
+                                try:
+                                    _ind_4h_v = mtf_data.get("4H", last_indic_row if ai_tf == "4H" else None)
+                                    _ind_1h_v = mtf_data.get("1H")
+                                    _ind_15m_v = mtf_data.get("15m")
+                                    _ml_result_vol = ml_engine.predict_all(_ind_4h_v, _ind_1h_v, _ind_15m_v)
+                                except Exception:
+                                    pass
+
                             ai_verdict_full = await ask_ai_analysis(
                                 sym, ai_tf, ai_indic, dynamic_trigger,
                                 mode="scan", lang=get_chat_lang(GROUP_CHAT_ID),
-                                mtf_data=mtf_data, smc_data=smc_data
+                                mtf_data=mtf_data, smc_data=smc_data,
+                                ml_data=_ml_result_vol
                             )
 
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                            
+                            # Inject ML scores into volume waitlist caption
+                            if ai_verdict and _ml_result_vol and _ml_result_vol.get("available"):
+                                try:
+                                    from ml.inject import inject_ml_into_caption
+                                    ai_verdict = inject_ml_into_caption(ai_verdict, _ml_result_vol)
+                                except Exception:
+                                    pass
                             else:
                                 ai_verdict = ai_verdict_full
 
@@ -913,7 +967,14 @@ async def main():
                                                   mtf_data=mtf_data,
                                                   indicators=last_indic_row)
 
-                            alert_type = vw_item.get("alert", "").split("_")[-1] if vw_item.get("alert") else "resistance"
+                            # alert can be dict (from alert_data) or string — handle both
+                            _raw_alert = vw_item.get("alert", "")
+                            if isinstance(_raw_alert, dict):
+                                alert_type = _raw_alert.get("type", "resistance")
+                            elif isinstance(_raw_alert, str) and _raw_alert:
+                                alert_type = _raw_alert.split("_")[-1]
+                            else:
+                                alert_type = "resistance"
 
                             if tier == "monitor":
                                 # Monitor — same logic as main pipeline

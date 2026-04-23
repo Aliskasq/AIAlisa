@@ -1604,7 +1604,20 @@ async def handle_message(app_session, update):
                     "bot_token": BOT_TOKEN
                 }
 
-            ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data)
+            # ML prediction for manual scan
+            _ml_result_scan = None
+            try:
+                from ml.engine import get_ml_engine
+                _ml_scan_engine = get_ml_engine()
+                if _ml_scan_engine.is_ready:
+                    _ind_4h_s = mtf_data.get("4H", last_row)
+                    _ind_1h_s = mtf_data.get("1H")
+                    _ind_15m_s = mtf_data.get("15m")
+                    _ml_result_scan = _ml_scan_engine.predict_all(_ind_4h_s, _ind_1h_s, _ind_15m_s)
+            except Exception:
+                pass
+
+            ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_scan)
 
             async def _delayed_delete(sess, cid, mid, delay=15):
                 await asyncio.sleep(delay)
@@ -1651,6 +1664,14 @@ async def handle_message(app_session, update):
                 _parts = ai_msg.split("---", 1)
                 ai_brief = _parts[0].strip()
                 ai_extended = _parts[1].strip() if len(_parts) > 1 and _parts[1].strip() else None
+
+            # Inject ML scores into brief caption
+            if ai_brief and _ml_result_scan and _ml_result_scan.get("available"):
+                try:
+                    from ml.inject import inject_ml_into_caption
+                    ai_brief = inject_ml_into_caption(ai_brief, _ml_result_scan)
+                except Exception:
+                    pass
 
             import re as _re
             _part_hdr = _re.compile(r'^={2,}\s*PART\s*\d*.*?={2,}\s*\n?', _re.IGNORECASE | _re.MULTILINE)
@@ -1801,5 +1822,26 @@ async def handle_message(app_session, update):
                 except Exception as e:
                     logging.error(f"❌ SMC look error: {e}")
 
-                ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mode="scan", mtf_data=mtf_data, smc_data=smc_data)
+                # ML prediction for margin scan
+                _ml_result_margin = None
+                try:
+                    from ml.engine import get_ml_engine
+                    _ml_margin_engine = get_ml_engine()
+                    if _ml_margin_engine.is_ready:
+                        _ml_result_margin = _ml_margin_engine.predict_all(
+                            mtf_data.get("4H", last_row), mtf_data.get("1H"), mtf_data.get("15m")
+                        )
+                except Exception:
+                    pass
+
+                ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mode="scan", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_margin)
+                
+                # Inject ML into response
+                if ai_msg and _ml_result_margin and _ml_result_margin.get("available"):
+                    try:
+                        from ml.inject import inject_ml_into_caption
+                        ai_msg = inject_ml_into_caption(ai_msg, _ml_result_margin)
+                    except Exception:
+                        pass
+
                 await send_response(app_session, chat_id, ai_msg, msg_id)
