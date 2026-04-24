@@ -373,6 +373,10 @@ async def main():
                             if raw_15m:
                                 mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
+                            # Propagate funding_rate to MTF dicts for ML prediction
+                            for _tf_d in mtf_data.values():
+                                _tf_d["funding_rate"] = funding
+
                             smc_data = {}
                             try:
                                 from core.smc import analyze_smc
@@ -867,6 +871,10 @@ async def main():
                                 mtf_data["1H"] = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0]
                             if raw_15m:
                                 mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
+
+                            # Propagate funding_rate to MTF dicts for ML prediction
+                            for _tf_d in mtf_data.values():
+                                _tf_d["funding_rate"] = funding
 
                             # SMC analysis
                             smc_data = {}

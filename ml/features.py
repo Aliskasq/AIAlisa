@@ -65,13 +65,58 @@ FEATURE_NAMES = [
     "imi",
     "rsi_mom",
 
+    # ── Funding Rate ──
+    "funding_rate_scaled",     # fundingRate * 10000 (0.01% → 1.0)
+    "funding_rate_ma3_scaled", # average of last 3 funding payments * 10000
+    "funding_rate_trend",      # (current - ma3) * 10000
+
     # ── Candle shape ──
     "body_pct",               # abs(close - open) / close * 100
     "upper_wick_pct",         # (high - max(open,close)) / close * 100
     "lower_wick_pct",         # (min(open,close) - low) / close * 100
 ]
 
-NUM_FEATURES = len(FEATURE_NAMES)  # should be 33
+NUM_FEATURES = len(FEATURE_NAMES)  # 37
+
+
+def _parse_funding_from_dict(indicators: dict) -> tuple:
+    """Parse funding rate from indicator dict.
+    
+    Handles both formats:
+      - numeric: indicators["funding_rate"] = 0.0001 (from ML training)
+      - string:  indicators["funding_rate"] = "0.0100% → 0.0150% → 0.0250%" (from bot)
+    
+    Returns: (current_rate, ma3_rate) as floats (decimal, e.g. 0.0001)
+    """
+    raw = indicators.get("funding_rate", 0)
+    ma3 = indicators.get("funding_rate_ma3", None)
+    
+    if isinstance(raw, (int, float)):
+        # Numeric — from training pipeline
+        current = float(raw)
+        if ma3 is not None:
+            return current, float(ma3)
+        return current, current
+    
+    if isinstance(raw, str) and "→" in raw:
+        # String format: "0.0100% → 0.0150% → 0.0250%"
+        try:
+            parts = [p.strip().replace("%", "") for p in raw.split("→")]
+            rates = [float(p) / 100 for p in parts]  # convert from % to decimal
+            current = rates[-1] if rates else 0.0
+            avg = sum(rates) / len(rates) if rates else 0.0
+            return current, avg
+        except (ValueError, IndexError):
+            return 0.0, 0.0
+    
+    if isinstance(raw, str):
+        # Single value string: "0.0100%"
+        try:
+            return float(raw.replace("%", "")) / 100, 0.0
+        except ValueError:
+            return 0.0, 0.0
+    
+    return 0.0, 0.0
 
 
 def _safe_div(a, b, default=0.0):
@@ -149,6 +194,16 @@ def extract_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
     out["imi"] = df["imi"]
     out["rsi_mom"] = df["rsi_mom"]
 
+    # ── Funding Rate ──
+    if "funding_rate" in df.columns:
+        out["funding_rate_scaled"] = df["funding_rate"] * 10000
+        out["funding_rate_ma3_scaled"] = df["funding_rate_ma3"] * 10000
+        out["funding_rate_trend"] = (df["funding_rate"] - df["funding_rate_ma3"]) * 10000
+    else:
+        out["funding_rate_scaled"] = 0.0
+        out["funding_rate_ma3_scaled"] = 0.0
+        out["funding_rate_trend"] = 0.0
+
     # ── Candle shape ──
     out["body_pct"] = (df["close"] - df["open"]).abs() / c * 100
     body_top = df[["close", "open"]].max(axis=1)
@@ -188,6 +243,8 @@ def extract_features_from_dict(indicators: dict) -> np.ndarray:
     bb_lower = float(indicators.get("bb_lower", c))
     bb_mid = float(indicators.get("bb_mid", c))
     bb_range = bb_upper - bb_lower
+
+    funding, funding_ma3 = _parse_funding_from_dict(indicators)
 
     features = np.array([
         # Trend
@@ -238,6 +295,11 @@ def extract_features_from_dict(indicators: dict) -> np.ndarray:
         float(indicators.get("ccmi", 0)) - float(indicators.get("ccmi_signal", 0)),
         float(indicators.get("imi", 50)),
         float(indicators.get("rsi_mom", 50)),
+
+        # Funding Rate
+        funding * 10000,
+        funding_ma3 * 10000,
+        (funding - funding_ma3) * 10000,
 
         # Candle shape — not available from dict (only last candle summary)
         # Use zeros as fallback; these features are less critical for single prediction

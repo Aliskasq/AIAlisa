@@ -179,6 +179,57 @@ async def fetch_klines_multi(session: aiohttp.ClientSession, symbol: str,
     return sorted(unique, key=lambda x: x["open_time"])
 
 
+async def fetch_funding_history(session: aiohttp.ClientSession, symbol: str,
+                                 limit: int = 1000) -> list:
+    """Fetch funding rate history for a symbol. Weight = 1.
+    Returns list of {funding_time, funding_rate} dicts or empty list."""
+    url = f"https://fapi.binance.com/fapi/v1/fundingRate?symbol={symbol}&limit={limit}"
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+            return [
+                {"funding_time": int(r["fundingTime"]), "funding_rate": float(r["fundingRate"])}
+                for r in data
+            ]
+    except Exception:
+        return []
+
+
+def merge_funding_into_df(df: pd.DataFrame, funding_data: list) -> pd.DataFrame:
+    """Merge funding rate history into candle DataFrame using merge_asof.
+
+    Each candle gets the most recent funding rate at its open_time.
+    Also calculates MA3 (average of last 3 funding payments = ~24h).
+    """
+    if not funding_data:
+        df["funding_rate"] = 0.0
+        df["funding_rate_ma3"] = 0.0
+        return df
+
+    # Build funding DataFrame with pre-calculated MA3
+    fdf = pd.DataFrame(funding_data).sort_values("funding_time").reset_index(drop=True)
+    fdf["funding_rate_ma3"] = fdf["funding_rate"].rolling(3, min_periods=1).mean()
+
+    # merge_asof: for each candle, find the most recent funding event
+    df = df.sort_values("open_time").reset_index(drop=True)
+    df = pd.merge_asof(
+        df, fdf[["funding_time", "funding_rate", "funding_rate_ma3"]],
+        left_on="open_time", right_on="funding_time", direction="backward"
+    )
+
+    # Fill NaN (candles before first funding event)
+    df["funding_rate"] = df["funding_rate"].fillna(0.0)
+    df["funding_rate_ma3"] = df["funding_rate_ma3"].fillna(0.0)
+
+    # Drop helper column
+    if "funding_time" in df.columns:
+        df.drop(columns=["funding_time"], inplace=True)
+
+    return df
+
+
 async def get_all_futures_symbols(session: aiohttp.ClientSession) -> list:
     """Get all USDT perpetual futures symbols."""
     url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
@@ -199,7 +250,8 @@ async def get_all_futures_symbols(session: aiohttp.ClientSession) -> list:
         return []
 
 
-def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
+def process_pair(candles: list, tf_key: str, config: dict,
+                 funding_data: list = None) -> tuple:
     """
     Process a single pair: calculate indicators → extract features → create labels.
     
@@ -211,6 +263,11 @@ def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
     
     try:
         df = pd.DataFrame(candles)
+
+        # Merge funding rate into candle df before indicator calculation
+        if funding_data:
+            df = merge_funding_into_df(df, funding_data)
+
         result = calculate_binance_indicators(df, tf_key)
         
         # calculate_binance_indicators returns (last_row_dict, df) or just dict
@@ -219,6 +276,11 @@ def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
         else:
             logging.warning(f"Unexpected return type from calculate_binance_indicators: {type(result)}")
             return None, None
+
+        # Carry funding columns through to feature extraction
+        if "funding_rate" in df.columns:
+            df_with_indicators["funding_rate"] = df["funding_rate"].values
+            df_with_indicators["funding_rate_ma3"] = df["funding_rate_ma3"].values
         
         features = extract_features_from_df(df_with_indicators)
         labels = create_labels(df_with_indicators, 
@@ -258,7 +320,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     
     start_time = time.time()
     
-    # Phase 1: Collect features — batch API calls (10 parallel), sequential processing
+    # Phase 1: Collect features — batch API calls, sequential processing
     all_features = []
     all_labels = []
     pairs_ok = 0
@@ -276,9 +338,13 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
         for idx, sym in enumerate(batch_symbols):
             async def _fetch_one(_sym=sym, _delay=idx * API_DELAY_SEC):
                 await asyncio.sleep(_delay)
-                return _sym, await fetch_klines_multi(
+                candles = await fetch_klines_multi(
                     session, _sym, config["interval"], config["limit"], config["requests"]
                 )
+                # Fetch funding history (weight = 1, limit = 1000 covers ~333 days)
+                funding = await fetch_funding_history(session, _sym, limit=1000)
+                await asyncio.sleep(0.3)  # small delay after funding request
+                return _sym, candles, funding
             fetch_tasks.append(_fetch_one())
         
         results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
@@ -291,15 +357,15 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
                     logging.warning(f"⚠️ Fetch exception: {type(result).__name__}: {result}")
                     _first_errors_logged += 1
                 continue
-            sym, candles = result
+            sym, candles, funding_data = result
             if not candles:
                 pairs_fail += 1
                 continue
             
-            features, labels = process_pair(candles, tf_key, config)
+            features, labels = process_pair(candles, tf_key, config, funding_data)
             if features is None:
                 pairs_fail += 1
-                del candles
+                del candles, funding_data
                 continue
             
             all_features.append(features.values)
@@ -307,7 +373,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
             total_samples += len(features)
             pairs_ok += 1
             
-            del candles, features, labels
+            del candles, funding_data, features, labels
         
         # Periodic GC + progress
         i = batch_start + len(batch_symbols)
