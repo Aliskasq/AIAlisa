@@ -55,8 +55,8 @@ TIMEFRAME_CONFIG = {
     },
     "15m": {
         "interval": "15m",
-        "limit": 4500,       # 3 × 1500 = ~46 days
-        "requests": 3,       # 3 Binance requests stitched together
+        "limit": 1500,       # 1500 candles = ~15 days (single request, no stitching)
+        "requests": 1,       # single request — faster, fewer fails on new coins
         "horizon": 4,        # 4 candles = 1h
         "threshold": 0.3,
         "model_file": "xgb_15m.pkl",
