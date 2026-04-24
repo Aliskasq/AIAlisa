@@ -376,8 +376,11 @@ async def handle_message(app_session, update):
                 "🧠 `/mltrain --tf 4h` — только 4H\n"
                 "🧠 `/mltrain --dry-run` — статистика без обучения\n"
                 "📊 `/mlstatus` — модели, точность, cron\n"
-                "⏰ `/mlcron ср+вс 04:00` — расписание\n"
-                "⏰ `/mlcron off` — отключить cron"
+                "⏰ `/mlcron 4ч ср+вс 03:45` — 4H по расписанию\n"
+                "⏰ `/mlcron 1ч+15м daily 03:20` — 1H+15m ежедневно\n"
+                "⏰ `/mlcron all ср+вс 04:00` — все модели\n"
+                "⏰ `/mlcron off` — отключить cron\n"
+                "⏰ `/mlcron off 4h` — отключить только 4H"
             )
         await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
         return
@@ -1651,7 +1654,9 @@ async def handle_message(app_session, update):
                 cron_out = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
                 ml_cron = [l.strip() for l in cron_out.split("\n") if "ml.trainer" in l and not l.startswith("#")]
                 if ml_cron:
-                    status_lines.append(f"\n⏰ Cron: `{ml_cron[0]}`")
+                    status_lines.append(f"\n⏰ Cron ({len(ml_cron)}):")
+                    for _cl in ml_cron:
+                        status_lines.append(f"  `{_cl}`")
                 else:
                     status_lines.append("\n⏰ Cron: не настроен")
             except Exception:
@@ -1670,51 +1675,115 @@ async def handle_message(app_session, update):
         parts = text.split()
         
         if len(parts) == 1:
-            # Show current cron
+            # Show current cron + help
             help_text = (
                 "⏰ *ML Cron — расписание обучения*\n\n"
-                "Установить: `/mlcron wed+sun 04:00`\n"
-                "Только воскресенье: `/mlcron sun 04:00`\n"
-                "Каждый день: `/mlcron daily 04:00`\n"
-                "Отключить: `/mlcron off`\n\n"
-                "Текущее расписание: проверь `/mlstatus`"
+                "*По таймфреймам:*\n"
+                "`/mlcron 4ч ср+вс 03:45` — 4H модель\n"
+                "`/mlcron 1ч+15м daily 03:20` — 1H и 15m\n"
+                "`/mlcron 4h wed+sun 03:45` — EN формат\n"
+                "`/mlcron 1h+15m пн+вт+ср+чт+пт+сб+вс 03:20`\n\n"
+                "*Все модели разом:*\n"
+                "`/mlcron all ср+вс 04:00` — все 3 модели\n"
+                "`/mlcron all daily 04:00` — каждый день\n\n"
+                "*Управление:*\n"
+                "`/mlcron off` — отключить всё\n"
+                "`/mlcron off 4h` — отключить только 4H\n\n"
+                "Текущее расписание: `/mlstatus`"
             )
             await send_response(app_session, chat_id, help_text, msg_id, parse_mode="Markdown")
             return
         
         import subprocess
         
-        if parts[1].lower() == "off":
-            # Remove ML cron
-            try:
-                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
-                new_cron = "\n".join(l for l in current.split("\n") if "ml.trainer" not in l)
-                subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
-                await send_response(app_session, chat_id, "✅ ML cron отключён", msg_id)
-            except subprocess.CalledProcessError:
-                await send_response(app_session, chat_id, "✅ Cron уже пуст", msg_id)
-            return
-        
-        # Parse schedule: /mlcron wed+sun 04:00
-        schedule = parts[1].lower()
-        time_str = parts[2] if len(parts) > 2 else "04:00"
-        
-        try:
-            hour, minute = time_str.split(":")
-            hour, minute = int(hour), int(minute)
-        except (ValueError, IndexError):
-            await send_response(app_session, chat_id, "❌ Формат времени: HH:MM (UTC)", msg_id)
-            return
-        
+        # Day name mapping (EN + RU)
         day_map = {
             "mon": "1", "tue": "2", "wed": "3", "thu": "4",
             "fri": "5", "sat": "6", "sun": "0",
             "пн": "1", "вт": "2", "ср": "3", "чт": "4",
             "пт": "5", "сб": "6", "вс": "0",
-            "daily": "*",
+            "daily": "*", "ежедневно": "*", "каждыйдень": "*",
         }
         
-        if schedule == "daily":
+        # Timeframe aliases (RU + EN)
+        tf_aliases = {
+            "4h": "4h", "4ч": "4h",
+            "1h": "1h", "1ч": "1h",
+            "15m": "15m", "15м": "15m", "15мин": "15m",
+            "all": "all", "все": "all", "всё": "all",
+        }
+        
+        # /mlcron off [tf]
+        if parts[1].lower() == "off":
+            tf_filter = None
+            if len(parts) >= 3:
+                tf_filter = tf_aliases.get(parts[2].lower())
+            
+            try:
+                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
+                if tf_filter and tf_filter != "all":
+                    # Remove only specific TF cron
+                    new_lines = [l for l in current.split("\n") if not (f"--tf {tf_filter}" in l and "ml.trainer" in l) and l.strip()]
+                else:
+                    # Remove all ML cron entries
+                    new_lines = [l for l in current.split("\n") if "ml.trainer" not in l and l.strip()]
+                new_cron = "\n".join(new_lines) + "\n" if new_lines else ""
+                subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
+                if tf_filter and tf_filter != "all":
+                    await send_response(app_session, chat_id, f"✅ ML cron для {tf_filter} отключён", msg_id)
+                else:
+                    await send_response(app_session, chat_id, "✅ ML cron отключён (все)", msg_id)
+            except subprocess.CalledProcessError:
+                await send_response(app_session, chat_id, "✅ Cron уже пуст", msg_id)
+            return
+        
+        # Parse: /mlcron <tf_spec> <days> <time>
+        # tf_spec: "4ч", "1ч+15м", "4h", "1h+15m", "all"
+        # days: "ср+вс", "daily", "пн+вт+ср+чт+пт+сб+вс"
+        # time: "03:45"
+        
+        if len(parts) < 3:
+            await send_response(app_session, chat_id, "❌ Формат: `/mlcron <модели> <дни> <время>`\nПример: `/mlcron 4ч ср+вс 03:45`", msg_id, parse_mode="Markdown")
+            return
+        
+        tf_spec = parts[1].lower()
+        schedule = parts[2].lower()
+        time_str = parts[3] if len(parts) > 3 else "04:00"
+        
+        # Parse time
+        try:
+            hour, minute = time_str.split(":")
+            hour, minute = int(hour), int(minute)
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError
+        except (ValueError, IndexError):
+            await send_response(app_session, chat_id, "❌ Формат времени: HH:MM (UTC)", msg_id)
+            return
+        
+        # Parse timeframes from tf_spec (e.g. "1ч+15м" → ["1h", "15m"])
+        tf_parts_raw = tf_spec.replace("-", "+").replace(",", "+").split("+")
+        tf_list = []
+        for tp in tf_parts_raw:
+            tp = tp.strip()
+            if tp in tf_aliases:
+                resolved = tf_aliases[tp]
+                if resolved == "all":
+                    tf_list = ["all"]
+                    break
+                tf_list.append(resolved)
+            else:
+                await send_response(app_session, chat_id,
+                    f"❌ Неизвестный таймфрейм: `{tp}`\n"
+                    f"Допустимо: 4h/4ч, 1h/1ч, 15m/15м, all/все",
+                    msg_id, parse_mode="Markdown")
+                return
+        
+        if not tf_list:
+            await send_response(app_session, chat_id, "❌ Не указаны таймфреймы", msg_id)
+            return
+        
+        # Parse days
+        if schedule in day_map and day_map[schedule] == "*":
             dow = "*"
         else:
             days = schedule.replace("+", ",").split(",")
@@ -1724,26 +1793,59 @@ async def handle_message(app_session, update):
                 if d in day_map:
                     dow_parts.append(day_map[d])
                 else:
-                    await send_response(app_session, chat_id, f"❌ Неизвестный день: {d}\nДопустимо: mon,tue,wed,thu,fri,sat,sun (или пн,вт,ср,чт,пт,сб,вс)", msg_id)
+                    await send_response(app_session, chat_id,
+                        f"❌ Неизвестный день: `{d}`\n"
+                        f"Допустимо: mon,tue,wed,thu,fri,sat,sun (или пн,вт,ср,чт,пт,сб,вс), daily/ежедневно",
+                        msg_id, parse_mode="Markdown")
                     return
             dow = ",".join(dow_parts)
         
-        cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && python3 -m ml.trainer >> ml/train.log 2>&1"
+        # Build cron lines
+        new_cron_lines = []
+        if "all" in tf_list:
+            # Single cron for all models
+            cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && python3 -m ml.trainer >> ml/train.log 2>&1"
+            new_cron_lines.append(cron_line)
+            remove_filter = lambda l: "ml.trainer" in l  # remove all old ML cron
+        else:
+            # Separate cron per TF, chained with &&
+            tf_cmds = " && ".join(f"python3 -m ml.trainer --tf {tf}" for tf in tf_list)
+            cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && {tf_cmds} >> ml/train.log 2>&1"
+            new_cron_lines.append(cron_line)
+            # Remove old cron for these specific TFs (and "all" entries)
+            remove_tfs = set(tf_list)
+            def remove_filter(l):
+                if "ml.trainer" not in l:
+                    return False
+                # Remove lines that train any of our TFs, or train all (no --tf flag)
+                for tf in remove_tfs:
+                    if f"--tf {tf}" in l:
+                        return True
+                # Also remove "all" lines (no --tf) if we're setting specific TFs
+                if "--tf" not in l and "ml.trainer" in l:
+                    return True
+                return False
         
         try:
-            # Get current crontab, remove old ML entries, add new
             try:
                 current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
             except subprocess.CalledProcessError:
                 current = ""
             
-            lines = [l for l in current.split("\n") if "ml.trainer" not in l and l.strip()]
-            lines.append(cron_line)
-            new_cron = "\n".join(lines) + "\n"
-            subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
+            # Keep existing lines that don't conflict
+            kept_lines = [l for l in current.split("\n") if l.strip() and not remove_filter(l)]
+            kept_lines.extend(new_cron_lines)
+            final_cron = "\n".join(kept_lines) + "\n"
+            subprocess.run(["crontab", "-"], input=final_cron, text=True, check=True)
             
+            tf_display = "+".join(tf_list) if "all" not in tf_list else "все"
+            cron_display = "\n".join(f"`{cl}`" for cl in new_cron_lines)
             await send_response(app_session, chat_id, 
-                f"✅ ML cron установлен!\n\n`{cron_line}`\n\nОбучение: {time_str} UTC по {schedule}", 
+                f"✅ ML cron установлен!\n\n"
+                f"📦 Модели: *{tf_display}*\n"
+                f"📅 Дни: {schedule}\n"
+                f"⏰ Время: {time_str} UTC\n\n"
+                f"{cron_display}",
                 msg_id, parse_mode="Markdown")
         except Exception as e:
             await send_response(app_session, chat_id, f"❌ Cron ошибка: {e}", msg_id)
