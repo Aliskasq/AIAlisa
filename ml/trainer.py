@@ -80,8 +80,10 @@ XGB_PARAMS = {
     "tree_method": "hist",   # memory-efficient
 }
 
-# Rate limiting
-API_DELAY_SEC = 0.1          # delay between API calls
+# Rate limiting — trainer uses max 500 weight/min (leaves rest for bot)
+# Each klines request ≈ 10 weight → max ~50 requests/min → ~1.2s between requests
+API_DELAY_SEC = 1.3          # delay between API calls within batch
+MAX_WEIGHT_TRAINER = 500     # max weight per minute for trainer
 BATCH_SIZE = 50              # pairs to process before gc.collect()
 
 logging.basicConfig(
@@ -104,13 +106,14 @@ async def fetch_klines_raw(session: aiohttp.ClientSession, symbol: str,
         url += f"&endTime={end_time}"
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            # Track API weight
+            # Track API weight — pause if too high (bot also uses weight)
             weight = resp.headers.get('X-MBX-USED-WEIGHT-1M', '0')
             weight_int = int(weight) if weight.isdigit() else 0
             
-            if weight_int > 2000:
+            # Hard pause: total weight approaching Binance limit (bot sends alert at 2350)
+            if weight_int > 2200:
                 wait_sec = 62 - (time.time() % 60)
-                logging.warning(f"⚠️ API weight {weight_int}/2400 — pausing {wait_sec:.0f}s")
+                logging.warning(f"⚠️ API weight {weight_int}/2400 — pausing {wait_sec:.0f}s for minute reset")
                 await asyncio.sleep(wait_sec)
             
             if resp.status == 429:
@@ -220,7 +223,7 @@ def process_pair(candles: list, tf_key: str, config: dict) -> tuple:
         features = extract_features_from_df(df_with_indicators)
         labels = create_labels(df_with_indicators, 
                               horizon=config["horizon"],
-                              threshold=config["threshold"])
+                              threshold_pct=config["threshold"])
         
         # Drop NaN rows (from indicator warmup + future label lookahead)
         valid_mask = features.notna().all(axis=1) & labels.notna()
@@ -262,16 +265,16 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     pairs_fail = 0
     total_samples = 0
     
-    FETCH_BATCH = 5   # parallel API fetches (conservative for weight limits)
+    FETCH_BATCH = 3   # small batches to stay within 500 weight/min
     _first_errors_logged = 0
     
     for batch_start in range(0, len(symbols), FETCH_BATCH):
         batch_symbols = symbols[batch_start:batch_start + FETCH_BATCH]
         
-        # Parallel fetch for batch
+        # Staggered fetch — 1.3s between requests to stay under 500 weight/min
         fetch_tasks = []
         for idx, sym in enumerate(batch_symbols):
-            async def _fetch_one(_sym=sym, _delay=idx * 0.2):
+            async def _fetch_one(_sym=sym, _delay=idx * API_DELAY_SEC):
                 await asyncio.sleep(_delay)
                 return _sym, await fetch_klines_multi(
                     session, _sym, config["interval"], config["limit"], config["requests"]
