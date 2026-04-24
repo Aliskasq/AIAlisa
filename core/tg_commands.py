@@ -1582,7 +1582,7 @@ async def handle_message(app_session, update):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1800)
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3600)
                 output = stdout.decode("utf-8", errors="ignore") if stdout else ""
                 
                 # Parse last lines for summary
@@ -1605,7 +1605,7 @@ async def handle_message(app_session, update):
                 
                 await send_response(app_session, chat_id, result_text, msg_id)
             except asyncio.TimeoutError:
-                await send_response(app_session, chat_id, "❌ ML обучение: timeout (>30 мин)", msg_id)
+                await send_response(app_session, chat_id, "❌ ML обучение: timeout (>60 мин)", msg_id)
             except Exception as e:
                 await send_response(app_session, chat_id, f"❌ ML ошибка: {e}", msg_id)
         
