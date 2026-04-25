@@ -65,7 +65,7 @@ TIMEFRAME_CONFIG = {
 
 # XGBoost hyperparameters — conservative to avoid overfitting on 540 pairs
 XGB_PARAMS = {
-    "n_estimators": 300,
+    "n_estimators": 200,       # reduced from 300 for RAM (2 GB server)
     "max_depth": 5,
     "learning_rate": 0.05,
     "subsample": 0.8,
@@ -406,6 +406,17 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     logging.info(f"   Dataset: {X.shape[0]} samples × {X.shape[1]} features")
     logging.info(f"   Labels: LONG={int((y==1).sum())} ({(y==1).mean()*100:.1f}%), "
                 f"SHORT={int((y==0).sum())} ({(y==0).mean()*100:.1f}%)")
+    
+    # Downsample if too large for available RAM (~2 GB server)
+    # 117 features × 400K samples ≈ 350 MB for X alone; XGBoost needs ~3-4× during training
+    MAX_SAMPLES = 400_000
+    if X.shape[0] > MAX_SAMPLES:
+        logging.info(f"   ⚡ Downsampling {X.shape[0]} → {MAX_SAMPLES} samples (RAM limit)")
+        rng = np.random.RandomState(42)
+        idx = rng.choice(X.shape[0], MAX_SAMPLES, replace=False)
+        X = X[idx]
+        y = y[idx]
+        gc.collect()
     
     if dry_run:
         logging.info(f"   🏃 DRY RUN — skipping training")
