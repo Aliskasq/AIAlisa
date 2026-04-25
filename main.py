@@ -490,7 +490,8 @@ async def main():
                                 _ind_4h = item.get("mtf_data", {}).get("4H", last_indic_row if ai_tf == "4H" else None)
                                 _ind_1h = item.get("mtf_data", {}).get("1H")
                                 _ind_15m = item.get("mtf_data", {}).get("15m")
-                                _ml_result = ml_engine.predict_all(_ind_4h, _ind_1h, _ind_15m)
+                                _smc_for_ml = item.get("smc_data", {})
+                                _ml_result = ml_engine.predict_all(_ind_4h, _ind_1h, _ind_15m, smc_data=_smc_for_ml)
                                 if _ml_result.get("available"):
                                     logging.info(f"🧠 ML: {sym} → {_ml_result['direction']} {max(_ml_result['weighted_long_pct'], _ml_result['weighted_short_pct']):.0f}% (consensus={'Y' if _ml_result.get('consensus') else 'N'})")
                             except Exception as _ml_err:
@@ -911,7 +912,7 @@ async def main():
                                     _ind_4h_v = mtf_data.get("4H", last_indic_row if ai_tf == "4H" else None)
                                     _ind_1h_v = mtf_data.get("1H")
                                     _ind_15m_v = mtf_data.get("15m")
-                                    _ml_result_vol = ml_engine.predict_all(_ind_4h_v, _ind_1h_v, _ind_15m_v)
+                                    _ml_result_vol = ml_engine.predict_all(_ind_4h_v, _ind_1h_v, _ind_15m_v, smc_data=smc_data)
                                 except Exception:
                                     pass
 

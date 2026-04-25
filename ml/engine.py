@@ -72,13 +72,14 @@ class MLEngine:
         """True if at least one model is loaded."""
         return self._loaded
     
-    def predict(self, indicators: dict, tf_key: str) -> dict:
+    def predict(self, indicators: dict, tf_key: str, smc_data: dict = None) -> dict:
         """
         Predict for a single timeframe.
         
         Args:
             indicators: dict from calculate_binance_indicators (first return value)
             tf_key: "4H", "1H", or "15m"
+            smc_data: dict from analyze_smc (optional, for SMC features)
         
         Returns:
             {
@@ -92,13 +93,19 @@ class MLEngine:
         if tf_key not in self.models:
             return {"available": False}
         
-        from ml.features import extract_features_from_dict
+        from ml.features import extract_features_from_dict, NUM_FEATURES
         
         try:
-            features = extract_features_from_dict(indicators)
+            features = extract_features_from_dict(indicators, smc_data=smc_data)
             features_2d = features.reshape(1, -1)
             
+            # Handle model trained with fewer features (backward compat)
             model = self.models[tf_key]
+            expected = model.n_features_in_ if hasattr(model, 'n_features_in_') else features_2d.shape[1]
+            if features_2d.shape[1] > expected:
+                # Model was trained with fewer features — truncate to match
+                features_2d = features_2d[:, :expected]
+            
             proba = model.predict_proba(features_2d)[0]
             
             # proba[0] = SHORT prob, proba[1] = LONG prob
@@ -118,7 +125,8 @@ class MLEngine:
             logging.error(f"❌ ML predict error ({tf_key}): {e}")
             return {"available": False}
     
-    def predict_all(self, ind_4h: dict = None, ind_1h: dict = None, ind_15m: dict = None) -> dict:
+    def predict_all(self, ind_4h: dict = None, ind_1h: dict = None, ind_15m: dict = None,
+                     smc_data: dict = None) -> dict:
         """
         Predict across all timeframes and compute weighted score.
         
@@ -144,7 +152,9 @@ class MLEngine:
         for tf_key, ind in tf_inputs.items():
             if ind is None:
                 continue
-            result = self.predict(ind, tf_key)
+            # Pass matching SMC data for this timeframe
+            tf_smc = smc_data.get(tf_key) if smc_data else None
+            result = self.predict(ind, tf_key, smc_data=tf_smc)
             if result.get("available"):
                 per_tf[tf_key] = result
                 w = TF_WEIGHTS.get(tf_key, 0)
