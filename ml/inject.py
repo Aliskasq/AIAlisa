@@ -87,7 +87,7 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
         # Look for the "Overall" / "Общий" line with LONG/SHORT percentages
         # This is where we add the ML summary
         if not verdict_injected and re.search(
-            r"(?:Overall|Общий)[:\s]*(?:LONG|ЛОНГ)\s+\d+%", line, re.IGNORECASE
+            r"(?:Overall|Общий)[:\s]*(?:LONG|SHORT|ЛОНГ|ШОРТ)\s+\d+(?:\.\d+)?%", line, re.IGNORECASE
         ):
             wl = ml_result["weighted_long_pct"]
             ws = ml_result["weighted_short_pct"]
