@@ -39,15 +39,15 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 TIMEFRAME_CONFIG = {
     "4H": {
         "interval": "4h",
-        "limit": 1500,       # 1500 candles = ~250 days
-        "requests": 1,       # single request (Binance max = 1500)
+        "limit": 800,        # 800 candles = ~133 days (150 warmup + 650 training)
+        "requests": 1,
         "horizon": 4,        # look-ahead: 4 candles = 16h
         "threshold": 0.3,    # min move % for label
         "model_file": "xgb_4h.pkl",
     },
     "1H": {
         "interval": "1h",
-        "limit": 1500,       # 1500 candles = ~62 days
+        "limit": 800,        # 800 candles = ~33 days
         "requests": 1,
         "horizon": 4,        # 4 candles = 4h
         "threshold": 0.3,
@@ -55,8 +55,8 @@ TIMEFRAME_CONFIG = {
     },
     "15m": {
         "interval": "15m",
-        "limit": 1500,       # 1500 candles = ~15 days (single request, no stitching)
-        "requests": 1,       # single request — faster, fewer fails on new coins
+        "limit": 800,        # 800 candles = ~8 days
+        "requests": 1,
         "horizon": 4,        # 4 candles = 1h
         "threshold": 0.3,
         "model_file": "xgb_15m.pkl",
