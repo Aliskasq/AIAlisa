@@ -1263,7 +1263,7 @@ SKIP RULES:
 INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
 SMC SCORECARD counts structure, order blocks, FVG, zones separately.
 MARKET POSITIONING shows crowd behavior (OI, L/S ratio, taker volume) — use to confirm or question your direction.
-{('ML MODEL provides XGBoost statistical predictions — if ML strongly disagrees with indicator consensus, mention the divergence in your analysis.' if ml_prompt_block else '')}
+{('ML MODEL provides XGBoost statistical predictions — use ML data to inform your analysis but DO NOT include 🧠 ML lines in your output. ML lines will be injected automatically after your response. If ML strongly disagrees with indicators, mention the divergence in your text analysis (e.g. "ML disagrees") but do NOT write the 🧠 ML score lines yourself.' if ml_prompt_block else '')}
 Combine ALL scorecards to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
 For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels. Use liquidation zones to identify potential price magnets.
