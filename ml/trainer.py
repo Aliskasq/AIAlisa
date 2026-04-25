@@ -82,9 +82,9 @@ XGB_PARAMS = {
 
 # Rate limiting — trainer uses max 500 weight/min (leaves rest for bot)
 # Each klines request ≈ 10 weight → max ~50 requests/min → ~1.2s between requests
-API_DELAY_SEC = 1.3          # delay between API calls within batch
-MAX_WEIGHT_TRAINER = 500     # max weight per minute for trainer
-BATCH_SIZE = 50              # pairs to process before gc.collect()
+API_DELAY_SEC = 0.5          # delay between API calls within batch (800 candles = weight 5)
+MAX_WEIGHT_TRAINER = 1000    # max weight per minute for trainer
+BATCH_SIZE = 100             # pairs to process before gc.collect()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -336,7 +336,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     total_samples = 0
     MAX_SAMPLES = 350_000  # hard cap — prevents OOM on 2 GB server
     
-    FETCH_BATCH = 3   # small batches to stay within 500 weight/min
+    FETCH_BATCH = 10  # 10 pairs per batch × 6 weight each (klines 5 + funding 1) ≈ 60 weight
     _first_errors_logged = 0
     
     for batch_start in range(0, len(symbols), FETCH_BATCH):
