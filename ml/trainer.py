@@ -451,40 +451,16 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     
     logging.info(f"   Temporal split: train={len(X_train)}, val={len(X_val)} (last 20% by time)")
     
-    # ── Phase 3a: First pass — train to get feature importances ──
-    logging.info(f"   Training XGBoost pass 1 ({params['n_estimators']} trees, depth={params['max_depth']})...")
+    # ── Train XGBoost (all 117 features — XGBoost regularization handles noise) ──
+    logging.info(f"   Training XGBoost ({params['n_estimators']} trees, depth={params['max_depth']}, {X_train.shape[1]} features)...")
     
     model = XGBClassifier(**params)
     model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
     
-    # ── Feature selection — drop noise features (importance < 0.005) ──
     importances = model.feature_importances_
-    important_mask = importances >= 0.005
-    n_kept = important_mask.sum()
-    n_dropped = (~important_mask).sum()
-    
-    if n_dropped > 0 and n_kept >= 20:
-        dropped_names = [FEATURE_NAMES[i] for i in range(len(FEATURE_NAMES)) if not important_mask[i]]
-        logging.info(f"   🔪 Feature selection: keeping {n_kept}/{len(FEATURE_NAMES)}, dropping {n_dropped} noise features")
-        logging.info(f"      Dropped: {', '.join(dropped_names[:10])}{'...' if len(dropped_names) > 10 else ''}")
-        
-        X_train = X_train[:, important_mask]
-        X_val = X_val[:, important_mask]
-        
-        # ── Phase 3b: Retrain on selected features ──
-        logging.info(f"   Training XGBoost pass 2 (selected {n_kept} features)...")
-        del model
-        gc.collect()
-        
-        model = XGBClassifier(**params)
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
-        
-        # Store which features were kept (for prediction compatibility)
-        kept_feature_names = [FEATURE_NAMES[i] for i in range(len(FEATURE_NAMES)) if important_mask[i]]
-        importances = model.feature_importances_
-    else:
-        kept_feature_names = FEATURE_NAMES
-        logging.info(f"   All {len(FEATURE_NAMES)} features important enough (no pruning needed)")
+    kept_feature_names = FEATURE_NAMES
+    important_mask = None
+    n_dropped = 0
     
     # Phase 4: Evaluate
     y_pred = model.predict(X_val)
@@ -508,7 +484,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     save_obj = {
         "model": model,
         "feature_names": kept_feature_names,
-        "feature_mask": important_mask.tolist() if n_dropped > 0 else None,
+        "feature_mask": None,  # no feature selection — XGBoost regularization handles it
     }
     joblib.dump(save_obj, model_path)
     model_size = os.path.getsize(model_path) / 1024 / 1024
