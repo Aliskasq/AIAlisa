@@ -905,19 +905,32 @@ def extract_features_from_df(df: pd.DataFrame, smc_data: dict = None) -> pd.Data
     return out[FEATURE_NAMES]
 
 
-def create_labels(df: pd.DataFrame, horizon: int = 4, threshold_pct: float = 0.3) -> pd.Series:
+def create_labels(df: pd.DataFrame, horizon: int = 4, threshold_pct: float = 0.3,
+                   adaptive: bool = True) -> pd.Series:
     """
     Create binary labels for training.
     
-    Label = 1 (LONG) if price rises > threshold_pct% in `horizon` candles.
-    Label = 0 (SHORT) if price drops > threshold_pct% in `horizon` candles.
+    Label = 1 (LONG) if price rises > threshold in `horizon` candles.
+    Label = 0 (SHORT) if price drops > threshold in `horizon` candles.
     Label = NaN otherwise (neutral — excluded from training).
+    
+    If adaptive=True, threshold adapts per-row based on ATR:
+      threshold = max(threshold_pct, atr_pct * 0.3)
+    This means volatile coins (memecoins) need bigger moves to count,
+    while stable coins use the base threshold.
     """
     future_close = df["close"].shift(-horizon)
     pct_change = (future_close - df["close"]) / df["close"] * 100
     
+    if adaptive and "atr14" in df.columns:
+        # ATR-based adaptive threshold: 30% of ATR as minimum move
+        atr_pct = (df["atr14"] / df["close"] * 100).fillna(0)
+        threshold = np.maximum(threshold_pct, atr_pct * 0.3)
+    else:
+        threshold = threshold_pct
+    
     labels = pd.Series(np.nan, index=df.index)
-    labels[pct_change > threshold_pct] = 1   # LONG
-    labels[pct_change < -threshold_pct] = 0  # SHORT
+    labels[pct_change > threshold] = 1   # LONG
+    labels[pct_change < -threshold] = 0  # SHORT
     
     return labels

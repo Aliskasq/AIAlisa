@@ -52,12 +52,24 @@ class MLEngine:
             logging.warning("⚠️ ML: joblib not installed — ML predictions disabled")
             return
         
+        self.feature_masks = {}  # tf_key → numpy bool array (or None if all features used)
+        
         for tf_key, filename in TF_MODELS.items():
             path = os.path.join(self.model_dir, filename)
             if os.path.exists(path):
                 try:
-                    self.models[tf_key] = joblib.load(path)
-                    logging.info(f"🧠 ML: loaded {filename}")
+                    loaded = joblib.load(path)
+                    # Support both formats: raw model (old) and {model, feature_mask} (new)
+                    if isinstance(loaded, dict) and "model" in loaded:
+                        self.models[tf_key] = loaded["model"]
+                        mask = loaded.get("feature_mask")
+                        self.feature_masks[tf_key] = np.array(mask, dtype=bool) if mask else None
+                        n_feat = len(loaded.get("feature_names", []))
+                        logging.info(f"🧠 ML: loaded {filename} ({n_feat} features)")
+                    else:
+                        self.models[tf_key] = loaded  # old format — raw model
+                        self.feature_masks[tf_key] = None
+                        logging.info(f"🧠 ML: loaded {filename} (legacy format)")
                 except Exception as e:
                     logging.error(f"❌ ML: failed to load {filename}: {e}")
         
@@ -99,11 +111,15 @@ class MLEngine:
             features = extract_features_from_dict(indicators, smc_data=smc_data)
             features_2d = features.reshape(1, -1)
             
+            # Apply feature mask if model was trained with feature selection
+            mask = self.feature_masks.get(tf_key)
+            if mask is not None and len(mask) == features_2d.shape[1]:
+                features_2d = features_2d[:, mask]
+            
             # Handle model trained with fewer features (backward compat)
             model = self.models[tf_key]
             expected = model.n_features_in_ if hasattr(model, 'n_features_in_') else features_2d.shape[1]
             if features_2d.shape[1] > expected:
-                # Model was trained with fewer features — truncate to match
                 features_2d = features_2d[:, :expected]
             
             proba = model.predict_proba(features_2d)[0]

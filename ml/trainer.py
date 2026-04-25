@@ -65,7 +65,7 @@ TIMEFRAME_CONFIG = {
 
 # XGBoost hyperparameters — conservative to avoid overfitting on 540 pairs
 XGB_PARAMS = {
-    "n_estimators": 200,       # reduced from 300 for RAM (2 GB server)
+    "n_estimators": 250,       # balanced: more trees but fits 2 GB server
     "max_depth": 5,
     "learning_rate": 0.05,
     "subsample": 0.8,
@@ -432,7 +432,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     
     # Phase 3: Train XGBoost
     from xgboost import XGBClassifier
-    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import accuracy_score, classification_report
     
     # Balance classes
     pos_count = (y == 1).sum()
@@ -442,23 +442,51 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     params = XGB_PARAMS.copy()
     params["scale_pos_weight"] = round(scale_pos, 2)
     
-    # Train/validation split (80/20, stratified)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
+    # ── Temporal split (no data leakage) ──
+    # Data is already ordered by time (oldest→newest per pair, pairs sequential).
+    # Take last 20% as validation — model never sees future data during training.
+    split_idx = int(len(X) * 0.8)
+    X_train, X_val = X[:split_idx], X[split_idx:]
+    y_train, y_val = y[:split_idx], y[split_idx:]
     
-    logging.info(f"   Training XGBoost ({params['n_estimators']} trees, depth={params['max_depth']})...")
+    logging.info(f"   Temporal split: train={len(X_train)}, val={len(X_val)} (last 20% by time)")
+    
+    # ── Phase 3a: First pass — train to get feature importances ──
+    logging.info(f"   Training XGBoost pass 1 ({params['n_estimators']} trees, depth={params['max_depth']})...")
     
     model = XGBClassifier(**params)
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_val, y_val)],
-        verbose=False,
-    )
+    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+    
+    # ── Feature selection — drop noise features (importance < 0.005) ──
+    importances = model.feature_importances_
+    important_mask = importances >= 0.005
+    n_kept = important_mask.sum()
+    n_dropped = (~important_mask).sum()
+    
+    if n_dropped > 0 and n_kept >= 20:
+        dropped_names = [FEATURE_NAMES[i] for i in range(len(FEATURE_NAMES)) if not important_mask[i]]
+        logging.info(f"   🔪 Feature selection: keeping {n_kept}/{len(FEATURE_NAMES)}, dropping {n_dropped} noise features")
+        logging.info(f"      Dropped: {', '.join(dropped_names[:10])}{'...' if len(dropped_names) > 10 else ''}")
+        
+        X_train = X_train[:, important_mask]
+        X_val = X_val[:, important_mask]
+        
+        # ── Phase 3b: Retrain on selected features ──
+        logging.info(f"   Training XGBoost pass 2 (selected {n_kept} features)...")
+        del model
+        gc.collect()
+        
+        model = XGBClassifier(**params)
+        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+        
+        # Store which features were kept (for prediction compatibility)
+        kept_feature_names = [FEATURE_NAMES[i] for i in range(len(FEATURE_NAMES)) if important_mask[i]]
+        importances = model.feature_importances_
+    else:
+        kept_feature_names = FEATURE_NAMES
+        logging.info(f"   All {len(FEATURE_NAMES)} features important enough (no pruning needed)")
     
     # Phase 4: Evaluate
-    from sklearn.metrics import accuracy_score, classification_report
-    
     y_pred = model.predict(X_val)
     accuracy = accuracy_score(y_val, y_pred)
     
@@ -466,17 +494,23 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     logging.info(f"   Classification report:\n{classification_report(y_val, y_pred, target_names=['SHORT','LONG'])}")
     
     # Feature importance (top 10)
-    importances = model.feature_importances_
     top_idx = np.argsort(importances)[-10:][::-1]
     logging.info(f"   Top 10 features:")
     for idx in top_idx:
-        logging.info(f"     {FEATURE_NAMES[idx]}: {importances[idx]:.4f}")
+        feat_name = kept_feature_names[idx] if idx < len(kept_feature_names) else f"feature_{idx}"
+        logging.info(f"     {feat_name}: {importances[idx]:.4f}")
     
-    # Phase 5: Save model
+    # Phase 5: Save model + feature mask
     import joblib
     os.makedirs(MODEL_DIR, exist_ok=True)
     model_path = os.path.join(MODEL_DIR, config["model_file"])
-    joblib.dump(model, model_path)
+    # Save model with feature mask so engine.py knows which features to use
+    save_obj = {
+        "model": model,
+        "feature_names": kept_feature_names,
+        "feature_mask": important_mask.tolist() if n_dropped > 0 else None,
+    }
+    joblib.dump(save_obj, model_path)
     model_size = os.path.getsize(model_path) / 1024 / 1024
     logging.info(f"   💾 Saved: {model_path} ({model_size:.1f} MB)")
     
