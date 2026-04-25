@@ -334,6 +334,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     pairs_ok = 0
     pairs_fail = 0
     total_samples = 0
+    MAX_SAMPLES = 350_000  # hard cap — prevents OOM on 2 GB server
     
     FETCH_BATCH = 3   # small batches to stay within 500 weight/min
     _first_errors_logged = 0
@@ -376,12 +377,18 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
                 del candles, funding_data
                 continue
             
-            all_features.append(features.values)
-            all_labels.append(labels.values)
+            # Use float32 to halve memory (float64 → float32)
+            all_features.append(features.values.astype(np.float32))
+            all_labels.append(labels.values.astype(np.float32))
             total_samples += len(features)
             pairs_ok += 1
             
             del candles, funding_data, features, labels
+            
+            # Stop collecting if we have enough samples
+            if total_samples >= MAX_SAMPLES:
+                logging.info(f"   ⚡ Reached {MAX_SAMPLES} sample cap at {pairs_ok} pairs — stopping collection")
+                break
         
         # Periodic GC + progress
         i = batch_start + len(batch_symbols)
@@ -389,6 +396,9 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
             gc.collect()
             logging.info(f"   Progress: {i}/{len(symbols)} pairs, "
                         f"{total_samples} samples, {pairs_ok} ok / {pairs_fail} fail")
+        
+        if total_samples >= MAX_SAMPLES:
+            break
     
     if not all_features:
         logging.error(f"❌ No valid data for {tf_key}!")
@@ -406,17 +416,6 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     logging.info(f"   Dataset: {X.shape[0]} samples × {X.shape[1]} features")
     logging.info(f"   Labels: LONG={int((y==1).sum())} ({(y==1).mean()*100:.1f}%), "
                 f"SHORT={int((y==0).sum())} ({(y==0).mean()*100:.1f}%)")
-    
-    # Downsample if too large for available RAM (~2 GB server)
-    # 117 features × 400K samples ≈ 350 MB for X alone; XGBoost needs ~3-4× during training
-    MAX_SAMPLES = 400_000
-    if X.shape[0] > MAX_SAMPLES:
-        logging.info(f"   ⚡ Downsampling {X.shape[0]} → {MAX_SAMPLES} samples (RAM limit)")
-        rng = np.random.RandomState(42)
-        idx = rng.choice(X.shape[0], MAX_SAMPLES, replace=False)
-        X = X[idx]
-        y = y[idx]
-        gc.collect()
     
     if dry_run:
         logging.info(f"   🏃 DRY RUN — skipping training")
