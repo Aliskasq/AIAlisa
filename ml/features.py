@@ -889,15 +889,15 @@ def extract_features_from_df(df: pd.DataFrame, smc_data: dict = None) -> pd.Data
     # ── GROUP 3: SMC features ──
     # SMC is a per-symbol snapshot (structures, OBs, FVGs from full candle history).
     # Same SMC context applies to all rows — use last candle's price for distances.
+    smc_col_names = [f for f in FEATURE_NAMES if f.startswith("smc_")]
     if smc_data and "swing_structures" in smc_data:
         last_price = float(df["close"].iloc[-1]) if len(df) > 0 else 0
         smc_features = _extract_smc_features(smc_data, last_price)
-        smc_col_names = [f for f in FEATURE_NAMES if f.startswith("smc_")]
-        for col_name, val in zip(smc_col_names, smc_features):
-            out[col_name] = val  # broadcast same value to all rows
+        smc_dict = {col: val for col, val in zip(smc_col_names, smc_features)}
     else:
-        for smc_col in [f for f in FEATURE_NAMES if f.startswith("smc_")]:
-            out[smc_col] = 0.0
+        smc_dict = {col: 0.0 for col in smc_col_names}
+    smc_df = pd.DataFrame(smc_dict, index=out.index)
+    out = pd.concat([out, smc_df], axis=1)
 
     # Replace inf with NaN
     out = out.replace([np.inf, -np.inf], np.nan)
