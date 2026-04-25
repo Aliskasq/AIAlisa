@@ -42,7 +42,7 @@ TIMEFRAME_CONFIG = {
         "limit": 800,        # 800 candles = ~133 days (150 warmup + 650 training)
         "requests": 1,
         "horizon": 4,        # look-ahead: 4 candles = 16h
-        "threshold": 0.3,    # min move % for label
+        "threshold": 0.5,    # min move % for label (0.5% filters noise)
         "model_file": "xgb_4h.pkl",
     },
     "1H": {
@@ -50,7 +50,7 @@ TIMEFRAME_CONFIG = {
         "limit": 800,        # 800 candles = ~33 days
         "requests": 1,
         "horizon": 4,        # 4 candles = 4h
-        "threshold": 0.3,
+        "threshold": 0.5,    # min move % for label
         "model_file": "xgb_1h.pkl",
     },
     "15m": {
@@ -58,7 +58,7 @@ TIMEFRAME_CONFIG = {
         "limit": 800,        # 800 candles = ~8 days
         "requests": 1,
         "horizon": 4,        # 4 candles = 1h
-        "threshold": 0.3,
+        "threshold": 0.3,    # 15m keeps 0.3% (smaller moves are real on short TF)
         "model_file": "xgb_15m.pkl",
     },
 }
