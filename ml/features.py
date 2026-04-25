@@ -596,15 +596,15 @@ def _extract_smc_features(smc_data: dict, current_price: float) -> list:
 
 # ─── TRAINING EXTRACTION: from DataFrame ────────────────────────
 
-def extract_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
+def extract_features_from_df(df: pd.DataFrame, smc_data: dict = None) -> pd.DataFrame:
     """
     Extract ML features from a DataFrame that already has indicator columns.
-    Returns DataFrame with FEATURE_NAMES columns (only snapshot + partial dynamics).
+    Returns DataFrame with FEATURE_NAMES columns.
     
-    Note: Full dynamic features (50-candle history) and SMC features require
-    the indicator dict, not raw DataFrame. For training, we compute what we can
-    from the DataFrame and fill the rest with defaults. The trainer should
-    use extract_features_from_dict when indicator dicts are available.
+    Args:
+        df: DataFrame with indicator columns (from calculate_binance_indicators)
+        smc_data: dict from analyze_smc (optional). SMC is per-symbol snapshot,
+                  so the same values are applied to all rows (last candle's SMC context).
     """
     out = pd.DataFrame(index=df.index)
     c = df["close"]
@@ -886,17 +886,18 @@ def extract_features_from_df(df: pd.DataFrame) -> pd.DataFrame:
     cmf_positive = (cmf > 0).astype(float)
     out["cmf_positive_ratio_30"] = cmf_positive.rolling(30, min_periods=1).mean()
     
-    # ── GROUP 3: SMC features (zeros for DataFrame training — SMC requires full analysis) ──
-    for smc_col in [
-        "smc_swing_trend_enc", "smc_internal_trend_enc", "smc_trend_conflict_enc",
-        "smc_last_swing_type_enc", "smc_last_swing_bias_enc", "smc_last_swing_bars",
-        "smc_last_int_bias_enc", "smc_last_int_bars",
-        "smc_bull_ob_dist_pct", "smc_bear_ob_dist_pct",
-        "smc_bull_fvg_dist_pct", "smc_bear_fvg_dist_pct",
-        "smc_eqh_dist_pct", "smc_eql_dist_pct",
-        "smc_zone_enc", "smc_score_long_pct", "smc_score_short_pct",
-    ]:
-        out[smc_col] = 0.0
+    # ── GROUP 3: SMC features ──
+    # SMC is a per-symbol snapshot (structures, OBs, FVGs from full candle history).
+    # Same SMC context applies to all rows — use last candle's price for distances.
+    if smc_data and "swing_structures" in smc_data:
+        last_price = float(df["close"].iloc[-1]) if len(df) > 0 else 0
+        smc_features = _extract_smc_features(smc_data, last_price)
+        smc_col_names = [f for f in FEATURE_NAMES if f.startswith("smc_")]
+        for col_name, val in zip(smc_col_names, smc_features):
+            out[col_name] = val  # broadcast same value to all rows
+    else:
+        for smc_col in [f for f in FEATURE_NAMES if f.startswith("smc_")]:
+            out[smc_col] = 0.0
 
     # Replace inf with NaN
     out = out.replace([np.inf, -np.inf], np.nan)

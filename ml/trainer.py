@@ -253,7 +253,7 @@ async def get_all_futures_symbols(session: aiohttp.ClientSession) -> list:
 def process_pair(candles: list, tf_key: str, config: dict,
                  funding_data: list = None) -> tuple:
     """
-    Process a single pair: calculate indicators → extract features → create labels.
+    Process a single pair: calculate indicators → SMC analysis → extract features → create labels.
     
     Returns: (features_df, labels_series) or (None, None) on failure.
     Both have NaN rows already dropped.
@@ -272,7 +272,7 @@ def process_pair(candles: list, tf_key: str, config: dict,
         
         # calculate_binance_indicators returns (last_row_dict, df) or just dict
         if isinstance(result, tuple):
-            _, df_with_indicators = result
+            last_row_dict, df_with_indicators = result
         else:
             logging.warning(f"Unexpected return type from calculate_binance_indicators: {type(result)}")
             return None, None
@@ -282,7 +282,15 @@ def process_pair(candles: list, tf_key: str, config: dict,
             df_with_indicators["funding_rate"] = df["funding_rate"].values
             df_with_indicators["funding_rate_ma3"] = df["funding_rate_ma3"].values
         
-        features = extract_features_from_df(df_with_indicators)
+        # SMC analysis — run on the raw candle DataFrame
+        smc_data = None
+        try:
+            from core.smc import analyze_smc
+            smc_data = analyze_smc(df, tf_key)
+        except Exception:
+            pass  # SMC is optional, features will be zeros if missing
+        
+        features = extract_features_from_df(df_with_indicators, smc_data=smc_data)
         labels = create_labels(df_with_indicators, 
                               horizon=config["horizon"],
                               threshold_pct=config["threshold"])
