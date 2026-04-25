@@ -1617,6 +1617,7 @@ async def handle_message(app_session, update):
 
     if text.startswith("/mlstatus"):
         import json as _json
+        import os as _os
         stats_path = "/root/AIAlisa/ml/models/train_stats.json"
         try:
             from ml.engine import get_ml_engine
@@ -1629,7 +1630,7 @@ async def handle_message(app_session, update):
             else:
                 status_lines.append("⚠️ Модели не загружены (обучение не запускалось)")
             
-            if os.path.exists(stats_path):
+            if _os.path.exists(stats_path):
                 with open(stats_path) as f:
                     stats = _json.load(f)
                 status_lines.append(f"\n📅 Последнее обучение: {stats.get('trained_at', '?')}")
