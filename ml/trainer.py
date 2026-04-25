@@ -588,14 +588,23 @@ async def main(args):
                         f"{stats['pairs']} pairs, {stats['samples_total']} samples, "
                         f"{stats['model_size_mb']:.1f} MB, {stats['elapsed_sec']:.0f}s")
     
-    # Save stats to JSON
+    # Save stats to JSON — merge with existing (don't overwrite other TFs)
     stats_path = os.path.join(MODEL_DIR, "train_stats.json")
     try:
+        existing = {}
+        if os.path.exists(stats_path):
+            with open(stats_path) as f:
+                existing = json.load(f)
+        
+        # Merge: keep stats from other TFs, update only what we trained now
+        merged_tfs = existing.get("timeframes", {})
+        merged_tfs.update(all_stats)
+        
         with open(stats_path, "w") as f:
             json.dump({
                 "trained_at": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
                 "total_elapsed_min": round(total_elapsed / 60, 1),
-                "timeframes": all_stats,
+                "timeframes": merged_tfs,
             }, f, indent=2)
         logging.info(f"   📊 Stats saved: {stats_path}")
     except Exception:
