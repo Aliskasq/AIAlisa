@@ -16,7 +16,7 @@ Approved format:
     
     🏆 ВЕРДИКТ: LONG
     📊 AI: LONG 63% / SHORT 37%
-    🧠 ML: LONG 58% (взвеш: 4H×50% + 1H×30% + 15m×20%)
+    🧠 ML: LONG 58% (взвеш: 4H×40% + 1H×35% + 15m×25%)
     ✅ AI + ML: КОНСЕНСУС
 """
 
@@ -93,7 +93,7 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
             ws = ml_result["weighted_short_pct"]
             d = ml_result["direction"]
             result_lines.append(
-                f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×50% + 1H×30% + 15m×20%)"
+                f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
             )
             
             # Add consensus line — need AI direction
@@ -113,7 +113,7 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
         d = ml_result["direction"]
         result_lines.append("")
         result_lines.append(
-            f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×50% + 1H×30% + 15m×20%)"
+            f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
         )
         ai_dir = _extract_ai_direction(ai_text)
         if ai_dir:
@@ -149,7 +149,7 @@ def format_ml_for_prompt(ml_result: dict) -> str:
     Returns text block like:
         [ML MODEL PREDICTIONS (XGBoost, second opinion)]
         4H: LONG 74% | 1H: LONG 68% | 15m: SHORT 55%
-        Weighted: LONG 67% (4H×50% + 1H×30% + 15m×20%)
+        Weighted: LONG 67% (4H×40% + 1H×35% + 15m×25%)
         Consensus: NO (15m disagrees)
         Note: ML is statistical pattern recognition. Use as additional signal, not override.
     """
@@ -174,7 +174,7 @@ def format_ml_for_prompt(ml_result: dict) -> str:
     return (
         f"\n[ML MODEL PREDICTIONS (XGBoost, second opinion)]\n"
         f"{' | '.join(tf_parts)}\n"
-        f"Weighted: {d} {max(wl, ws):.0f}% (4H×50% + 1H×30% + 15m×20%)\n"
+        f"Weighted: {d} {max(wl, ws):.0f}% (4H×40% + 1H×35% + 15m×25%)\n"
         f"ML Consensus: {consensus}\n"
         f"Note: ML is statistical pattern recognition trained on 540+ pairs. "
         f"Use as additional confirmation signal. If ML strongly disagrees with indicators, mention it.\n"

@@ -15,7 +15,7 @@ import numpy as np
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 # Timeframe weights for combined score (matches analyzer.py)
-TF_WEIGHTS = {"4H": 0.50, "1H": 0.30, "15m": 0.20}
+TF_WEIGHTS = {"4H": 0.40, "1H": 0.35, "15m": 0.25}
 
 # Singleton instance
 _instance = None
@@ -130,7 +130,7 @@ class MLEngine:
                     "1H": {"direction": "LONG", "long_prob": 0.68, "confidence": 68.0},
                     "15m": {"direction": "SHORT", "long_prob": 0.45, "confidence": 55.0},
                 },
-                "weighted_long_pct": 67.0,   # 4H×50% + 1H×30% + 15m×20%
+                "weighted_long_pct": 67.0,   # 4H×40% + 1H×35% + 15m×25%
                 "weighted_short_pct": 33.0,
                 "direction": "LONG",
                 "consensus": True,           # all TFs agree on direction
@@ -184,7 +184,7 @@ class MLEngine:
             🧠 ML 4ч: LONG 74%
             🧠 ML 1ч: LONG 68%
             🧠 ML 15м: SHORT 55% ⚠️
-            🧠 ML: LONG 67% (взвеш: 4H×50% + 1H×30% + 15m×20%)
+            🧠 ML: LONG 67% (взвеш: 4H×40% + 1H×35% + 15m×25%)
             ✅ AI + ML: КОНСЕНСУС
         """
         if not ml_result.get("available"):
@@ -214,7 +214,7 @@ class MLEngine:
         # Weighted summary
         wl = ml_result["weighted_long_pct"]
         ws = ml_result["weighted_short_pct"]
-        lines.append(f"🧠 ML: {weighted_dir} {max(wl, ws):.0f}% (взвеш: 4H×50% + 1H×30% + 15m×20%)")
+        lines.append(f"🧠 ML: {weighted_dir} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)")
         
         return "\n".join(lines)
     
