@@ -654,8 +654,12 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     # Warns when current RSI approaches that level again
     rsi_pullback_peak = 0
     rsi_pullback_drop = 0
+    rsi_pullback_range = ""  # e.g. "66-70" if multiple peaks above 65
     if len(rsi_values_50) >= 10:
-        # Scan backwards: find peaks where RSI dropped by ≥8 points after
+        # Collect ALL peaks with meaningful pullback (drop ≥8 pts)
+        _peaks_above_65 = []
+        _best_peak = 0
+        _best_drop = 0
         for i in range(len(rsi_values_50) - 3, 0, -1):
             val = rsi_values_50[i]
             # Check if this was a local peak (higher than neighbors)
@@ -664,9 +668,17 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
                 future_min = min(rsi_values_50[i+1:min(i+10, len(rsi_values_50))])
                 drop = val - future_min
                 if drop >= 8:  # meaningful pullback (at least 8 RSI points)
-                    rsi_pullback_peak = round(val, 1)
-                    rsi_pullback_drop = round(drop, 1)
-                    break  # take the most recent one
+                    if val > _best_peak:
+                        _best_peak = val
+                        _best_drop = drop
+                    if val >= 65:
+                        _peaks_above_65.append(round(val, 1))
+        if _best_peak > 0:
+            rsi_pullback_peak = round(_best_peak, 1)
+            rsi_pullback_drop = round(_best_drop, 1)
+        # If 2+ peaks above 65, show range (e.g. "66-70")
+        if len(_peaks_above_65) >= 2:
+            rsi_pullback_range = f"{min(_peaks_above_65):.0f}-{max(_peaks_above_65):.0f}"
 
     # SuperTrend History (50 candles)
     st_bars_since_flip = 0
@@ -976,6 +988,7 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
         "rsi_price_divergence": rsi_price_divergence,
         "rsi_pullback_peak": rsi_pullback_peak,
         "rsi_pullback_drop": rsi_pullback_drop,
+        "rsi_pullback_range": rsi_pullback_range,
         
         # SuperTrend History (50 candles)
         "st_bars_since_flip": st_bars_since_flip,
@@ -1222,8 +1235,10 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     pullback_text = ""
     rsi_pullback_peak = indic.get("rsi_pullback_peak", 0)
     rsi_pullback_drop = indic.get("rsi_pullback_drop", 0)
+    rsi_pullback_range = indic.get("rsi_pullback_range", "")
     if rsi_pullback_peak > 0 and rsi >= rsi_pullback_peak - 5:
-        pullback_text = f"\n   ⚠️ PULLBACK HISTORY: last pullback started from RSI {rsi_pullback_peak} (dropped {rsi_pullback_drop} pts)"
+        _peak_label = rsi_pullback_range if rsi_pullback_range else str(rsi_pullback_peak)
+        pullback_text = f"\n   ⚠️ PULLBACK HISTORY: last pullback started from RSI {_peak_label} (dropped {rsi_pullback_drop} pts)"
         if rsi >= rsi_pullback_peak - 2:
             pullback_text += f" — CURRENT RSI {rsi:.0f} IS NEAR THAT LEVEL! CAUTION!"
     
@@ -1865,6 +1880,7 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     # 2f. RSI Pullback History
     rsi_pullback_peak_v = indic.get('rsi_pullback_peak', 0)
     rsi_pullback_drop_v = indic.get('rsi_pullback_drop', 0)
+    rsi_pullback_range_v = indic.get('rsi_pullback_range', "")
     exh_max += 2
     if rsi_pullback_peak_v > 0 and rsi_val > 70:
         if rsi_val >= rsi_pullback_peak_v:
@@ -2112,7 +2128,8 @@ def format_tf_summary(indic: dict, tf_label: str) -> str:
     # RSI pullback history line
     rsi_pullback_line = ""
     if rsi_val > 70 and rsi_pullback_peak_v > 0:
-        rsi_pullback_line = f"\n   ⚠️ PULLBACK HISTORY: last pullback from RSI {rsi_pullback_peak_v} (drop {rsi_pullback_drop_v} pts)"
+        _peak_label_v = rsi_pullback_range_v if rsi_pullback_range_v else str(rsi_pullback_peak_v)
+        rsi_pullback_line = f"\n   ⚠️ PULLBACK HISTORY: last pullback from RSI {_peak_label_v} (drop {rsi_pullback_drop_v} pts)"
         if rsi_val >= rsi_pullback_peak_v - 2:
             rsi_pullback_line += f" — RSI {rsi_val:.0f} NEAR DANGER ZONE!"
 
