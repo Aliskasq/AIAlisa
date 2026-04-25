@@ -377,18 +377,22 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
                 del candles, funding_data
                 continue
             
-            # Use float32 to halve memory (float64 → float32)
-            all_features.append(features.values.astype(np.float32))
-            all_labels.append(labels.values.astype(np.float32))
-            total_samples += len(features)
+            # Subsample per pair if needed to fit all pairs in RAM
+            # 535 pairs × max_per_pair ≈ MAX_SAMPLES
+            max_per_pair = MAX_SAMPLES // len(symbols) if len(symbols) > 0 else 9999
+            feat_vals = features.values.astype(np.float32)
+            lab_vals = labels.values.astype(np.float32)
+            if len(feat_vals) > max_per_pair:
+                idx = np.random.RandomState(42 + pairs_ok).choice(len(feat_vals), max_per_pair, replace=False)
+                feat_vals = feat_vals[idx]
+                lab_vals = lab_vals[idx]
+            
+            all_features.append(feat_vals)
+            all_labels.append(lab_vals)
+            total_samples += len(feat_vals)
             pairs_ok += 1
             
-            del candles, funding_data, features, labels
-            
-            # Stop collecting if we have enough samples
-            if total_samples >= MAX_SAMPLES:
-                logging.info(f"   ⚡ Reached {MAX_SAMPLES} sample cap at {pairs_ok} pairs — stopping collection")
-                break
+            del candles, funding_data, features, labels, feat_vals, lab_vals
         
         # Periodic GC + progress
         i = batch_start + len(batch_symbols)
@@ -397,8 +401,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
             logging.info(f"   Progress: {i}/{len(symbols)} pairs, "
                         f"{total_samples} samples, {pairs_ok} ok / {pairs_fail} fail")
         
-        if total_samples >= MAX_SAMPLES:
-            break
+
     
     if not all_features:
         logging.error(f"❌ No valid data for {tf_key}!")
