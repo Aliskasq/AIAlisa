@@ -51,6 +51,16 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
     if not per_tf:
         return ai_text
     
+    # --- STRIP any ML lines the AI wrote itself (prevents duplicates) ---
+    _ml_line_re = re.compile(
+        r"^\s*🧠\s*ML[\s:]|"                          # 🧠 ML 4ч: ... / 🧠 ML: SHORT 60%
+        r"^\s*(?:✅|⚠️)\s*AI\s*\+\s*ML\s*:",          # ✅ AI + ML: КОНСЕНСУС / ⚠️ AI + ML: РАСХОЖДЕНИЕ
+        re.IGNORECASE
+    )
+    cleaned_lines = [ln for ln in ai_text.split("\n") if not _ml_line_re.search(ln)]
+    # Remove blank lines that were left between ⏱ and next content
+    ai_text = "\n".join(cleaned_lines)
+    
     lines = ai_text.split("\n")
     new_lines = []
     injected_tfs = set()
