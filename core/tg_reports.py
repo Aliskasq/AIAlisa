@@ -17,6 +17,9 @@ async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
     Fetch 97 x 15m candles after entry time and walk high/low to find first TP/SL hit.
     Returns (status, close_price) where status is 'tp', 'sl', or 'open'.
     close_price = TP/SL level if hit, or last candle close if open.
+    
+    FALLBACK SL: If ai_sl is None, uses 10% from entry as emergency SL.
+    This prevents zombie positions that never close when AI didn't provide SL.
     """
     try:
         # Parse entry time → ms for Binance API startTime
@@ -34,7 +37,37 @@ async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
                 logging.warning(f"⚠️ Candle check {symbol}: empty response")
                 return ("open", 0)
 
-        logging.info(f"🕯️ {symbol}: loaded {len(raw)} candles (15m) from {entry_time_iso}, dir={ai_dir} entry={entry_price} TP={ai_tp} SL={ai_sl}")
+        # === FALLBACK SL/TP when AI didn't provide levels ===
+        effective_sl = ai_sl
+        effective_tp = ai_tp
+        if entry_price > 0:
+            if not effective_sl or effective_sl <= 0:
+                # Emergency SL: 10% from entry
+                if ai_dir == "LONG":
+                    effective_sl = entry_price * 0.90
+                elif ai_dir == "SHORT":
+                    effective_sl = entry_price * 1.10
+                logging.info(f"🕯️ {symbol}: no ai_sl, using fallback 10% SL = {effective_sl}")
+            if not effective_tp or effective_tp <= 0:
+                # Emergency TP: 20% from entry (2:1 R:R with 10% SL)
+                if ai_dir == "LONG":
+                    effective_tp = entry_price * 1.20
+                elif ai_dir == "SHORT":
+                    effective_tp = entry_price * 0.80
+        
+        # === SANITY CHECK: SL/TP must be on correct side of entry ===
+        if ai_dir == "LONG":
+            if effective_sl and effective_sl >= entry_price:
+                effective_sl = entry_price * 0.90  # force correct side
+            if effective_tp and effective_tp <= entry_price:
+                effective_tp = entry_price * 1.20
+        elif ai_dir == "SHORT":
+            if effective_sl and effective_sl <= entry_price:
+                effective_sl = entry_price * 1.10
+            if effective_tp and effective_tp >= entry_price:
+                effective_tp = entry_price * 0.80
+
+        logging.info(f"🕯️ {symbol}: loaded {len(raw)} candles (15m) from {entry_time_iso}, dir={ai_dir} entry={entry_price} TP={effective_tp} SL={effective_sl} (orig: TP={ai_tp} SL={ai_sl})")
 
         # Walk candles chronologically — first hit wins
         last_close = 0
@@ -45,20 +78,20 @@ async def _check_tp_sl_from_candles(session: aiohttp.ClientSession, symbol: str,
 
             if ai_dir == "LONG":
                 # SL: price drops to or below SL
-                if ai_sl and ai_sl < entry_price and low <= ai_sl:
-                    logging.info(f"🕯️ {symbol}: SL HIT (LONG) — candle low {low} <= SL {ai_sl}")
-                    return ("sl", ai_sl)
-                if ai_tp and ai_tp > entry_price and high >= ai_tp:
-                    logging.info(f"🕯️ {symbol}: TP HIT (LONG) — candle high {high} >= TP {ai_tp}")
-                    return ("tp", ai_tp)
+                if effective_sl and effective_sl < entry_price and low <= effective_sl:
+                    logging.info(f"🕯️ {symbol}: SL HIT (LONG) — candle low {low} <= SL {effective_sl}")
+                    return ("sl", effective_sl)
+                if effective_tp and effective_tp > entry_price and high >= effective_tp:
+                    logging.info(f"🕯️ {symbol}: TP HIT (LONG) — candle high {high} >= TP {effective_tp}")
+                    return ("tp", effective_tp)
             elif ai_dir == "SHORT":
                 # SL: price rises to or above SL
-                if ai_sl and ai_sl > entry_price and high >= ai_sl:
-                    logging.info(f"🕯️ {symbol}: SL HIT (SHORT) — candle high {high} >= SL {ai_sl}")
-                    return ("sl", ai_sl)
-                if ai_tp and ai_tp < entry_price and low <= ai_tp:
-                    logging.info(f"🕯️ {symbol}: TP HIT (SHORT) — candle low {low} <= TP {ai_tp}")
-                    return ("tp", ai_tp)
+                if effective_sl and effective_sl > entry_price and high >= effective_sl:
+                    logging.info(f"🕯️ {symbol}: SL HIT (SHORT) — candle high {high} >= SL {effective_sl}")
+                    return ("sl", effective_sl)
+                if effective_tp and effective_tp < entry_price and low <= effective_tp:
+                    logging.info(f"🕯️ {symbol}: TP HIT (SHORT) — candle low {low} <= TP {effective_tp}")
+                    return ("tp", effective_tp)
 
         logging.info(f"🕯️ {symbol}: OPEN (no TP/SL hit in {len(raw)} candles)")
         return ("open", last_close if last_close else 0)

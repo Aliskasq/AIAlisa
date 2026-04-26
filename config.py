@@ -275,6 +275,65 @@ def parse_ai_trade_params(ai_text: str) -> dict:
     return result
 
 
+def _validate_ai_prices(symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direction, max_entry_deviation=0.30):
+    """Validate AI-parsed prices against real market price.
+    
+    FIXES BUG: AI model sometimes returns prices from a DIFFERENT coin
+    (e.g., SEI price in HANA analysis). This causes wrong entry in virtual bank,
+    wrong SL/TP levels, and phantom losses.
+    
+    Checks:
+    1. ai_entry vs current_price: if >30% off → use current_price
+    2. ai_sl direction: LONG SL must be < entry, SHORT SL must be > entry
+    3. ai_tp direction: LONG TP must be > entry, SHORT TP must be < entry
+    
+    Returns: (ai_entry, ai_sl, ai_tp) — corrected values
+    """
+    if current_price <= 0:
+        return ai_entry, ai_sl, ai_tp
+    
+    # 1. Validate ai_entry — must be close to current_price
+    if ai_entry is not None and ai_entry > 0:
+        deviation = abs(ai_entry - current_price) / current_price
+        if deviation > max_entry_deviation:
+            logging.warning(
+                f"⚠️ PRICE MISMATCH {symbol}: ai_entry={ai_entry} vs market={current_price} "
+                f"(deviation {deviation*100:.1f}% > {max_entry_deviation*100:.0f}%) — using market price"
+            )
+            ai_entry = current_price
+    
+    # Use effective entry for SL/TP validation
+    effective_entry = ai_entry if (ai_entry and ai_entry > 0) else current_price
+    direction = (ai_direction or "").upper()
+    
+    # 2. Validate ai_sl direction
+    if ai_sl is not None and ai_sl > 0 and direction in ("LONG", "SHORT"):
+        if direction == "LONG" and ai_sl >= effective_entry:
+            logging.warning(f"⚠️ SL WRONG SIDE {symbol}: LONG but SL={ai_sl} >= entry={effective_entry} — clearing SL")
+            ai_sl = None
+        elif direction == "SHORT" and ai_sl <= effective_entry:
+            logging.warning(f"⚠️ SL WRONG SIDE {symbol}: SHORT but SL={ai_sl} <= entry={effective_entry} — clearing SL")
+            ai_sl = None
+        # Also check SL isn't from a different coin (>50% away from entry)
+        elif abs(ai_sl - effective_entry) / effective_entry > 0.50:
+            logging.warning(f"⚠️ SL TOO FAR {symbol}: SL={ai_sl} is >50% from entry={effective_entry} — clearing SL")
+            ai_sl = None
+    
+    # 3. Validate ai_tp direction
+    if ai_tp is not None and ai_tp > 0 and direction in ("LONG", "SHORT"):
+        if direction == "LONG" and ai_tp <= effective_entry:
+            logging.warning(f"⚠️ TP WRONG SIDE {symbol}: LONG but TP={ai_tp} <= entry={effective_entry} — clearing TP")
+            ai_tp = None
+        elif direction == "SHORT" and ai_tp >= effective_entry:
+            logging.warning(f"⚠️ TP WRONG SIDE {symbol}: SHORT but TP={ai_tp} >= entry={effective_entry} — clearing TP")
+            ai_tp = None
+        elif abs(ai_tp - effective_entry) / effective_entry > 0.50:
+            logging.warning(f"⚠️ TP TOO FAR {symbol}: TP={ai_tp} is >50% from entry={effective_entry} — clearing TP")
+            ai_tp = None
+    
+    return ai_entry, ai_sl, ai_tp
+
+
 def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_monitor=False, is_pump_filter=False):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
@@ -288,6 +347,12 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
                 existing["ai_direction"] = ai_direction.upper()
             save_breakout_log(log)
         return  # already exists, don't duplicate
+
+    # === VALIDATE AI PRICES against real market price ===
+    ai_entry, ai_sl, ai_tp = _validate_ai_prices(
+        symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direction
+    )
+
     if True:  # new entry — always add
         # Check if same symbol (any TF) already exists — mark as duplicate
         symbol_already_exists = any(e["symbol"] == symbol for e in log)
@@ -326,6 +391,11 @@ def upgrade_breakout_entry(symbol, tf, ai_direction, ai_entry=None, ai_sl=None, 
     found = False
     for entry in log:
         if entry["symbol"] == symbol and entry["tf"] == tf:
+            # Validate AI prices against stored current_price
+            _ref_price = entry.get("current_price", 0) or (ai_entry if ai_entry else 0)
+            ai_entry, ai_sl, ai_tp = _validate_ai_prices(
+                symbol, _ref_price, ai_entry, ai_sl, ai_tp, ai_direction
+            )
             entry["ai_direction"] = ai_direction.upper() if ai_direction else ""
             if ai_entry is not None:
                 entry["ai_entry"] = round(ai_entry, 8)
@@ -424,6 +494,10 @@ def save_monitor_breakout_log(log):
 
 def add_monitor_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
     """Add a monitor upgrade event to the monitor log (deduplicates by symbol+tf)."""
+    # === VALIDATE AI PRICES against real market price ===
+    ai_entry, ai_sl, ai_tp = _validate_ai_prices(
+        symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direction
+    )
     log = load_monitor_breakout_log()
     if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
         entry = {
