@@ -307,7 +307,8 @@ async def main():
                         _sym_tf_key = f"{symbol}_{tf_key}"
                         if trigger_hit and _sym_tf_key not in processed_symbols:
                             processed_symbols.add(_sym_tf_key)
-                            logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price})")
+                            _above_pct = ((current_price / dynamic_line_price) - 1) * 100 if dynamic_line_price > 0 else 0
+                            logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price}, Line: {dynamic_line_price:.6f}, Trigger: {dynamic_trigger:.6f}, Above: {_above_pct:.1f}%, Slope: {slope:.8f})")
                             line_data = stored_lines.get(tf_key, {}).get(symbol)
                             if line_data:
                                 breakout_queue.append({
