@@ -276,10 +276,13 @@ async def main():
                         trigger_hit = False
                         
                         if alert_type in ["GROWING-CANDLE-MODE", "DROP-ONGOING", "DROP-FLAT-HORIZ"]:
-                            # Ensure minimum 2% above trendline for all alert types
-                            raw_trigger = alert['trigger_price']
-                            min_trigger = dynamic_line_price * 1.02 if dynamic_line_price > 0 else raw_trigger
-                            dynamic_trigger = max(raw_trigger, min_trigger)
+                            # For descending trendlines: trigger follows the line down
+                            # Use dynamic_line_price * 1.02 (current line + 2%) as trigger
+                            # Only fall back to raw_trigger if dynamic_line_price is invalid
+                            if dynamic_line_price > 0:
+                                dynamic_trigger = dynamic_line_price * 1.02
+                            else:
+                                dynamic_trigger = alert['trigger_price']
                         else:
                             if status == "WAITING_RED_CLOSE":
                                 dynamic_trigger = dynamic_line_price * 1.02
