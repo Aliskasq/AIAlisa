@@ -923,8 +923,11 @@ async def main():
                                 ml_data=_ml_result_vol
                             )
 
+                            # Reset ai_verdict for each coin (prevent leaking previous coin's text)
                             if ai_verdict_full and "---" in ai_verdict_full:
                                 ai_verdict = ai_verdict_full.split("---", 1)[0].strip()
+                            else:
+                                ai_verdict = ai_verdict_full or ""
                             
                             # Inject ML scores into volume waitlist caption
                             if ai_verdict and _ml_result_vol and _ml_result_vol.get("available"):
@@ -933,8 +936,6 @@ async def main():
                                     ai_verdict = inject_ml_into_caption(ai_verdict, _ml_result_vol)
                                 except Exception:
                                     pass
-                            else:
-                                ai_verdict = ai_verdict_full
 
                             # Parse AI direction
                             import re as _re
