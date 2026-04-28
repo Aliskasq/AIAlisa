@@ -275,10 +275,14 @@ async def main():
 
                         trigger_hit = False
                         
-                        if alert_type in ["GROWING-CANDLE-MODE", "DROP-ONGOING", "DROP-FLAT-HORIZ"]:
-                            # For descending trendlines: trigger follows the line down
-                            # Use dynamic_line_price * 1.02 (current line + 2%) as trigger
-                            # Only fall back to raw_trigger if dynamic_line_price is invalid
+                        if alert_type == "GROWING-CANDLE-MODE":
+                            # GROWING-CANDLE-MODE: price is near/at the line, need 3% above to filter noise
+                            if dynamic_line_price > 0:
+                                dynamic_trigger = dynamic_line_price * 1.03
+                            else:
+                                dynamic_trigger = alert['trigger_price']
+                        elif alert_type in ["DROP-ONGOING", "DROP-FLAT-HORIZ"]:
+                            # Other dynamic types: 2% above line
                             if dynamic_line_price > 0:
                                 dynamic_trigger = dynamic_line_price * 1.02
                             else:
