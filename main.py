@@ -281,17 +281,12 @@ async def main():
                                 dynamic_trigger = dynamic_line_price * 1.03
                             else:
                                 dynamic_trigger = alert['trigger_price']
-                        elif alert_type in ["DROP-ONGOING", "DROP-FLAT-HORIZ"]:
-                            # Other dynamic types: 2% above line
+                        else:
+                            # PEAK-TO-PEAK: 2% above line
                             if dynamic_line_price > 0:
                                 dynamic_trigger = dynamic_line_price * 1.02
                             else:
                                 dynamic_trigger = alert['trigger_price']
-                        else:
-                            if status == "WAITING_RED_CLOSE":
-                                dynamic_trigger = dynamic_line_price * 1.02
-                            else:
-                                dynamic_trigger = dynamic_line_price * 1.02
                                 
                         if status == "WAITING_RED_CLOSE":
                             prev_is_red = prev_candle['close'] < prev_candle['open']
