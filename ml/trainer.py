@@ -39,7 +39,7 @@ MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 TIMEFRAME_CONFIG = {
     "4H": {
         "interval": "4h",
-        "limit": 800,        # 800 candles = ~133 days (150 warmup + 650 training)
+        "limit": 1500,       # 1500 candles = ~250 days (150 warmup + 1350 training)
         "requests": 1,
         "horizon": 4,        # look-ahead: 4 candles = 16h
         "threshold": 0.5,    # min move % for label (0.5% filters noise)
@@ -47,7 +47,7 @@ TIMEFRAME_CONFIG = {
     },
     "1H": {
         "interval": "1h",
-        "limit": 800,        # 800 candles = ~33 days
+        "limit": 1500,       # 1500 candles = ~62 days
         "requests": 1,
         "horizon": 4,        # 4 candles = 4h
         "threshold": 0.5,    # min move % for label
@@ -55,7 +55,7 @@ TIMEFRAME_CONFIG = {
     },
     "15m": {
         "interval": "15m",
-        "limit": 800,        # 800 candles = ~8 days
+        "limit": 1500,       # 1500 candles = ~15 days
         "requests": 1,
         "horizon": 4,        # 4 candles = 1h
         "threshold": 0.3,    # 15m keeps 0.3% (smaller moves are real on short TF)
@@ -334,7 +334,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     pairs_ok = 0
     pairs_fail = 0
     total_samples = 0
-    MAX_SAMPLES = 350_000  # hard cap — prevents OOM on 2 GB server
+    MAX_SAMPLES = 500_000  # hard cap — with 2GB swap we can afford more data
     
     FETCH_BATCH = 10  # 10 pairs per batch × 6 weight each (klines 5 + funding 1) ≈ 60 weight
     _first_errors_logged = 0
