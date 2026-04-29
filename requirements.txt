@@ -7,6 +7,7 @@ mplfinance
 matplotlib
 beautifulsoup4
 xgboost
+lightgbm
 scikit-learn
 joblib
 

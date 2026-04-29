@@ -43,7 +43,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # look-ahead: 4 candles = 16h
         "threshold": 0.5,    # min move % for label (0.5% filters noise)
-        "model_file": "xgb_4h.pkl",
+        "model_files": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl"},
     },
     "1H": {
         "interval": "1h",
@@ -51,7 +51,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # 4 candles = 4h
         "threshold": 0.5,    # min move % for label
-        "model_file": "xgb_1h.pkl",
+        "model_files": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl"},
     },
     "15m": {
         "interval": "15m",
@@ -59,7 +59,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # 4 candles = 1h
         "threshold": 0.3,    # 15m keeps 0.3% (smaller moves are real on short TF)
-        "model_file": "xgb_15m.pkl",
+        "model_files": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl"},
     },
 }
 
@@ -78,6 +78,22 @@ XGB_PARAMS = {
     "random_state": 42,
     "n_jobs": 1,             # single-threaded to save RAM
     "tree_method": "hist",   # memory-efficient
+}
+
+# LightGBM hyperparameters — similar regularization, faster training
+LGB_PARAMS = {
+    "n_estimators": 300,       # LGB trains faster → can afford more trees
+    "max_depth": 5,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 10,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "scale_pos_weight": 1.0,  # recalculated per dataset
+    "random_state": 42,
+    "n_jobs": 1,
+    "verbose": -1,            # suppress LGB warnings
 }
 
 # Rate limiting — trainer uses max 500 weight/min (leaves rest for bot)
@@ -312,17 +328,85 @@ def process_pair(candles: list, tf_key: str, config: dict,
         return None, None
 
 
+def _train_single_model(model_type: str, X_train, y_train, X_val, y_val,
+                        scale_pos: float, feature_names: list) -> dict:
+    """
+    Train a single model (xgb or lgb) and return stats + model object.
+    
+    Returns: {
+        "model": trained_model,
+        "accuracy": float,
+        "y_proba": np.array (probabilities on val set),
+        "top_features": {name: importance, ...},
+        "model_size_mb": float (after save),
+        "report": str (classification report),
+    }
+    """
+    from sklearn.metrics import accuracy_score, classification_report
+    
+    if model_type == "xgb":
+        from xgboost import XGBClassifier
+        params = XGB_PARAMS.copy()
+        params["scale_pos_weight"] = round(scale_pos, 2)
+        logging.info(f"   🔵 Training XGBoost ({params['n_estimators']} trees, "
+                    f"depth={params['max_depth']}, {X_train.shape[1]} features)...")
+        model = XGBClassifier(**params)
+        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+    
+    elif model_type == "lgb":
+        from lightgbm import LGBMClassifier
+        params = LGB_PARAMS.copy()
+        params["scale_pos_weight"] = round(scale_pos, 2)
+        logging.info(f"   🟢 Training LightGBM ({params['n_estimators']} trees, "
+                    f"depth={params['max_depth']}, {X_train.shape[1]} features)...")
+        model = LGBMClassifier(**params)
+        model.fit(X_train, y_train, eval_set=[(X_val, y_val)],
+                  eval_metric="logloss")
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    # Evaluate
+    y_pred = model.predict(X_val)
+    y_proba = model.predict_proba(X_val)[:, 1]  # LONG probability
+    accuracy = accuracy_score(y_val, y_pred)
+    report = classification_report(y_val, y_pred, target_names=['SHORT', 'LONG'])
+    
+    logging.info(f"   ✅ {model_type.upper()} validation accuracy: {accuracy*100:.1f}%")
+    logging.info(f"   Classification report:\n{report}")
+    
+    # Feature importance (top 10)
+    importances = model.feature_importances_
+    top_idx = np.argsort(importances)[-10:][::-1]
+    logging.info(f"   Top 10 features ({model_type.upper()}):")
+    for idx in top_idx:
+        feat_name = feature_names[idx] if idx < len(feature_names) else f"feature_{idx}"
+        logging.info(f"     {feat_name}: {importances[idx]:.4f}")
+    
+    top_features = {}
+    for idx in top_idx[:5]:
+        fname = feature_names[idx] if idx < len(feature_names) else f"feature_{idx}"
+        top_features[fname] = round(float(importances[idx]), 4)
+    
+    return {
+        "model": model,
+        "accuracy": round(accuracy * 100, 1),
+        "y_proba": y_proba,
+        "top_features": top_features,
+        "report": report,
+    }
+
+
 async def train_timeframe(tf_key: str, config: dict, symbols: list,
                           session: aiohttp.ClientSession,
                           dry_run: bool = False) -> dict:
     """
-    Train XGBoost for one timeframe on all symbols.
-    Sequential processing: one pair at a time → collect features → train.
+    Train XGBoost + LightGBM ensemble for one timeframe on all symbols.
+    Data fetched once, models trained sequentially to save RAM.
     
-    Returns: dict with stats (accuracy, feature importance, etc.)
+    Returns: dict with per-model stats + ensemble accuracy
     """
     logging.info(f"\n{'='*60}")
-    logging.info(f"🧠 Training {tf_key} model on {len(symbols)} pairs...")
+    logging.info(f"🧠 Training {tf_key} ensemble (XGB + LGB) on {len(symbols)} pairs...")
     logging.info(f"   Config: {config['limit']} candles, horizon={config['horizon']}, "
                 f"threshold={config['threshold']}%, requests={config['requests']}")
     
@@ -378,7 +462,6 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
                 continue
             
             # Subsample per pair if needed to fit all pairs in RAM
-            # 535 pairs × max_per_pair ≈ MAX_SAMPLES
             max_per_pair = MAX_SAMPLES // len(symbols) if len(symbols) > 0 else 9999
             feat_vals = features.values.astype(np.float32)
             lab_vals = labels.values.astype(np.float32)
@@ -400,8 +483,6 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
             gc.collect()
             logging.info(f"   Progress: {i}/{len(symbols)} pairs, "
                         f"{total_samples} samples, {pairs_ok} ok / {pairs_fail} fail")
-        
-
     
     if not all_features:
         logging.error(f"❌ No valid data for {tf_key}!")
@@ -412,7 +493,6 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     X = np.vstack(all_features)
     y = np.concatenate(all_labels)
     
-    # Free the lists
     del all_features, all_labels
     gc.collect()
     
@@ -430,65 +510,109 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
             "dry_run": True,
         }
     
-    # Phase 3: Train XGBoost
-    from xgboost import XGBClassifier
-    from sklearn.metrics import accuracy_score, classification_report
-    
     # Balance classes
     pos_count = (y == 1).sum()
     neg_count = (y == 0).sum()
     scale_pos = neg_count / pos_count if pos_count > 0 else 1.0
     
-    params = XGB_PARAMS.copy()
-    params["scale_pos_weight"] = round(scale_pos, 2)
-    
     # ── Temporal split (no data leakage) ──
-    # Data is already ordered by time (oldest→newest per pair, pairs sequential).
-    # Take last 20% as validation — model never sees future data during training.
     split_idx = int(len(X) * 0.8)
     X_train, X_val = X[:split_idx], X[split_idx:]
     y_train, y_val = y[:split_idx], y[split_idx:]
     
     logging.info(f"   Temporal split: train={len(X_train)}, val={len(X_val)} (last 20% by time)")
     
-    # ── Train XGBoost (all 117 features — XGBoost regularization handles noise) ──
-    logging.info(f"   Training XGBoost ({params['n_estimators']} trees, depth={params['max_depth']}, {X_train.shape[1]} features)...")
+    # Free full arrays (train/val are views, but X/y can be freed after copy)
+    # Actually X_train/X_val are slices of X, so keep X alive
     
-    model = XGBClassifier(**params)
-    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
-    
-    importances = model.feature_importances_
-    kept_feature_names = FEATURE_NAMES
-    important_mask = None
-    n_dropped = 0
-    
-    # Phase 4: Evaluate
-    y_pred = model.predict(X_val)
-    accuracy = accuracy_score(y_val, y_pred)
-    
-    logging.info(f"   ✅ Validation accuracy: {accuracy*100:.1f}%")
-    logging.info(f"   Classification report:\n{classification_report(y_val, y_pred, target_names=['SHORT','LONG'])}")
-    
-    # Feature importance (top 10)
-    top_idx = np.argsort(importances)[-10:][::-1]
-    logging.info(f"   Top 10 features:")
-    for idx in top_idx:
-        feat_name = kept_feature_names[idx] if idx < len(kept_feature_names) else f"feature_{idx}"
-        logging.info(f"     {feat_name}: {importances[idx]:.4f}")
-    
-    # Phase 5: Save model + feature mask
     import joblib
+    from sklearn.metrics import accuracy_score
     os.makedirs(MODEL_DIR, exist_ok=True)
-    model_path = os.path.join(MODEL_DIR, config["model_file"])
-    # Save model with feature mask so engine.py knows which features to use
-    save_obj = {
-        "model": model,
-        "feature_names": kept_feature_names,
-        "feature_mask": None,  # no feature selection — XGBoost regularization handles it
-    }
-    joblib.dump(save_obj, model_path)
-    model_size = os.path.getsize(model_path) / 1024 / 1024
-    logging.info(f"   💾 Saved: {model_path} ({model_size:.1f} MB)")
+    
+    model_files = config["model_files"]
+    model_stats = {}
+    ensemble_probas = {}  # model_type → y_proba on val set
+    
+    # ── Phase 3: Train models sequentially ──
+    for model_type in ["xgb", "lgb"]:
+        try:
+            result = _train_single_model(
+                model_type, X_train, y_train, X_val, y_val,
+                scale_pos, FEATURE_NAMES
+            )
+        except Exception as e:
+            logging.error(f"   ❌ {model_type.upper()} training failed: {type(e).__name__}: {e}")
+            model_stats[model_type] = {"error": str(e)}
+            continue
+        
+        # Save model
+        model_path = os.path.join(MODEL_DIR, model_files[model_type])
+        save_obj = {
+            "model": result["model"],
+            "feature_names": FEATURE_NAMES,
+            "feature_mask": None,
+            "model_type": model_type,
+        }
+        joblib.dump(save_obj, model_path)
+        model_size = os.path.getsize(model_path) / 1024 / 1024
+        logging.info(f"   💾 Saved: {model_path} ({model_size:.1f} MB)")
+        
+        ensemble_probas[model_type] = result["y_proba"]
+        model_stats[model_type] = {
+            "accuracy": result["accuracy"],
+            "top_features": result["top_features"],
+            "model_size_mb": round(model_size, 1),
+        }
+        
+        # Free model to save RAM before training next one
+        del result["model"]
+        del result
+        gc.collect()
+    
+    # ── Phase 4: Ensemble evaluation ──
+    ensemble_accuracy = None
+    ensemble_weights = {}
+    
+    if len(ensemble_probas) >= 2:
+        # Weighted average by accuracy (higher accuracy → more weight)
+        total_acc = sum(model_stats[mt]["accuracy"] for mt in ensemble_probas)
+        for mt in ensemble_probas:
+            ensemble_weights[mt] = round(model_stats[mt]["accuracy"] / total_acc, 3)
+        
+        # Weighted soft voting
+        ensemble_proba = np.zeros(len(y_val))
+        for mt, proba in ensemble_probas.items():
+            ensemble_proba += proba * ensemble_weights[mt]
+        
+        ensemble_pred = (ensemble_proba >= 0.5).astype(int)
+        ensemble_accuracy = round(accuracy_score(y_val, ensemble_pred) * 100, 1)
+        
+        logging.info(f"\n   🏆 ENSEMBLE ({' + '.join(mt.upper() for mt in ensemble_probas)}):")
+        logging.info(f"   Weights: {', '.join(f'{mt.upper()}={w:.3f}' for mt, w in ensemble_weights.items())}")
+        logging.info(f"   ✅ Ensemble accuracy: {ensemble_accuracy}%")
+        
+        # Compare: ensemble vs best single model
+        best_single = max(model_stats[mt]["accuracy"] for mt in ensemble_probas)
+        diff = ensemble_accuracy - best_single
+        if diff > 0:
+            logging.info(f"   📈 Ensemble beats best single model by +{diff:.1f}%")
+        elif diff == 0:
+            logging.info(f"   ➡️ Ensemble matches best single model")
+        else:
+            logging.info(f"   📉 Ensemble is {abs(diff):.1f}% worse than best single (check for overfitting)")
+    elif len(ensemble_probas) == 1:
+        # Only one model succeeded — use its accuracy as ensemble
+        mt = list(ensemble_probas.keys())[0]
+        ensemble_accuracy = model_stats[mt]["accuracy"]
+        ensemble_weights = {mt: 1.0}
+        logging.info(f"   ⚠️ Only {mt.upper()} trained — no ensemble possible")
+    
+    # Save ensemble weights for engine.py
+    if ensemble_weights:
+        weights_path = os.path.join(MODEL_DIR, f"ensemble_weights_{tf_key.lower()}.json")
+        with open(weights_path, "w") as f:
+            json.dump(ensemble_weights, f)
+        logging.info(f"   💾 Ensemble weights saved: {weights_path}")
     
     elapsed = time.time() - start_time
     
@@ -500,14 +624,14 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
         "samples_train": int(X_train.shape[0]),
         "samples_val": int(X_val.shape[0]),
         "long_pct": round((y==1).mean() * 100, 1),
-        "accuracy": round(accuracy * 100, 1),
-        "model_size_mb": round(model_size, 1),
+        "models": model_stats,
+        "ensemble_accuracy": ensemble_accuracy,
+        "ensemble_weights": ensemble_weights,
         "elapsed_sec": round(elapsed, 1),
-        "top_features": {FEATURE_NAMES[i]: round(float(importances[i]), 4) for i in top_idx[:5]},
     }
     
     # Free memory
-    del X, y, X_train, X_val, y_train, y_val, model
+    del X, y, X_train, X_val, y_train, y_val, ensemble_probas
     gc.collect()
     
     return stats
@@ -560,9 +684,17 @@ async def main(args):
         elif stats.get("dry_run"):
             logging.info(f"   {tf}: {stats['pairs']} pairs, {stats['samples']} samples (dry run)")
         else:
-            logging.info(f"   {tf}: {stats['accuracy']:.1f}% acc, "
+            models = stats.get("models", {})
+            parts = []
+            for mt in ["xgb", "lgb"]:
+                if mt in models and "accuracy" in models[mt]:
+                    parts.append(f"{mt.upper()}={models[mt]['accuracy']:.1f}%")
+            ens = stats.get("ensemble_accuracy")
+            if ens:
+                parts.append(f"Ensemble={ens:.1f}%")
+            logging.info(f"   {tf}: {' | '.join(parts)}, "
                         f"{stats['pairs']} pairs, {stats['samples_total']} samples, "
-                        f"{stats['model_size_mb']:.1f} MB, {stats['elapsed_sec']:.0f}s")
+                        f"{stats['elapsed_sec']:.0f}s")
     
     # Save stats to JSON — merge with existing (don't overwrite other TFs)
     stats_path = os.path.join(MODEL_DIR, "train_stats.json")

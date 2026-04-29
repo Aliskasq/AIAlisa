@@ -1640,8 +1640,28 @@ async def handle_message(app_session, update):
                         status_lines.append(f"  {tf}: ❌ {s['error']}")
                     elif s.get("dry_run"):
                         status_lines.append(f"  {tf}: {s['pairs']} пар, {s['samples']} сэмплов (dry-run)")
+                    elif "models" in s:
+                        # New ensemble format
+                        status_lines.append(f"\n  *{tf}*: {s['pairs']} пар, {s['samples_total']} сэмплов")
+                        models = s.get("models", {})
+                        for mt in ["xgb", "lgb"]:
+                            if mt in models and "accuracy" in models[mt]:
+                                ms = models[mt]
+                                status_lines.append(f"    {mt.upper()}: {ms['accuracy']}% точность")
+                                top = ms.get("top_features", {})
+                                if top:
+                                    top3 = ", ".join(list(top.keys())[:3])
+                                    status_lines.append(f"      топ фичи: {top3}")
+                        ens = s.get("ensemble_accuracy")
+                        ew = s.get("ensemble_weights", {})
+                        if ens and ew:
+                            w_str = ", ".join(f"{mt.upper()}={w:.3f}" for mt, w in ew.items())
+                            status_lines.append(f"    🏆 Ансамбль: {ens}% ({w_str})")
+                        elif ens:
+                            status_lines.append(f"    🏆 Ансамбль: {ens}%")
                     else:
-                        status_lines.append(f"  {tf}: {s['accuracy']}% точность, {s['pairs']} пар, {s['samples_total']} сэмплов")
+                        # Legacy single-model format
+                        status_lines.append(f"  {tf}: {s.get('accuracy', '?')}% точность, {s['pairs']} пар, {s['samples_total']} сэмплов")
                         top = s.get("top_features", {})
                         if top:
                             top3 = ", ".join(list(top.keys())[:3])
