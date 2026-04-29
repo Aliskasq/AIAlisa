@@ -8,6 +8,7 @@ matplotlib
 beautifulsoup4
 xgboost
 lightgbm
+catboost
 scikit-learn
 joblib
 

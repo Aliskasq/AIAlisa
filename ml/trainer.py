@@ -43,7 +43,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # look-ahead: 4 candles = 16h
         "threshold": 0.5,    # min move % for label (0.5% filters noise)
-        "model_files": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl"},
+        "model_files": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl", "cat": "cat_4h.pkl"},
     },
     "1H": {
         "interval": "1h",
@@ -51,7 +51,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # 4 candles = 4h
         "threshold": 0.5,    # min move % for label
-        "model_files": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl"},
+        "model_files": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl", "cat": "cat_1h.pkl"},
     },
     "15m": {
         "interval": "15m",
@@ -59,7 +59,7 @@ TIMEFRAME_CONFIG = {
         "requests": 1,
         "horizon": 4,        # 4 candles = 1h
         "threshold": 0.3,    # 15m keeps 0.3% (smaller moves are real on short TF)
-        "model_files": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl"},
+        "model_files": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl", "cat": "cat_15m.pkl"},
     },
 }
 
@@ -94,6 +94,20 @@ LGB_PARAMS = {
     "random_state": 42,
     "n_jobs": 1,
     "verbose": -1,            # suppress LGB warnings
+}
+
+# CatBoost hyperparameters — handles categorical features natively, good regularization
+CAT_PARAMS = {
+    "iterations": 300,
+    "depth": 5,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "l2_leaf_reg": 3.0,       # L2 regularization (stronger than default)
+    "random_seed": 42,
+    "thread_count": 1,        # single-threaded to save RAM
+    "verbose": 0,             # suppress training output
+    "task_type": "CPU",
+    "auto_class_weights": "Balanced",  # handles class imbalance
 }
 
 # Rate limiting — trainer uses max 500 weight/min (leaves rest for bot)
@@ -362,6 +376,15 @@ def _train_single_model(model_type: str, X_train, y_train, X_val, y_val,
         model = LGBMClassifier(**params)
         model.fit(X_train, y_train, eval_set=[(X_val, y_val)],
                   eval_metric="logloss")
+    
+    elif model_type == "cat":
+        from catboost import CatBoostClassifier
+        params = CAT_PARAMS.copy()
+        logging.info(f"   🟠 Training CatBoost ({params['iterations']} trees, "
+                    f"depth={params['depth']}, {X_train.shape[1]} features)...")
+        model = CatBoostClassifier(**params)
+        model.fit(X_train, y_train, eval_set=(X_val, y_val),
+                  early_stopping_rounds=30)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -534,7 +557,7 @@ async def train_timeframe(tf_key: str, config: dict, symbols: list,
     ensemble_probas = {}  # model_type → y_proba on val set
     
     # ── Phase 3: Train models sequentially ──
-    for model_type in ["xgb", "lgb"]:
+    for model_type in ["xgb", "lgb", "cat"]:
         try:
             result = _train_single_model(
                 model_type, X_train, y_train, X_val, y_val,

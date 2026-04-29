@@ -31,11 +31,11 @@ def get_ml_engine() -> "MLEngine":
         _instance = MLEngine()
     return _instance
 
-# Timeframe → model filenames (ensemble: xgb + lgb)
+# Timeframe → model filenames (ensemble: xgb + lgb + cat)
 TF_MODELS = {
-    "4H": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl"},
-    "1H": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl"},
-    "15m": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl"},
+    "4H": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl", "cat": "cat_4h.pkl"},
+    "1H": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl", "cat": "cat_1h.pkl"},
+    "15m": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl", "cat": "cat_15m.pkl"},
 }
 
 # Legacy single-model filenames (backward compat)
