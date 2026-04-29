@@ -1644,7 +1644,7 @@ async def handle_message(app_session, update):
                         # New ensemble format
                         status_lines.append(f"\n  *{tf}*: {s['pairs']} пар, {s['samples_total']} сэмплов")
                         models = s.get("models", {})
-                        for mt in ["xgb", "lgb", "cat"]:
+                        for mt in ["xgb", "lgb"]:
                             if mt in models and "accuracy" in models[mt]:
                                 ms = models[mt]
                                 status_lines.append(f"    {mt.upper()}: {ms['accuracy']}% точность")
