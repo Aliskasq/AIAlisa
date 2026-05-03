@@ -53,7 +53,7 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
     
     # --- STRIP any ML lines the AI wrote itself (prevents duplicates) ---
     _ml_line_re = re.compile(
-        r"^\s*🧠\s*ML[\s:]|"                          # 🧠 ML 4ч: ... / 🧠 ML: SHORT 60%
+        r"^\s*🧠\s*(?:Overall\s*)?ML[\s:]|"            # 🧠 ML 4ч: ... / 🧠 Overall ML: SHORT 60%
         r"^\s*(?:✅|⚠️)\s*AI\s*\+\s*ML\s*:",          # ✅ AI + ML: КОНСЕНСУС / ⚠️ AI + ML: РАСХОЖДЕНИЕ
         re.IGNORECASE
     )
@@ -94,16 +94,16 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
     for line in new_lines:
         result_lines.append(line)
         
-        # Look for the "Overall" / "Общий" line with LONG/SHORT percentages
+        # Look for the "Overall AI" / "Overall" / "Общий" line with LONG/SHORT percentages
         # This is where we add the ML summary
         if not verdict_injected and re.search(
-            r"(?:Overall|Общий)[:\s]*(?:LONG|SHORT|ЛОНГ|ШОРТ)\s+\d+(?:\.\d+)?%", line, re.IGNORECASE
+            r"(?:Overall\s*AI|Overall|Общий)[:\s]*(?:LONG|SHORT|ЛОНГ|ШОРТ)\s+\d+(?:\.\d+)?%", line, re.IGNORECASE
         ):
             wl = ml_result["weighted_long_pct"]
             ws = ml_result["weighted_short_pct"]
             d = ml_result["direction"]
             result_lines.append(
-                f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
+                f"🧠 Overall ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
             )
             
             # Add consensus line — need AI direction
@@ -123,7 +123,7 @@ def inject_ml_into_caption(ai_text: str, ml_result: dict) -> str:
         d = ml_result["direction"]
         result_lines.append("")
         result_lines.append(
-            f"🧠 ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
+            f"🧠 Overall ML: {d} {max(wl, ws):.0f}% (взвеш: 4H×40% + 1H×35% + 15m×25%)"
         )
         ai_dir = _extract_ai_direction(ai_text)
         if ai_dir:

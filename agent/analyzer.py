@@ -485,12 +485,12 @@ def _fix_placeholder_percentages(text: str, mtf_data: dict = None, indicators: d
             for long_word, short_word in [("LONG", "SHORT"), ("ДЛГО", "КОРОТКО"), ("ЛОНГ", "ШОРТ")]:
                 # Match both placeholders (X%/Y%) and any numbers AI may have inserted
                 for pct_pat in [r'X%', r'\d+%']:
-                    # Fix "Overall" / "Общий" line
-                    pattern = rf'((?:Overall|Общий)[:\s]*){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
+                    # Fix "Overall AI" / "Overall" / "Общий" line
+                    pattern = rf'((?:Overall\s*AI|Overall|Общий)[:\s]*){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
                     replacement = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
                     text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
                     # Fix VERDICT / ВЕРДИКТ line parenthetical: e.g. "SKIP (LONG 56% / SHORT 34%)"
-                    pattern_v = rf'((?:VERDICT|ВЕРДИКТ)[:\s]*(?:LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК|MONITOR|МОНИТОРИНГ)[^(]*\(){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
+                    pattern_v = rf'((?:VERDICT|ВЕРДИКТ)[:\s]*(?:LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК)[^(]*\(){long_word}\s+{pct_pat}\s*/\s*{short_word}\s+{pct_pat}'
                     replacement_v = rf'\g<1>{long_word} {overall_long}% / {short_word} {overall_short}%'
                     text = re.sub(pattern_v, replacement_v, text, flags=re.IGNORECASE)
                     # Fix "Weighted verdict" / "Взвешенный вердикт" line
@@ -583,14 +583,14 @@ def _enforce_verdict_consensus(text: str, tf_pcts: dict, overall_long: int, over
         return text
 
     # Check what AI currently has
-    current_m = re.search(r'(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК|MONITOR|МОНИТОРИНГ)',
+    current_m = re.search(r'(?:VERDICT|ВЕРДИКТ)[:\s]*(LONG|SHORT|SKIP|ЛОНГ|ШОРТ|ПРОПУСК)',
                           text, re.IGNORECASE)
     if not current_m:
         return text
 
     current = current_m.group(1).upper()
     # Normalize Russian
-    current_norm = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP", "МОНИТОРИНГ": "MONITOR"}.get(current, current)
+    current_norm = {"ЛОНГ": "LONG", "ШОРТ": "SHORT", "ПРОПУСК": "SKIP"}.get(current, current)
 
     if correct_verdict == "SKIP" and current_norm in ("LONG", "SHORT"):
         # AI gave signal but consensus says SKIP — override
@@ -600,11 +600,11 @@ def _enforce_verdict_consensus(text: str, tf_pcts: dict, overall_long: int, over
             rf'\g<1>SKIP',
             text, count=1, flags=re.IGNORECASE
         )
-    elif correct_verdict in ("LONG", "SHORT") and current_norm in ("SKIP", "MONITOR"):
+    elif correct_verdict in ("LONG", "SHORT") and current_norm == "SKIP":
         # AI said SKIP/MONITOR but consensus says signal — override
         logging.info(f"⚠️ Verdict override: AI said {current_norm} but TF consensus → {correct_verdict}")
         text = re.sub(
-            r'((?:VERDICT|ВЕРДИКТ)[:\s]*)(?:SKIP|ПРОПУСК|MONITOR|МОНИТОРИНГ)(?:\s*\([^)]*\))?',
+            r'((?:VERDICT|ВЕРДИКТ)[:\s]*)(?:SKIP|ПРОПУСК)(?:\s*\([^)]*\))?',
             rf'\g<1>{correct_verdict}',
             text, count=1, flags=re.IGNORECASE
         )
@@ -895,7 +895,7 @@ ${base_coin} Analysis🤔
 {tf_format_lines_short}
 
 🏆 VERDICT: LONG or SHORT
-📊 Overall: LONG X% / SHORT Y%
+📊 Overall AI: LONG X% / SHORT Y%
 💰 Funding: [rate]
 📊 L/S: [ratio]
 ⚠️ [short risk note referencing lower TF]
@@ -973,8 +973,8 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
-- SKIP signals go to hourly monitoring and may upgrade later
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- SKIP signals are not traded
 """
     elif square:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -1019,7 +1019,7 @@ ${base_coin} Analysis
 {tf_format_lines_short}
 
 🏆 VERDICT: LONG or SHORT
-📊 Overall: LONG X% / SHORT Y%
+📊 Overall AI: LONG X% / SHORT Y%
 💰 Funding: [rate]
 📊 L/S: [ratio]
 
@@ -1071,8 +1071,8 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
-- SKIP signals go to hourly monitoring and may upgrade later
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- SKIP signals are not traded
 """
     else:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
@@ -1113,7 +1113,7 @@ ${base_coin} Analysis🤔
 {tf_format_lines_short}
 
 🏆 VERDICT: LONG or SHORT
-📊 Overall: LONG X% / SHORT Y%
+📊 Overall AI: LONG X% / SHORT Y%
 💰 Funding: [rate]
 📊 L/S: [ratio]
 ⚠️ [short risk note]
@@ -1142,8 +1142,8 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, monitoring"
-- SKIP signals go to hourly monitoring and may upgrade later
+- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- SKIP signals are not traded
 """
 
 

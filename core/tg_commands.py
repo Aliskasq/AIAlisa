@@ -13,9 +13,8 @@ from config import (
     BOT_TOKEN, load_breakout_log, load_price_alerts, save_price_alerts,
     load_virtual_bank, save_virtual_bank, reset_virtual_bank,
     VIRTUAL_BANK_POSITION_SIZE,
-    OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR, MONITOR_GROUP_CHAT_ID,
-    load_monitor_breakout_log, load_monitor_virtual_bank,
-    reset_monitor_virtual_bank,
+    load_ml_breakout_log, load_ml_virtual_bank,
+    reset_ml_virtual_bank,
 )
 import config as _cfg
 import agent.analyzer
@@ -46,7 +45,7 @@ from core.tg_state import (
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
-    build_signals_text_monitor, build_signals_close_text_monitor,
+    build_ml_signals_text, build_ml_signals_close_text,
 )
 
 
@@ -108,15 +107,13 @@ async def handle_message(app_session, update):
         if len(parts) >= 2 and parts[1] in ("en", "ru"):
             new_lang = parts[1]
             set_chat_lang(chat_id, new_lang)
-            from config import GROUP_CHAT_ID as _gcid, MONITOR_GROUP_CHAT_ID as _mcid
+            from config import GROUP_CHAT_ID as _gcid
             if _gcid and str(chat_id) != str(_gcid):
                 set_chat_lang(_gcid, new_lang)
-            if _mcid and str(chat_id) != str(_mcid):
-                set_chat_lang(_mcid, new_lang)
             if new_lang == "en":
-                await send_response(app_session, chat_id, "🌐 Language set to *English* 🇬🇧 (autopush + monitor)", msg_id, parse_mode="Markdown")
+                await send_response(app_session, chat_id, "🌐 Language set to *English* 🇬🇧", msg_id, parse_mode="Markdown")
             else:
-                await send_response(app_session, chat_id, "🌐 Язык: *Русский* 🇷🇺 (автопуш + монитор)", msg_id, parse_mode="Markdown")
+                await send_response(app_session, chat_id, "🌐 Язык: *Русский* 🇷🇺", msg_id, parse_mode="Markdown")
         else:
             await send_response(app_session, chat_id, "🌐 Usage: `/lang en` or `/lang ru`", msg_id, parse_mode="Markdown")
         return
@@ -133,33 +130,12 @@ async def handle_message(app_session, update):
         # /key — show current keys (masked)
         if len(parts) == 1:
             main_key = _cfg.OPENROUTER_API_KEY or ""
-            mon_key = _cfg.OPENROUTER_API_KEY_MONITOR or ""
             main_masked = f"...{main_key[-8:]}" if len(main_key) > 8 else ("✅ set" if main_key else "❌ not set")
-            mon_masked = f"...{mon_key[-8:]}" if len(mon_key) > 8 else ("❌ not set (using main)" if not mon_key else "✅ set")
             await send_response(app_session, chat_id,
                 f"🔑 *API Keys:*\n\n"
-                f"🧠 Main: `{main_masked}`\n"
-                f"🔵 Monitor: `{mon_masked}`\n\n"
-                f"Сменить: `/key <new-key>`\n"
-                f"Monitor: `/key monitor <new-key>`",
+                f"🧠 Main: `{main_masked}`\n\n"
+                f"Сменить: `/key <new-key>`",
                 msg_id, parse_mode="Markdown")
-            return
-
-        # /key monitor <new-key>
-        if parts[1].lower() == "monitor":
-            if len(parts) >= 3 and parts[2].strip():
-                new_key = parts[2].strip()
-                _cfg.OPENROUTER_API_KEY_MONITOR = new_key
-                _cfg.update_env_file("OPENROUTER_API_KEY_MONITOR", new_key)
-                masked = f"...{new_key[-8:]}" if len(new_key) > 8 else new_key
-                await send_response(app_session, chat_id,
-                    f"✅ Monitor API key updated & saved: `{masked}`",
-                    msg_id, parse_mode="Markdown")
-                logging.info("🔑 Monitor API key changed by admin (persisted to .env)")
-            else:
-                await send_response(app_session, chat_id,
-                    "Usage: `/key monitor <new-api-key>`",
-                    msg_id, parse_mode="Markdown")
             return
 
         # /key <new-key>
@@ -184,32 +160,6 @@ async def handle_message(app_session, update):
 
         parts = text.split(maxsplit=1)
         sub_cmd = parts[1].strip() if len(parts) > 1 else ""
-
-        # /model monitor
-        if sub_cmd.lower().startswith("monitor"):
-            mon_parts = sub_cmd.split(maxsplit=1)
-            if len(mon_parts) >= 2 and mon_parts[1].strip():
-                new_mon_model = mon_parts[1].strip()
-                _cfg.OPENROUTER_MODEL_MONITOR = new_mon_model
-                _s = agent.analyzer._get_ai_settings()
-                _s["monitor_model"] = new_mon_model
-                agent.analyzer._save_and_cache_settings(_s)
-                await send_response(app_session, chat_id,
-                    f"✅ Monitor AI model switched to:\n`{new_mon_model}`\n\n"
-                    f"🔑 Monitor API key: {'✅ set' if _cfg.OPENROUTER_API_KEY_MONITOR else '❌ not set (using main key)'}",
-                    msg_id, parse_mode="Markdown")
-            else:
-                cur_mon = _cfg.OPENROUTER_MODEL_MONITOR or agent.analyzer.OPENROUTER_MODEL
-                has_key = "✅ отдельный ключ" if _cfg.OPENROUTER_API_KEY_MONITOR else "⚠️ основной ключ"
-                mon_group = _cfg.MONITOR_GROUP_CHAT_ID or "не задана (шлёт в основную)"
-                await send_response(app_session, chat_id,
-                    f"🔵 *Monitor настройки:*\n\n"
-                    f"🧠 Модель: `{cur_mon}`\n"
-                    f"🔑 API ключ: {has_key}\n"
-                    f"💬 Группа: `{mon_group}`\n\n"
-                    f"Сменить модель: `/model monitor <model-id>`",
-                    msg_id, parse_mode="Markdown")
-            return
 
         # /models all
         if sub_cmd.lower() == "all":
@@ -250,7 +200,7 @@ async def handle_message(app_session, update):
             return
 
         # /models <model-name>
-        if sub_cmd and sub_cmd.lower() not in ("all", "monitor") and "/" in sub_cmd:
+        if sub_cmd and sub_cmd.lower() not in ("all",) and "/" in sub_cmd:
             new_model = sub_cmd.strip()
             from agent.analyzer import set_active_provider
             set_active_provider("openrouter", model=new_model)
@@ -332,8 +282,7 @@ async def handle_message(app_session, update):
             "    _Top 10 growth/drops 24h / Топ 10 рост/падение_\n\n"
             "📊 `/trend`\n"
             "    _All breakouts since scan / Все пробития_\n\n"
-            "👁 `/monitor`\n"
-            "    _Coins in monitor / Монеты в мониторинге_\n\n"
+
             "📊 `/vol`\n"
             "    _Volume waitlist / Ожидание объёма_\n\n"
             "🔔 `/alert BTC 69500`\n"
@@ -349,14 +298,13 @@ async def handle_message(app_session, update):
                 "🏆 `/signals` — signal winrate & bank\n"
                 "🔒 `/signals close` — snapshot: close all open now\n"
                 "🔄 `/signals clear` — reset bank to $10k\n"
-                "🔵 `/bankm` — monitor bank & trades\n"
-                "🔒 `/bankm close` — close all monitor now\n"
-                "🔄 `/bankm clear` — reset monitor bank to $10k\n"
+                "🧠 `/bankml` — ML bank & trades\n"
+                "🔒 `/bankml close` — close all ML positions now\n"
+                "🔄 `/bankml clear` — reset ML bank to $10k\n"
                 "🧠 `/models` — AI engine\n"
                 "🧠 `/models all` — all OpenRouter models\n"
                 "🧠 `/models <id>` — switch to any model\n"
-                "🧠 `/model monitor` — monitor AI settings\n"
-                "🧠 `/model monitor <id>` — switch monitor model\n"
+
                 "⏰ `/time 18:30` — scan schedule\n"
                 "📢 `/autopost on/off` — auto Square\n"
                 "🪙 `/autopost SOL BTC` — coins\n"
@@ -960,9 +908,9 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
-    # MONITOR BANK: /bankm
+    # ML BANK: /bankml
     # ==========================================
-    if text.startswith("/bankm"):
+    if text.startswith("/bankml"):
         if not is_admin(msg):
             deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
             await send_response(app_session, chat_id, deny, msg_id)
@@ -970,41 +918,33 @@ async def handle_message(app_session, update):
 
         bm_parts = text.split()
         if len(bm_parts) >= 2 and bm_parts[1] in ("clear", "reset", "сброс"):
-            reset_monitor_virtual_bank()
-            if lang_pref == "ru":
-                await send_response(app_session, chat_id,
-                    "🔄 *Monitor банк сброшен!*\n\n"
-                    "💰 Баланс: `$10,000.00`\n"
-                    "📊 All-time статистика обнулена\n"
-                    "📋 Сегодняшние сигналы остались в списке",
-                    msg_id, parse_mode="Markdown")
-            else:
-                await send_response(app_session, chat_id,
-                    "🔄 *Monitor bank reset!*\n\n"
-                    "💰 Balance: `$10,000.00`\n"
-                    "📊 All-time stats cleared\n"
-                    "📋 Today's signals kept in the list",
-                    msg_id, parse_mode="Markdown")
+            reset_ml_virtual_bank()
+            await send_response(app_session, chat_id,
+                "🔄 *ML банк сброшен!*\n\n"
+                "💰 Баланс: `$10,000.00`\n"
+                "📊 All-time статистика обнулена\n"
+                "📋 Сегодняшние сигналы остались в списке",
+                msg_id, parse_mode="Markdown")
             return
 
         if len(bm_parts) >= 2 and bm_parts[1] in ("close", "закрыть"):
             try:
-                chunks = await build_signals_close_text_monitor(app_session, lang=lang_pref)
+                chunks = await build_ml_signals_close_text(app_session, lang=lang_pref)
                 for i, chunk in enumerate(chunks):
                     rid = msg_id if i == 0 else None
                     await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
             except Exception as e:
-                logging.error(f"❌ /bankm close error: {e}")
+                logging.error(f"❌ /bankml close error: {e}")
                 await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
             return
 
         try:
-            chunks = await build_signals_text_monitor(app_session, lang=lang_pref)
+            chunks = await build_ml_signals_text(app_session, lang=lang_pref)
             for i, chunk in enumerate(chunks):
                 rid = msg_id if i == 0 else None
                 await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
         except Exception as e:
-            logging.error(f"❌ /bankm error: {e}")
+            logging.error(f"❌ /bankml error: {e}")
             await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
         return
 
@@ -1150,63 +1090,7 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
         return
 
-    # ==========================================
-    # /monitor — show coins in monitor
-    # ==========================================
-    if text.startswith("/monitor") or text in ["монитор", "мониторинг"]:
-        from core.signal_pipeline import load_monitors
-        monitors = load_monitors()
-        if not monitors:
-            no_mon = "📭 No coins in monitor." if lang_pref == "en" else "📭 Нет монет в мониторинге."
-            await send_response(app_session, chat_id, no_mon, msg_id)
-            return
 
-        mon_symbols = list(set(m["symbol"] for m in monitors))
-        current_prices = {}
-        try:
-            async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
-                if resp.status == 200:
-                    tickers = await resp.json()
-                    price_map = {t["symbol"]: float(t["price"]) for t in tickers}
-                    for s in mon_symbols:
-                        if s in price_map:
-                            current_prices[s] = price_map[s]
-        except Exception as e:
-            logging.error(f"❌ /monitor price fetch: {e}")
-
-        header = "📊 *Мониторинг*\n\n" if lang_pref == "ru" else "📊 *Monitor*\n\n"
-        lines = []
-        for m in sorted(monitors, key=lambda x: x.get("symbol", "")):
-            sym = m["symbol"]
-            tf = m.get("tf", "?")
-            direction = m.get("direction", "?").upper()
-            entry = m.get("entry_price", 0)
-            reason = m.get("reason", "")
-            checks = m.get("check_count", 0)
-            cur = current_prices.get(sym, 0)
-
-            if entry and entry > 0 and cur > 0:
-                pct = ((cur - entry) / entry) * 100
-                pct_str = f"{pct:+.2f}%"
-            else:
-                pct_str = "—"
-
-            emoji = "🟢" if "long" in direction.lower() else "🔴" if "short" in direction.lower() else "⚪"
-            lines.append(
-                f"{emoji} *{sym}* {tf} {direction}\n"
-                f"   Вход: `{entry:.6f}` → Сейчас: `{cur:.6f}` ({pct_str})\n"
-                f"   Причина: {reason} | Проверок: {checks}"
-            )
-
-        chunk = header
-        for line in lines:
-            if len(chunk) + len(line) + 2 > 3900:
-                await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
-                chunk = ""
-            chunk += line + "\n\n"
-        if chunk.strip():
-            await send_response(app_session, chat_id, chunk, msg_id, parse_mode="Markdown")
-        return
 
     # ==========================================
     # /trend — breakout list

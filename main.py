@@ -8,8 +8,8 @@ from datetime import datetime, timezone, timedelta
 
 # Import configuration and shared functions
 from config import (TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log,
-                     parse_ai_trade_params, GROUP_CHAT_ID, MONITOR_GROUP_CHAT_ID,
-                     OPENROUTER_API_KEY_MONITOR, OPENROUTER_MODEL_MONITOR)
+                     parse_ai_trade_params, GROUP_CHAT_ID, add_ml_breakout_entry,
+                     SIGNAL_CONFIDENCE_FULL)
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
@@ -23,9 +23,9 @@ from agent.square_publisher import auto_square_poster
 
 from core.tg_listener import SCAN_SCHEDULE
 from core.signal_pipeline import (
-    classify_signal, parse_confidence_from_ai,
+    parse_confidence_from_ai, calculate_ml_sl,
     check_volume_pass, get_volume_12h,
-    add_monitor, add_to_volume_waitlist, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
+    add_to_volume_waitlist, FIXED_LEVERAGE, FIXED_DEPOSIT_PCT,
     get_1d_emergency_warnings
 )
 
@@ -38,7 +38,7 @@ ml_engine = MLEngine()  # loads models from ml/models/ (graceful if missing)
 class TradeLogFilter(logging.Filter):
     """Pass only coin/trade-relevant lines to bot.log."""
     KEYWORDS = (
-        "MONITOR", "UPGRADED", "FULL:", "SIGNAL", "ALERT",
+        "FULL:", "SIGNAL", "ALERT",
         "bank", "P&L", "breakout", "SKIP", "LONG", "SHORT",
         "entry added", "entry failed",
         "❌", "⚠️", "🟢", "🔵", "🔴", "🎯",
@@ -51,7 +51,7 @@ class TradeLogFilter(logging.Filter):
     )
     NOISE = (
         "Sleeping", "💤", "Waiting list is empty", "👀 Checking",
-        "/signals", "/bankm", "bankm close", "signals close",
+        "/signals", "/bankml", "bankml close", "signals close",
         "Analysis progress", "Monitoring loop started",
         "STARTING GLOBAL", "recalculation completed",
         "Data ready", "After volume filter", "Starting AI queue",
@@ -155,9 +155,7 @@ async def main():
         # Start log cleanup task (23:55 UTC daily)
         asyncio.create_task(log_cleanup_task())
 
-        # Start monitor recheck loop (re-evaluates MONITOR signals every 30 min)
-        from core.signal_pipeline import monitor_recheck_loop
-        asyncio.create_task(monitor_recheck_loop(session))
+
 
         while True:
             now_utc = datetime.now(timezone.utc)
@@ -587,11 +585,8 @@ async def main():
                                     _ai_dir = _verdict_map.get(_raw, _raw)
                                 # If no verdict line found at all → _ai_dir stays "" (unknown)
 
-                        # Parse confidence from AI and classify signal tier
+                        # Parse confidence from AI
                         long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
-                        adx_value = last_indic_row.get("adx", 0)
-                        adx_trend = last_indic_row.get("adx_trend", "stable")
-                        adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
 
                         # === 24H PUMP FILTER ===
                         _change_24h = last_indic_row.get("change_24h", 0)
@@ -599,121 +594,22 @@ async def main():
                         if _is_pump_filter:
                             logging.info(f"💯 24h pump filter: {sym} changed {_change_24h:+.1f}% in 24h — marking as pump")
 
-                        tier = classify_signal(long_pct, short_pct, adx_value,
-                                              adx_trend=adx_trend, adx_avg_50=adx_avg_50,
-                                              mtf_data=item.get("mtf_data"),
-                                              indicators=last_indic_row)
+                        # === CONFIDENCE THRESHOLD: < 62.5% → forced SKIP ===
+                        _confidence = max(long_pct, short_pct)
+                        if _ai_dir in ("LONG", "SHORT") and _confidence < SIGNAL_CONFIDENCE_FULL:
+                            logging.info(f"⚠️ Confidence too low: {sym} {_ai_dir} {_confidence:.1f}% < {SIGNAL_CONFIDENCE_FULL}% → forced SKIP")
+                            _ai_dir = "SKIP"
 
-                        if tier == "monitor" and not ai_has_error:
-                            # 🔵 MONITOR — add to monitor queue + send full signal to monitor group
-                            # Determine specific reason for smart lightweight recheck
-                            _rsi_4h = last_indic_row.get("rsi14", 50)
-                            _rsi_1h = item.get("mtf_data", {}).get("1H", {}).get("rsi14", 50)
-                            _rsi_15m = item.get("mtf_data", {}).get("15m", {}).get("rsi14", 50)
-                            _adx = adx_value
-
-                            # Check 15m pump first (most specific)
-                            _change_15m = item.get("mtf_data", {}).get("15m", {}).get("change_recent", 0)
-                            _prelim_dir = "LONG" if long_pct > short_pct else "SHORT"
-                            if abs(_change_15m) > 10:
-                                reason = "pump_15m"
-                            elif _prelim_dir == "LONG" and (_rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80)):
-                                # High RSI is only a problem for LONG (overbought → reversal risk)
-                                # For SHORT, high RSI actually CONFIRMS the short direction
-                                reason = "high_rsi"
-                            elif _prelim_dir == "SHORT" and (_rsi_4h < 25 or (_rsi_1h < 20 and _rsi_15m < 20)):
-                                # Low RSI is a problem for SHORT (oversold → bounce risk)
-                                reason = "low_rsi"
-                            elif _adx < 20:
-                                reason = "flat_market"
-                            else:
-                                reason = "low_confidence"
-
-                            direction = "LONG" if long_pct > short_pct else "SHORT"
-                            add_monitor(sym, tf, direction, long_pct, short_pct,
-                                       item["current_price"], reason,
-                                       rsi_4h=_rsi_4h, rsi_1h=_rsi_1h, rsi_15m=_rsi_15m,
-                                       adx_4h=_adx)
-                            logging.info(f"🔵 MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
-
-                            # Send full breakout with SKIP verdict to MAIN group (all breakouts go to main)
+                        # === ADD ML ENTRY (always, regardless of AI verdict) ===
+                        if _ml_result and _ml_result.get("available"):
                             try:
-                                _skip_caption = ai_verdict or ai_verdict_full or ""
-                                if not _skip_caption:
-                                    # Build fallback with per-TF scorecard data
-                                    _fb_lines = []
-                                    _mtf = item.get("mtf_data", {})
-                                    for _tf_name in ["4H", "1H", "15m"]:
-                                        _tf_ind = _mtf.get(_tf_name, {})
-                                        if not _tf_ind:
-                                            if _tf_name == tf:
-                                                _tf_ind = last_indic_row
-                                            else:
-                                                continue
-                                        _rsi = _tf_ind.get("rsi14", 0)
-                                        _adx_tf = _tf_ind.get("adx", 0)
-                                        _macd_h = _tf_ind.get("macd_hist", 0)
-                                        _ema7 = _tf_ind.get("ema7", 0)
-                                        _ema25 = _tf_ind.get("ema25", 0)
-                                        _ema99 = _tf_ind.get("ema99", 0)
-                                        # Count bull/bear signals
-                                        _b, _r = 0, 0
-                                        if _ema7 > _ema25 > _ema99: _b += 1
-                                        elif _ema7 < _ema25 < _ema99: _r += 1
-                                        if _macd_h > 0: _b += 1
-                                        else: _r += 1
-                                        if _rsi > 55: _b += 1
-                                        elif _rsi < 45: _r += 1
-                                        if _adx_tf > 25:
-                                            if _tf_ind.get("di_plus", 0) > _tf_ind.get("di_minus", 0): _b += 1
-                                            else: _r += 1
-                                        _st = _tf_ind.get("supertrend", "")
-                                        if "Bullish" in str(_st): _b += 1
-                                        elif "Bearish" in str(_st): _r += 1
-                                        _total = _b + _r if (_b + _r) > 0 else 1
-                                        _lpct = round(_b / _total * 100)
-                                        _fb_lines.append(f"⏱ {_tf_name}: LONG {_lpct}% / SHORT {100-_lpct}% (RSI {_rsi:.0f}, ADX {_adx_tf:.0f})")
-                                    _fb_tf_text = "\n".join(_fb_lines)
-                                    _reason_ru = "флэт" if reason == "flat_market" else "низкая уверенность"
-                                    _skip_caption = (
-                                        f"🏆 ВЕРДИКТ: SKIP ({direction})\n"
-                                        f"📊 Общий: LONG {long_pct:.0f}% / SHORT {short_pct:.0f}%\n\n"
-                                        f"{_fb_tf_text}\n\n"
-                                        f"⚠️ {_reason_ru} | ADX: {adx_value:.0f}"
-                                    )
-                                _skip_caption = f"🔵 MONITOR (SKIP)\n{_skip_caption}"
-                                _mon_sent, _ = await send_breakout_notification(
-                                    sym, item["full_df"], item["line_data"], tf, alert_type, session,
-                                    dynamic_trigger, _skip_caption
-                                )
-                                if _mon_sent:
-                                    # Delete old error chart after new monitor signal sent
-                                    if error_msg_id:
-                                        await delete_telegram_message(session, error_msg_id)
-                                        error_msg_id = None
-                                    logging.info(f"📤 MONITOR signal sent to main group: {sym}")
-                            except Exception as _me:
-                                logging.error(f"❌ Monitor send error for {sym}: {_me}")
-
-                            # Add to breakout log as info-only (no P&L impact)
-                            # Save with ACTUAL AI verdict:
-                            # - "SKIP" if AI said SKIP → ⚪ white dot, no P&L
-                            # - "LONG"/"SHORT" if AI gave direction but low confidence → 🟢/🔴 dot, tracked in P&L
-                            # - "" if AI didn't respond → ⚫ black dot
-                            _monitor_save_dir = _ai_dir  # actual AI verdict (LONG/SHORT/SKIP/"")
-                            _monitor_entry = _ai_params.get("ai_entry") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
-                            _monitor_sl = _ai_params.get("ai_sl") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
-                            _monitor_tp = _ai_params.get("ai_tp") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None
-                            add_breakout_entry(sym, tf, dynamic_trigger, item["current_price"], alert_type,
-                                               ai_direction=_monitor_save_dir,
-                                               ai_entry=_monitor_entry,
-                                               ai_sl=_monitor_sl,
-                                               ai_tp=_monitor_tp,
-                                               ai_leverage=1, ai_deposit_pct=2.0,
-                                               is_monitor=True,
-                                               is_pump_filter=_is_pump_filter)
-                            alerts_to_remove.append(item["alert"])
-                            continue
+                                _ml_dir = _ml_result.get("direction", "")
+                                if _ml_dir in ("LONG", "SHORT"):
+                                    _ml_sl = calculate_ml_sl(last_indic_row, _ml_dir, item["current_price"])
+                                    add_ml_breakout_entry(sym, tf, item["current_price"], _ml_dir, _ml_sl)
+                                    logging.info(f"🧠 ML bank entry: {sym} {_ml_dir} @ {item['current_price']} SL={_ml_sl}")
+                            except Exception as _ml_e:
+                                logging.error(f"❌ ML bank entry error for {sym}: {_ml_e}")
 
                         # 🟢 FULL SIGNAL — fetch 1D emergency warnings before sending
                         emergency_warnings = []
@@ -766,6 +662,7 @@ async def main():
                                                ai_leverage=FIXED_LEVERAGE,       # ALWAYS 1x
                                                ai_deposit_pct=FIXED_DEPOSIT_PCT, # ALWAYS 2%
                                                is_pump_filter=_is_pump_filter)
+                            logging.info(f"🟢 SIGNAL: {sym} {_ai_dir} (conf {_confidence:.0f}%)")
                             alerts_to_remove.append(item["alert"])
                         else:
                             logging.warning(f"🔄 Signal {sym} ({tf}) LEFT IN QUEUE. Will retry in 5 minutes.")
@@ -966,21 +863,19 @@ async def main():
                                         _raw = _line_verdict.group(1).upper()
                                         _ai_dir = _verdict_map.get(_raw, _raw)
 
-                            # Classify signal
+                            # Parse confidence + direction
                             long_pct, short_pct = parse_confidence_from_ai(ai_verdict or "")
-                            adx_value = last_indic_row.get("adx", 0)
-                            adx_trend = last_indic_row.get("adx_trend", "stable")
-                            adx_avg_50 = last_indic_row.get("adx_avg_50", 0)
+                            _confidence = max(long_pct, short_pct)
 
                             _change_24h = last_indic_row.get("change_24h", 0)
                             _is_pump_filter = abs(_change_24h) > 100
 
-                            tier = classify_signal(long_pct, short_pct, adx_value,
-                                                  adx_trend=adx_trend, adx_avg_50=adx_avg_50,
-                                                  mtf_data=mtf_data,
-                                                  indicators=last_indic_row)
+                            # Confidence threshold
+                            if _ai_dir in ("LONG", "SHORT") and _confidence < SIGNAL_CONFIDENCE_FULL:
+                                logging.info(f"⚠️ VOL PASS confidence too low: {sym} {_ai_dir} {_confidence:.1f}% → forced SKIP")
+                                _ai_dir = "SKIP"
 
-                            # alert can be dict (from alert_data) or string — handle both
+                            # alert can be dict or string
                             _raw_alert = vw_item.get("alert", "")
                             if isinstance(_raw_alert, dict):
                                 alert_type = _raw_alert.get("type", "resistance")
@@ -989,80 +884,47 @@ async def main():
                             else:
                                 alert_type = "resistance"
 
-                            if tier == "monitor":
-                                # Monitor — same logic as main pipeline
-                                _rsi_4h = last_indic_row.get("rsi14", 50)
-                                _rsi_1h = mtf_data.get("1H", {}).get("rsi14", 50)
-                                _rsi_15m = mtf_data.get("15m", {}).get("rsi14", 50)
-                                _adx = adx_value
-                                _change_15m = mtf_data.get("15m", {}).get("change_recent", 0)
-                                _prelim_dir = "LONG" if long_pct > short_pct else "SHORT"
+                            # === ADD ML ENTRY (volume waitlist pipeline) ===
+                            if _ml_result_vol and _ml_result_vol.get("available"):
+                                try:
+                                    _ml_dir_v = _ml_result_vol.get("direction", "")
+                                    if _ml_dir_v in ("LONG", "SHORT"):
+                                        _ml_sl_v = calculate_ml_sl(last_indic_row, _ml_dir_v, current_price)
+                                        add_ml_breakout_entry(sym, tf, current_price, _ml_dir_v, _ml_sl_v)
+                                        logging.info(f"🧠 ML bank (VOL): {sym} {_ml_dir_v} @ {current_price}")
+                                except Exception:
+                                    pass
 
-                                if abs(_change_15m) > 10:
-                                    reason = "pump_15m"
-                                elif _prelim_dir == "LONG" and (_rsi_4h > 75 or (_rsi_1h > 80 and _rsi_15m > 80)):
-                                    reason = "high_rsi"
-                                elif _prelim_dir == "SHORT" and (_rsi_4h < 25 or (_rsi_1h < 20 and _rsi_15m < 20)):
-                                    reason = "low_rsi"
-                                elif _adx < 20:
-                                    reason = "flat_market"
-                                else:
-                                    reason = "low_confidence"
+                            # 🟢 SIGNAL — send to group
+                            # 1D emergency warnings
+                            emergency_warnings = []
+                            try:
+                                raw_1d = await fetch_klines(session, sym, "1d", 250)
+                                if raw_1d:
+                                    indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
+                                    emergency_warnings = get_1d_emergency_warnings(indic_1d)
+                                    if emergency_warnings:
+                                        warn_text = "\n".join(emergency_warnings)
+                                        if ai_verdict:
+                                            ai_verdict = ai_verdict + f"\n\n📊 1D MACRO:\n{warn_text}"
+                            except Exception as e:
+                                logging.error(f"❌ VOL PASS 1D emergency check for {sym}: {e}")
 
-                                direction = "LONG" if long_pct > short_pct else "SHORT"
-                                add_monitor(sym, tf, direction, long_pct, short_pct,
-                                           current_price, reason,
-                                           rsi_4h=_rsi_4h, rsi_1h=_rsi_1h, rsi_15m=_rsi_15m,
-                                           adx_4h=_adx)
-                                logging.info(f"🔵 VOL PASS MONITOR: {sym} ({reason}, conf {max(long_pct,short_pct)}%, ADX {adx_value:.0f})")
+                            is_sent, _ = await send_breakout_notification(
+                                sym, full_df, line_data, tf, alert_type, session,
+                                dynamic_trigger, ai_verdict or ""
+                            )
+                            logging.info(f"🟢 VOL PASS: {sym} {_ai_dir} (conf {_confidence:.0f}%)")
 
-                                # Send to main group with MONITOR tag
-                                _skip_caption = ai_verdict or ""
-                                if not _skip_caption:
-                                    _skip_caption = f"🏆 ВЕРДИКТ: SKIP ({direction})\n📊 Общий: LONG {long_pct:.0f}% / SHORT {short_pct:.0f}%"
-                                _skip_caption = f"🔵 MONITOR (SKIP) [VOL PASS]\n{_skip_caption}"
-                                await send_breakout_notification(
-                                    sym, full_df, line_data, tf, alert_type, session,
-                                    dynamic_trigger, _skip_caption
-                                )
+                            if is_sent:
                                 add_breakout_entry(sym, tf, dynamic_trigger, current_price, alert_type,
                                                    ai_direction=_ai_dir,
-                                                   ai_entry=_ai_params.get("ai_entry") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
-                                                   ai_sl=_ai_params.get("ai_sl") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
-                                                   ai_tp=_ai_params.get("ai_tp") if (_ai_params and _ai_dir in ("LONG", "SHORT")) else None,
-                                                   ai_leverage=1, ai_deposit_pct=2.0,
-                                                   is_monitor=True, is_pump_filter=_is_pump_filter)
-                            else:
-                                # 🟢 FULL SIGNAL
-                                # 1D emergency warnings
-                                emergency_warnings = []
-                                try:
-                                    raw_1d = await fetch_klines(session, sym, "1d", 250)
-                                    if raw_1d:
-                                        indic_1d, _ = calculate_binance_indicators(pd.DataFrame(raw_1d), "1D")
-                                        emergency_warnings = get_1d_emergency_warnings(indic_1d)
-                                        if emergency_warnings:
-                                            warn_text = "\n".join(emergency_warnings)
-                                            if ai_verdict:
-                                                ai_verdict = ai_verdict + f"\n\n📊 1D MACRO:\n{warn_text}"
-                                except Exception as e:
-                                    logging.error(f"❌ VOL PASS 1D emergency check for {sym}: {e}")
-
-                                is_sent, _ = await send_breakout_notification(
-                                    sym, full_df, line_data, tf, alert_type, session,
-                                    dynamic_trigger, ai_verdict or ""
-                                )
-                                logging.info(f"🟢 VOL PASS FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
-
-                                if is_sent:
-                                    add_breakout_entry(sym, tf, dynamic_trigger, current_price, alert_type,
-                                                       ai_direction=_ai_dir,
-                                                       ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
-                                                       ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
-                                                       ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
-                                                       ai_leverage=FIXED_LEVERAGE,
-                                                       ai_deposit_pct=FIXED_DEPOSIT_PCT,
-                                                       is_pump_filter=_is_pump_filter)
+                                                   ai_entry=_ai_params.get("ai_entry") if _ai_params else None,
+                                                   ai_sl=_ai_params.get("ai_sl") if _ai_params else None,
+                                                   ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
+                                                   ai_leverage=FIXED_LEVERAGE,
+                                                   ai_deposit_pct=FIXED_DEPOSIT_PCT,
+                                                   is_pump_filter=_is_pump_filter)
 
                             # Remove alert if it was stored
                             alerts = load_alerts()

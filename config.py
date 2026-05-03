@@ -17,12 +17,7 @@ GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 
-# Monitor: separate API key + model (parallel AI calls, no rate limit conflict)
-OPENROUTER_API_KEY_MONITOR = os.getenv("OPENROUTER_API_KEY_MONITOR", "")
-OPENROUTER_MODEL_MONITOR = os.getenv("OPENROUTER_MODEL_MONITOR", "") or OPENROUTER_MODEL
 
-# Monitor group (separate from main signal group)
-MONITOR_GROUP_CHAT_ID = os.getenv("MONITOR_GROUP_CHAT_ID", "")
 
 # Groq API keys (3 accounts for rotation/fallback)
 GROQ_API_KEYS = [k for k in [
@@ -59,7 +54,7 @@ def load_ai_settings():
         "openrouter_model": OPENROUTER_MODEL or "openrouter/free",
         "gemini_model": "gemini-2.5-flash",
         "groq_model": "llama-3.3-70b-versatile",
-        "monitor_model": OPENROUTER_MODEL_MONITOR or OPENROUTER_MODEL or "openrouter/free",
+
     }
     if os.path.exists(AI_SETTINGS_FILE):
         try:
@@ -79,10 +74,7 @@ def save_ai_settings(settings):
     except Exception as e:
         logging.error(f"Error writing AI settings: {e}")
 
-# Restore monitor model from saved settings on startup
 _startup_settings = load_ai_settings()
-if _startup_settings.get("monitor_model"):
-    OPENROUTER_MODEL_MONITOR = _startup_settings["monitor_model"]
 
 # Binance Square
 SQUARE_OPENAPI_KEY = os.getenv("SQUARE_OPENAPI_KEY")
@@ -106,16 +98,15 @@ BREAKOUT_LOG_FILE = "data/breakout_log.json"
 PRICE_ALERTS_FILE = "data/price_alerts.json"
 VIRTUAL_BANK_FILE = "data/virtual_bank.json"
 
-# --- MONITOR virtual bank (separate from main signals) ---
-MONITOR_BREAKOUT_LOG_FILE = "data/breakout_log_monitor.json"
-MONITOR_VIRTUAL_BANK_FILE = "data/virtual_bank_monitor.json"
+# --- ML virtual bank (tracks ML model predictions separately) ---
+ML_BREAKOUT_LOG_FILE = "data/breakout_log_ml.json"
+ML_VIRTUAL_BANK_FILE = "data/virtual_bank_ml.json"
 
 # --- VIRTUAL BANK ($10,000 starting) ---
 VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
 
 # === SIGNAL PIPELINE SETTINGS ===
-SIGNAL_CONFIDENCE_FULL = 65      # % — full signal with entry
-SIGNAL_CONFIDENCE_MONITOR = 50   # % — put on 30-min watch
+SIGNAL_CONFIDENCE_FULL = 62.5    # % — full signal with entry
 SIGNAL_ADX_TRENDING = 20         # ADX below this = flat market
 SIGNAL_LEVERAGE = 1              # ALWAYS 1x, no leverage
 SIGNAL_DEPOSIT_PCT = 2           # ALWAYS 2% of bank per trade
@@ -123,6 +114,11 @@ SIGNAL_MIN_VOLUME_12H = 2_000_000   # $2M — 12h volume pass threshold
 SIGNAL_MIN_VOLUME_1H = 170_000     # $170K — 1h candle volume + green = pass
 SIGNAL_SL_ATR_MULT = 2.0          # SL = 2 × ATR from entry
 SIGNAL_TP_ATR_MULT = 3.0          # TP = 3 × ATR (R:R = 1:1.5)
+SIGNAL_SL_MAX_PCT = 10.0          # SL cap — never more than 10% from entry
+TRAILING_STOP_PCT = 3.0            # Trailing stop distance from peak
+ML_SL_ATR_MULT = 1.5              # ML SL = 1.5 × ATR, clamped 5-10%
+ML_SL_MIN_PCT = 5.0               # ML SL minimum
+ML_SL_MAX_PCT = 10.0              # ML SL maximum
 
 def load_virtual_bank():
     if os.path.exists(VIRTUAL_BANK_FILE):
@@ -331,21 +327,25 @@ def _validate_ai_prices(symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direct
             logging.warning(f"⚠️ TP TOO FAR {symbol}: TP={ai_tp} is >50% from entry={effective_entry} — clearing TP")
             ai_tp = None
     
+    # 4. Cap SL at SIGNAL_SL_MAX_PCT (10%) from entry
+    if ai_sl is not None and ai_sl > 0 and effective_entry > 0:
+        sl_pct = abs(ai_sl - effective_entry) / effective_entry * 100
+        if sl_pct > SIGNAL_SL_MAX_PCT:
+            if direction == "LONG":
+                ai_sl = effective_entry * (1 - SIGNAL_SL_MAX_PCT / 100)
+            elif direction == "SHORT":
+                ai_sl = effective_entry * (1 + SIGNAL_SL_MAX_PCT / 100)
+            logging.warning(f"⚠️ SL CAPPED {symbol}: was {sl_pct:.1f}% → capped to {SIGNAL_SL_MAX_PCT}% = {ai_sl}")
+    
     return ai_entry, ai_sl, ai_tp
 
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_monitor=False, is_pump_filter=False):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_pump_filter=False):
     """Add a breakout event to the log (deduplicates by symbol+tf)."""
     log = load_breakout_log()
     # Check if same symbol+tf already exists
     existing = next((e for e in log if e["symbol"] == symbol and e["tf"] == tf), None)
     if existing:
-        # If new entry is monitor but existing isn't marked, update it
-        if is_monitor and not existing.get("is_monitor", False):
-            existing["is_monitor"] = True
-            if ai_direction:
-                existing["ai_direction"] = ai_direction.upper()
-            save_breakout_log(log)
         return  # already exists, don't duplicate
 
     # === VALIDATE AI PRICES against real market price ===
@@ -375,8 +375,6 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
             entry["ai_leverage"] = ai_leverage
         if ai_deposit_pct is not None:
             entry["ai_deposit_pct"] = ai_deposit_pct
-        if is_monitor:
-            entry["is_monitor"] = True
         if is_pump_filter:
             entry["is_pump_filter"] = True
         if symbol_already_exists:
@@ -384,67 +382,32 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
         log.append(entry)
         save_breakout_log(log)
 
-def upgrade_breakout_entry(symbol, tf, ai_direction, ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
-    """Upgrade an existing SKIP entry to a real trade (called when monitor upgrades).
-    If no existing entry found, adds a new one."""
-    log = load_breakout_log()
-    found = False
-    for entry in log:
-        if entry["symbol"] == symbol and entry["tf"] == tf:
-            # Validate AI prices against stored current_price
-            _ref_price = entry.get("current_price", 0) or (ai_entry if ai_entry else 0)
-            ai_entry, ai_sl, ai_tp = _validate_ai_prices(
-                symbol, _ref_price, ai_entry, ai_sl, ai_tp, ai_direction
-            )
-            entry["ai_direction"] = ai_direction.upper() if ai_direction else ""
-            if ai_entry is not None:
-                entry["ai_entry"] = round(ai_entry, 8)
-                entry["current_price"] = round(ai_entry, 8)  # update price to upgrade moment
-            if ai_sl is not None:
-                entry["ai_sl"] = round(ai_sl, 8)
-            if ai_tp is not None:
-                entry["ai_tp"] = round(ai_tp, 8)
-            if ai_leverage is not None:
-                entry["ai_leverage"] = ai_leverage
-            if ai_deposit_pct is not None:
-                entry["ai_deposit_pct"] = ai_deposit_pct
-            entry["upgraded_at"] = datetime.now(timezone.utc).isoformat()
-            found = True
-            break
-    if found:
-        save_breakout_log(log)
-        logging.info(f"🔄 Breakout entry upgraded: {symbol} {tf} → {ai_direction}")
-    else:
-        # No existing entry — add new (shouldn't normally happen)
-        add_breakout_entry(symbol, tf, 0, ai_entry or 0, "monitor_upgrade",
-                          ai_direction, ai_entry, ai_sl, ai_tp, ai_leverage, ai_deposit_pct)
-
 def clear_breakout_log():
     save_breakout_log([])
 
 
 # ============================
-# MONITOR VIRTUAL BANK (separate)
+# ML VIRTUAL BANK (tracks ML model predictions)
 # ============================
 
-def load_monitor_virtual_bank():
-    if os.path.exists(MONITOR_VIRTUAL_BANK_FILE):
+def load_ml_virtual_bank():
+    if os.path.exists(ML_VIRTUAL_BANK_FILE):
         try:
-            with open(MONITOR_VIRTUAL_BANK_FILE, "r") as f:
+            with open(ML_VIRTUAL_BANK_FILE, "r") as f:
                 return json.load(f)
         except Exception as e:
-            logging.error(f"Error reading monitor virtual bank: {e}")
+            logging.error(f"Error reading ML virtual bank: {e}")
     return {"starting_balance": 10000, "balance": 10000, "total_trades": 0, "total_wins": 0, "total_losses": 0, "history": []}
 
-def save_monitor_virtual_bank(bank):
+def save_ml_virtual_bank(bank):
     try:
-        os.makedirs(os.path.dirname(MONITOR_VIRTUAL_BANK_FILE), exist_ok=True)
-        with open(MONITOR_VIRTUAL_BANK_FILE, "w") as f:
+        os.makedirs(os.path.dirname(ML_VIRTUAL_BANK_FILE), exist_ok=True)
+        with open(ML_VIRTUAL_BANK_FILE, "w") as f:
             json.dump(bank, f, indent=2)
     except Exception as e:
-        logging.error(f"Error writing monitor virtual bank: {e}")
+        logging.error(f"Error writing ML virtual bank: {e}")
 
-def reset_monitor_virtual_bank():
+def reset_ml_virtual_bank():
     bank = {
         "starting_balance": 10000,
         "balance": 10000,
@@ -453,11 +416,11 @@ def reset_monitor_virtual_bank():
         "total_losses": 0,
         "history": []
     }
-    save_monitor_virtual_bank(bank)
+    save_ml_virtual_bank(bank)
     return bank
 
-def update_monitor_bank_with_trades(trades_pnl):
-    bank = load_monitor_virtual_bank()
+def update_ml_bank_with_trades(trades_pnl):
+    bank = load_ml_virtual_bank()
     for symbol, pnl_pct, pnl_dollar in trades_pnl:
         bank["balance"] += pnl_dollar
         bank["total_trades"] += 1
@@ -472,58 +435,44 @@ def update_monitor_bank_with_trades(trades_pnl):
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
         })
     bank["balance"] = round(bank["balance"], 2)
-    save_monitor_virtual_bank(bank)
+    save_ml_virtual_bank(bank)
     return bank
 
-def load_monitor_breakout_log():
-    if os.path.exists(MONITOR_BREAKOUT_LOG_FILE):
+def load_ml_breakout_log():
+    if os.path.exists(ML_BREAKOUT_LOG_FILE):
         try:
-            with open(MONITOR_BREAKOUT_LOG_FILE, "r") as f:
+            with open(ML_BREAKOUT_LOG_FILE, "r") as f:
                 return json.load(f)
         except Exception:
             pass
     return []
 
-def save_monitor_breakout_log(log):
+def save_ml_breakout_log(log):
     try:
-        os.makedirs(os.path.dirname(MONITOR_BREAKOUT_LOG_FILE), exist_ok=True)
-        with open(MONITOR_BREAKOUT_LOG_FILE, "w") as f:
+        os.makedirs(os.path.dirname(ML_BREAKOUT_LOG_FILE), exist_ok=True)
+        with open(ML_BREAKOUT_LOG_FILE, "w") as f:
             json.dump(log, f, indent=2)
     except Exception as e:
-        logging.error(f"Error writing monitor breakout log: {e}")
+        logging.error(f"Error writing ML breakout log: {e}")
 
-def add_monitor_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None):
-    """Add a monitor upgrade event to the monitor log (deduplicates by symbol+tf)."""
-    # === VALIDATE AI PRICES against real market price ===
-    ai_entry, ai_sl, ai_tp = _validate_ai_prices(
-        symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direction
-    )
-    log = load_monitor_breakout_log()
-    if not any(e["symbol"] == symbol and e["tf"] == tf for e in log):
-        entry = {
-            "symbol": symbol,
-            "tf": tf,
-            "breakout_price": round(breakout_price, 8),
-            "current_price": round(current_price, 8),
-            "type": line_type,
-            "ai_direction": ai_direction.upper() if ai_direction else "",
-            "time": datetime.now(timezone.utc).isoformat()
-        }
-        if ai_entry is not None:
-            entry["ai_entry"] = round(ai_entry, 8)
-        if ai_sl is not None:
-            entry["ai_sl"] = round(ai_sl, 8)
-        if ai_tp is not None:
-            entry["ai_tp"] = round(ai_tp, 8)
-        if ai_leverage is not None:
-            entry["ai_leverage"] = ai_leverage
-        if ai_deposit_pct is not None:
-            entry["ai_deposit_pct"] = ai_deposit_pct
-        log.append(entry)
-        save_monitor_breakout_log(log)
+def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indicators=None):
+    """Add ML prediction to ML breakout log (deduplicates by symbol+tf)."""
+    log = load_ml_breakout_log()
+    if any(e["symbol"] == symbol and e["tf"] == tf for e in log):
+        return  # already exists
+    entry = {
+        "symbol": symbol,
+        "tf": tf,
+        "current_price": round(current_price, 8),
+        "ml_direction": ml_direction.upper() if ml_direction else "",
+        "ml_sl": round(ml_sl, 8) if ml_sl else None,
+        "time": datetime.now(timezone.utc).isoformat()
+    }
+    log.append(entry)
+    save_ml_breakout_log(log)
 
-def clear_monitor_breakout_log():
-    save_monitor_breakout_log([])
+def clear_ml_breakout_log():
+    save_ml_breakout_log([])
 
 
 # --- PRICE ALERTS ---
