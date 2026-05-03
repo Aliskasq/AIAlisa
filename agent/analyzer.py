@@ -625,14 +625,18 @@ def _validate_sl_tp_in_text(text: str) -> str:
     Checks: SL direction, minimum 2% SL distance, minimum 2:1 R:R ratio."""
     import re
     direction_m = re.search(r'VERDICT[:\s]*(LONG|SHORT)', text, re.IGNORECASE)
-    entry_m = re.search(r'(?:Entry|Вход)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
-    sl_m = re.search(r'(?:SL|Стоп|🚫 SL)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
-    tp_m = re.search(r'(?:TP|Тейк|🎯 TP)[:\s]*\$?([\d.]+)', text, re.IGNORECASE)
+    entry_m = re.search(r'(?:Entry|Вход)[:\s]*\$?(\d[\d.]*)', text, re.IGNORECASE)
+    sl_m = re.search(r'(?:SL|Стоп|🚫 SL)[:\s]*\$?(\d[\d.]*)', text, re.IGNORECASE)
+    tp_m = re.search(r'(?:TP|Тейк|🎯 TP)[:\s]*\$?(\d[\d.]*)', text, re.IGNORECASE)
     if direction_m and entry_m and sl_m:
-        direction = direction_m.group(1).upper()
-        entry = float(entry_m.group(1))
-        sl = float(sl_m.group(1))
-        tp = float(tp_m.group(1)) if tp_m else 0
+        try:
+            direction = direction_m.group(1).upper()
+            entry = float(entry_m.group(1))
+            sl = float(sl_m.group(1))
+            tp = float(tp_m.group(1)) if tp_m else 0
+        except (ValueError, AttributeError):
+            logging.warning(f"⚠️ [PARSE FAIL] Could not parse entry/sl/tp from AI text")
+            return text
         
         # Check SL on wrong side
         if direction == "LONG" and sl > entry:
