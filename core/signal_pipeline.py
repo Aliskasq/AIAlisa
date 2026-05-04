@@ -125,103 +125,111 @@ def calculate_ml_sl(indicators: dict, direction: str, entry_price: float) -> flo
 def check_trailing_stop_from_candles(candles: list, direction: str, entry_price: float,
                                       initial_sl: float, trail_pct: float = 3.0) -> tuple:
     """
-    Walk 5m candles and apply trailing stop logic.
+    Walk 5m candles and apply trailing stop with breakeven logic.
     
-    Args:
-        candles: list of Binance kline arrays [openTime, O, H, L, C, ...]
-        direction: "LONG" or "SHORT"
-        entry_price: entry price
-        initial_sl: initial stop loss price (from AI or ATR)
-        trail_pct: trailing stop distance in % from peak (default 3%)
+    Phase 1: Only initial SL protects (no trailing yet)
+    Phase 2: Price moves BREAKEVEN_TRIGGER_PCT% in our favor →
+             SL jumps to entry + BREAKEVEN_PROFIT_PCT% (guaranteed profit)
+    Phase 3: Trailing stop at trail_pct% from peak (never below breakeven SL)
     
     Returns: (status, close_price, peak_price, final_trailing_sl)
         status: "sl" (initial SL hit), "trail" (trailing SL hit), "open" (still open)
-        close_price: price at which position closed (SL level, trail level, or current)
-        peak_price: highest (LONG) or lowest (SHORT) price reached
-        final_trailing_sl: current trailing SL level
     """
+    from config import BREAKEVEN_TRIGGER_PCT, BREAKEVEN_PROFIT_PCT
+    
     if not candles or not direction or entry_price <= 0:
         return ("open", entry_price, entry_price, initial_sl)
     
     trail_mult = trail_pct / 100.0
+    be_trigger_mult = BREAKEVEN_TRIGGER_PCT / 100.0
+    be_profit_mult = BREAKEVEN_PROFIT_PCT / 100.0
     
     if direction == "LONG":
         peak = entry_price
+        breakeven_activated = False
+        breakeven_sl = entry_price * (1 + be_profit_mult)  # entry + 0.5%
         
         for candle in candles:
             high = float(candle[2])
             low = float(candle[3])
-            
-            # Check initial SL first (before peak update)
-            if initial_sl and initial_sl > 0 and low <= initial_sl:
-                # Only if trailing hasn't improved past initial SL yet
-                trailing_sl = peak * (1 - trail_mult)
-                if trailing_sl <= initial_sl:
-                    return ("sl", initial_sl, peak, initial_sl)
             
             # Update peak
             if high > peak:
                 peak = high
             
-            # Calculate trailing SL
-            trailing_sl = peak * (1 - trail_mult)
+            # Check if breakeven should activate (price reached +5% from entry)
+            if not breakeven_activated and peak >= entry_price * (1 + be_trigger_mult):
+                breakeven_activated = True
             
-            # Trailing SL only improves (never worse than initial)
-            if initial_sl and initial_sl > 0:
-                effective_sl = max(trailing_sl, initial_sl)
+            if not breakeven_activated:
+                # Phase 1: only initial SL protects
+                if initial_sl and initial_sl > 0 and low <= initial_sl:
+                    return ("sl", initial_sl, peak, initial_sl)
             else:
-                effective_sl = trailing_sl
-            
-            # Check trailing SL
-            if low <= effective_sl:
-                return ("trail", effective_sl, peak, effective_sl)
+                # Phase 2/3: trailing stop, floor = breakeven SL
+                trailing_sl = peak * (1 - trail_mult)
+                # Never below breakeven profit level
+                effective_sl = max(trailing_sl, breakeven_sl)
+                # Also never below initial SL (shouldn't happen but safety)
+                if initial_sl and initial_sl > 0:
+                    effective_sl = max(effective_sl, initial_sl)
+                
+                if low <= effective_sl:
+                    return ("trail", effective_sl, peak, effective_sl)
         
         # Still open
         last_close = float(candles[-1][4])
-        trailing_sl = peak * (1 - trail_mult)
-        if initial_sl and initial_sl > 0:
-            effective_sl = max(trailing_sl, initial_sl)
+        if breakeven_activated:
+            trailing_sl = peak * (1 - trail_mult)
+            effective_sl = max(trailing_sl, breakeven_sl)
+            if initial_sl and initial_sl > 0:
+                effective_sl = max(effective_sl, initial_sl)
         else:
-            effective_sl = trailing_sl
+            effective_sl = initial_sl if (initial_sl and initial_sl > 0) else entry_price * (1 - trail_mult)
         return ("open", last_close, peak, effective_sl)
     
     elif direction == "SHORT":
         trough = entry_price
+        breakeven_activated = False
+        breakeven_sl = entry_price * (1 - be_profit_mult)  # entry - 0.5%
         
         for candle in candles:
             high = float(candle[2])
             low = float(candle[3])
             
-            # Check initial SL first
-            if initial_sl and initial_sl > 0 and high >= initial_sl:
-                trailing_sl = trough * (1 + trail_mult)
-                if trailing_sl >= initial_sl:
-                    return ("sl", initial_sl, trough, initial_sl)
-            
             # Update trough
             if low < trough:
                 trough = low
             
-            # Calculate trailing SL
-            trailing_sl = trough * (1 + trail_mult)
+            # Check if breakeven should activate (price dropped 5% from entry)
+            if not breakeven_activated and trough <= entry_price * (1 - be_trigger_mult):
+                breakeven_activated = True
             
-            # Trailing SL only improves (never worse than initial)
-            if initial_sl and initial_sl > 0:
-                effective_sl = min(trailing_sl, initial_sl)
+            if not breakeven_activated:
+                # Phase 1: only initial SL protects
+                if initial_sl and initial_sl > 0 and high >= initial_sl:
+                    return ("sl", initial_sl, trough, initial_sl)
             else:
-                effective_sl = trailing_sl
-            
-            # Check trailing SL
-            if high >= effective_sl:
-                return ("trail", effective_sl, trough, effective_sl)
+                # Phase 2/3: trailing stop, ceiling = breakeven SL
+                trailing_sl = trough * (1 + trail_mult)
+                # Never above breakeven profit level
+                effective_sl = min(trailing_sl, breakeven_sl)
+                # Also never above initial SL
+                if initial_sl and initial_sl > 0:
+                    effective_sl = min(effective_sl, initial_sl)
+                
+                if high >= effective_sl:
+                    return ("trail", effective_sl, trough, effective_sl)
         
         # Still open
         last_close = float(candles[-1][4])
-        trailing_sl = trough * (1 + trail_mult)
-        if initial_sl and initial_sl > 0:
-            effective_sl = min(trailing_sl, initial_sl)
+        if breakeven_activated:
+            trailing_sl = trough * (1 + trail_mult)
+            effective_sl = min(trailing_sl, breakeven_sl)
+            if initial_sl and initial_sl > 0:
+                effective_sl = min(effective_sl, initial_sl)
         else:
-            effective_sl = trailing_sl
+            effective_sl = initial_sl if (initial_sl and initial_sl > 0) else entry_price * (1 + trail_mult)
         return ("open", last_close, trough, effective_sl)
     
     return ("open", entry_price, entry_price, initial_sl)
