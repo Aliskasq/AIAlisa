@@ -341,46 +341,57 @@ def _validate_ai_prices(symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direct
 
 
 def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_pump_filter=False):
-    """Add a breakout event to the log (deduplicates by symbol+tf)."""
+    """Add a breakout event to the log (deduplicates by symbol+tf).
+    If same symbol+tf exists but old verdict was SKIP/empty and new is LONG/SHORT, upgrade it.
+    """
     log = load_breakout_log()
     # Check if same symbol+tf already exists
     existing = next((e for e in log if e["symbol"] == symbol and e["tf"] == tf), None)
     if existing:
-        return  # already exists, don't duplicate
+        old_dir = existing.get("ai_direction", "").upper()
+        new_dir = ai_direction.upper() if ai_direction else ""
+        # Upgrade: old was SKIP/empty/info → new is a real trade (LONG/SHORT)
+        if old_dir not in ("LONG", "SHORT") and new_dir in ("LONG", "SHORT"):
+            log.remove(existing)
+            logging.info(f"♻️ Upgrading {symbol} {tf}: {old_dir or 'NONE'} → {new_dir}")
+        else:
+            return  # already exists with equal or better verdict
 
     # === VALIDATE AI PRICES against real market price ===
     ai_entry, ai_sl, ai_tp = _validate_ai_prices(
         symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direction
     )
 
-    if True:  # new entry — always add
-        # Check if same symbol (any TF) already exists — mark as duplicate
-        symbol_already_exists = any(e["symbol"] == symbol for e in log)
-        entry = {
-            "symbol": symbol,
-            "tf": tf,
-            "breakout_price": round(breakout_price, 8),
-            "current_price": round(current_price, 8),
-            "type": line_type,
-            "ai_direction": ai_direction.upper() if ai_direction else "",
-            "time": datetime.now(timezone.utc).isoformat()
-        }
-        if ai_entry is not None:
-            entry["ai_entry"] = round(ai_entry, 8)
-        if ai_sl is not None:
-            entry["ai_sl"] = round(ai_sl, 8)
-        if ai_tp is not None:
-            entry["ai_tp"] = round(ai_tp, 8)
-        if ai_leverage is not None:
-            entry["ai_leverage"] = ai_leverage
-        if ai_deposit_pct is not None:
-            entry["ai_deposit_pct"] = ai_deposit_pct
-        if is_pump_filter:
-            entry["is_pump_filter"] = True
-        if symbol_already_exists:
-            entry["is_duplicate"] = True
-        log.append(entry)
-        save_breakout_log(log)
+    # Check if same symbol (any TF) already has an active trade (LONG/SHORT) — mark as duplicate
+    symbol_has_active_trade = any(
+        e["symbol"] == symbol and e.get("ai_direction", "").upper() in ("LONG", "SHORT")
+        for e in log
+    )
+    entry = {
+        "symbol": symbol,
+        "tf": tf,
+        "breakout_price": round(breakout_price, 8),
+        "current_price": round(current_price, 8),
+        "type": line_type,
+        "ai_direction": ai_direction.upper() if ai_direction else "",
+        "time": datetime.now(timezone.utc).isoformat()
+    }
+    if ai_entry is not None:
+        entry["ai_entry"] = round(ai_entry, 8)
+    if ai_sl is not None:
+        entry["ai_sl"] = round(ai_sl, 8)
+    if ai_tp is not None:
+        entry["ai_tp"] = round(ai_tp, 8)
+    if ai_leverage is not None:
+        entry["ai_leverage"] = ai_leverage
+    if ai_deposit_pct is not None:
+        entry["ai_deposit_pct"] = ai_deposit_pct
+    if is_pump_filter:
+        entry["is_pump_filter"] = True
+    if symbol_has_active_trade:
+        entry["is_duplicate"] = True
+    log.append(entry)
+    save_breakout_log(log)
 
 def clear_breakout_log():
     save_breakout_log([])
@@ -456,10 +467,20 @@ def save_ml_breakout_log(log):
         logging.error(f"Error writing ML breakout log: {e}")
 
 def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indicators=None):
-    """Add ML prediction to ML breakout log (deduplicates by symbol+tf)."""
+    """Add ML prediction to ML breakout log (deduplicates by symbol+tf).
+    If same symbol+tf exists but direction was empty, upgrade it.
+    """
     log = load_ml_breakout_log()
-    if any(e["symbol"] == symbol and e["tf"] == tf for e in log):
-        return  # already exists
+    existing = next((e for e in log if e["symbol"] == symbol and e["tf"] == tf), None)
+    if existing:
+        old_dir = existing.get("ml_direction", "").upper()
+        new_dir = ml_direction.upper() if ml_direction else ""
+        if old_dir not in ("LONG", "SHORT") and new_dir in ("LONG", "SHORT"):
+            log.remove(existing)
+            logging.info(f"♻️ ML upgrade {symbol} {tf}: {old_dir or 'NONE'} → {new_dir}")
+            save_ml_breakout_log(log)  # save after remove
+        else:
+            return  # already exists
     entry = {
         "symbol": symbol,
         "tf": tf,
