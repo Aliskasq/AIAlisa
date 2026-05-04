@@ -928,11 +928,14 @@ async def main():
                                                    ai_deposit_pct=FIXED_DEPOSIT_PCT,
                                                    is_pump_filter=_is_pump_filter)
 
-                            # Remove alert if it was stored
-                            alerts = load_alerts()
-                            if vw_item.get("alert") and vw_item["alert"] in alerts:
-                                alerts = [a for a in alerts if a != vw_item["alert"]]
-                                save_alerts(alerts)
+                            # Remove alert if it was stored (by symbol+tf key for reliability)
+                            _vw_alert = vw_item.get("alert")
+                            if _vw_alert and isinstance(_vw_alert, dict):
+                                _vw_sym = _vw_alert.get("symbol", sym)
+                                _vw_tf = _vw_alert.get("tf", tf)
+                                fresh_alerts = load_alerts()
+                                fresh_alerts = [a for a in fresh_alerts if not (a["symbol"] == _vw_sym and a["tf"] == _vw_tf)]
+                                save_alerts(fresh_alerts)
 
                         except Exception as e:
                             logging.error(f"❌ VOL PASS pipeline error for {sym}: {e}")
