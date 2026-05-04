@@ -114,6 +114,7 @@ SIGNAL_MIN_VOLUME_12H = 2_000_000   # $2M — 12h volume pass threshold
 SIGNAL_MIN_VOLUME_1H = 170_000     # $170K — 1h candle volume + green = pass
 SIGNAL_SL_ATR_MULT = 2.0          # SL = 2 × ATR from entry
 SIGNAL_TP_ATR_MULT = 3.0          # TP = 3 × ATR (R:R = 1:1.5)
+SIGNAL_SL_MIN_PCT = 5.0           # SL floor — never less than 5% from entry
 SIGNAL_SL_MAX_PCT = 10.0          # SL cap — never more than 10% from entry
 TRAILING_STOP_PCT = 3.0            # Trailing stop distance from peak
 BREAKEVEN_TRIGGER_PCT = 5.0       # Move SL to breakeven+profit when price moves this % in our favor
@@ -331,10 +332,16 @@ def _validate_ai_prices(symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direct
             logging.warning(f"⚠️ TP TOO FAR {symbol}: TP={ai_tp} is >50% from entry={effective_entry} — clearing TP")
             ai_tp = None
     
-    # 4. Cap SL at SIGNAL_SL_MAX_PCT (10%) from entry
+    # 4. Clamp SL between SIGNAL_SL_MIN_PCT (5%) and SIGNAL_SL_MAX_PCT (10%) from entry
     if ai_sl is not None and ai_sl > 0 and effective_entry > 0:
         sl_pct = abs(ai_sl - effective_entry) / effective_entry * 100
-        if sl_pct > SIGNAL_SL_MAX_PCT:
+        if sl_pct < SIGNAL_SL_MIN_PCT:
+            if direction == "LONG":
+                ai_sl = effective_entry * (1 - SIGNAL_SL_MIN_PCT / 100)
+            elif direction == "SHORT":
+                ai_sl = effective_entry * (1 + SIGNAL_SL_MIN_PCT / 100)
+            logging.info(f"📏 SL FLOOR {symbol}: was {sl_pct:.1f}% → raised to {SIGNAL_SL_MIN_PCT}% = {ai_sl}")
+        elif sl_pct > SIGNAL_SL_MAX_PCT:
             if direction == "LONG":
                 ai_sl = effective_entry * (1 - SIGNAL_SL_MAX_PCT / 100)
             elif direction == "SHORT":
