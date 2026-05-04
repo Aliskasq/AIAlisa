@@ -473,6 +473,21 @@ async def main():
                             logging.info(f"⏭️ Skip {sym} {tf} — already traded on another TF")
                             continue
 
+                        # Check if this symbol+tf already exists in the bank
+                        _existing_bank = next(
+                            (e for e in load_breakout_log()
+                             if e["symbol"] == sym and e["tf"] == tf),
+                            None
+                        )
+                        _existing_dir = _existing_bank.get("ai_direction", "").upper() if _existing_bank else ""
+                        if _existing_dir in ("LONG", "SHORT"):
+                            # Active trade exists — skip completely (no AI call, no Telegram)
+                            logging.info(f"⏭️ Skip {sym} {tf} — already in bank as {_existing_dir}")
+                            alerts_to_remove.append(item["alert"])
+                            continue
+                        # If SKIP exists — allow re-analysis (AI might upgrade to LONG/SHORT)
+                        _is_retry_after_skip = bool(_existing_bank)
+
                         logging.info(f"🤖 AI queue [{idx+1}/{len(breakout_queue)}]: {sym} {tf}")
 
                         # For 1D breakouts: use 4H as primary indicators (not 1D)
@@ -639,6 +654,12 @@ async def main():
                             logging.error(f"❌ 1D emergency check for {sym}: {e}")
 
                         is_sent = False
+                        # If this is a retry after SKIP and AI still says SKIP → don't spam Telegram
+                        if _is_retry_after_skip and _ai_dir not in ("LONG", "SHORT"):
+                            logging.info(f"⏭️ {sym} {tf} retry still SKIP — suppressing duplicate Telegram message")
+                            alerts_to_remove.append(item["alert"])
+                            continue
+
                         if ai_has_error:
                             is_sent = True
                         else:
