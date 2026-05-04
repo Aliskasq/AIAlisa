@@ -650,7 +650,7 @@ async def main():
                             if is_sent and error_msg_id:
                                 await delete_telegram_message(session, error_msg_id)
                                 error_msg_id = None
-                            logging.info(f"🟢 FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {adx_value:.0f})")
+                            logging.info(f"🟢 FULL: {sym} {_ai_dir} (conf {max(long_pct,short_pct)}% ADX {last_indic_row.get('adx', 0):.0f})")
 
                         if is_sent:
                             traded_symbols.add(sym)  # Block further TFs for this symbol
