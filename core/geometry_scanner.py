@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 try:
-    from config import load_alerts, save_alerts
+    from config import load_alerts, save_alerts, load_breakout_log
 except ImportError:
     pass
 
@@ -354,22 +354,28 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
 
         if status in ["WAITING_2_PERCENT", "WAITING_RED_CLOSE"]:
             try:
-                current_alerts = load_alerts() or []
-                if not any(a['symbol'] == symbol and a['tf'] == tf_name for a in current_alerts):
-                    tf_ms = 14400000 if tf_name == "4H" else 86400000
-                    current_alerts.append({
-                        'symbol': symbol, 'tf': tf_name,
-                        'trigger_price': round(trigger_price, 8),
-                        'line_price': round(line_price_now, 8),
-                        'base_price': round(current_price, 8),
-                        'type': line_type, 'status': status,
-                        'added_at': str(pd.Timestamp.now()),
-                        'slope': float(m), 'intercept': intercept,
-                        'base_idx': int(last_idx),
-                        'base_open_time': base_open_time,
-                        'tf_ms': tf_ms
-                    })
-                    save_alerts(current_alerts)
+                # Don't re-create alert if symbol+tf already processed in breakout log
+                _bank = load_breakout_log()
+                _already_in_bank = any(e["symbol"] == symbol and e["tf"] == tf_name for e in _bank)
+                if _already_in_bank:
+                    logging.info(f"⏭️ {symbol} {tf_name} already in breakout log — skipping alert creation")
+                else:
+                    current_alerts = load_alerts() or []
+                    if not any(a['symbol'] == symbol and a['tf'] == tf_name for a in current_alerts):
+                        tf_ms = 14400000 if tf_name == "4H" else 86400000
+                        current_alerts.append({
+                            'symbol': symbol, 'tf': tf_name,
+                            'trigger_price': round(trigger_price, 8),
+                            'line_price': round(line_price_now, 8),
+                            'base_price': round(current_price, 8),
+                            'type': line_type, 'status': status,
+                            'added_at': str(pd.Timestamp.now()),
+                            'slope': float(m), 'intercept': intercept,
+                            'base_idx': int(last_idx),
+                            'base_open_time': base_open_time,
+                            'tf_ms': tf_ms
+                        })
+                        save_alerts(current_alerts)
             except Exception as e:
                 logging.error(f"❌ JSON Error: {e}")
 
