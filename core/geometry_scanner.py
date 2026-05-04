@@ -125,8 +125,13 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
         logging.warning(f"⚠️ {symbol:10} {tf_name}: Data is empty.")
         return None, {"error": "no_data"}
 
-    # Alert cleanup is handled by main.py after processing (alerts_to_remove)
-    # Do NOT delete alerts here — it causes duplicates when scanner re-creates them
+    try:
+        current_alerts = load_alerts() or []
+        filtered_alerts = [a for a in current_alerts if not (a['symbol'] == symbol and a['tf'] == tf_name)]
+        if len(current_alerts) != len(filtered_alerts):
+            save_alerts(filtered_alerts)
+    except Exception:
+        pass
 
     df[['high', 'low', 'close', 'open']] = df[['high', 'low', 'close', 'open']].apply(pd.to_numeric)
     

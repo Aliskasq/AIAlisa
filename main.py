@@ -667,10 +667,12 @@ async def main():
                         else:
                             logging.warning(f"🔄 Signal {sym} ({tf}) LEFT IN QUEUE. Will retry in 5 minutes.")
 
-                # Clean up processed alerts
+                # Clean up processed alerts (by symbol+tf to avoid dict comparison issues)
                 if alerts_to_remove:
-                    alerts = [a for a in alerts if a not in alerts_to_remove]
-                    save_alerts(alerts)
+                    remove_keys = {(a["symbol"], a["tf"]) for a in alerts_to_remove}
+                    fresh_alerts = load_alerts()  # Re-read from disk to avoid stale data
+                    fresh_alerts = [a for a in fresh_alerts if (a["symbol"], a["tf"]) not in remove_keys]
+                    save_alerts(fresh_alerts)
             else:
                 logging.info(f"👀 Waiting list is empty. Time (UTC+3): {now_msk.strftime('%H:%M:%S')}")
 
