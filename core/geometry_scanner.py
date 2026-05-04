@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 try:
-    from config import load_alerts, save_alerts, load_breakout_log
+    from config import load_alerts, save_alerts
 except ImportError:
     pass
 
@@ -125,13 +125,8 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
         logging.warning(f"⚠️ {symbol:10} {tf_name}: Data is empty.")
         return None, {"error": "no_data"}
 
-    try:
-        current_alerts = load_alerts() or []
-        filtered_alerts = [a for a in current_alerts if not (a['symbol'] == symbol and a['tf'] == tf_name)]
-        if len(current_alerts) != len(filtered_alerts):
-            save_alerts(filtered_alerts)
-    except Exception:
-        pass
+    # Alert cleanup is handled by main.py after processing (alerts_to_remove)
+    # Do NOT delete alerts here — it causes duplicates when scanner re-creates them
 
     df[['high', 'low', 'close', 'open']] = df[['high', 'low', 'close', 'open']].apply(pd.to_numeric)
     
@@ -354,28 +349,22 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
 
         if status in ["WAITING_2_PERCENT", "WAITING_RED_CLOSE"]:
             try:
-                # Don't re-create alert if symbol+tf already processed in breakout log
-                _bank = load_breakout_log()
-                _already_in_bank = any(e["symbol"] == symbol and e["tf"] == tf_name for e in _bank)
-                if _already_in_bank:
-                    logging.info(f"⏭️ {symbol} {tf_name} already in breakout log — skipping alert creation")
-                else:
-                    current_alerts = load_alerts() or []
-                    if not any(a['symbol'] == symbol and a['tf'] == tf_name for a in current_alerts):
-                        tf_ms = 14400000 if tf_name == "4H" else 86400000
-                        current_alerts.append({
-                            'symbol': symbol, 'tf': tf_name,
-                            'trigger_price': round(trigger_price, 8),
-                            'line_price': round(line_price_now, 8),
-                            'base_price': round(current_price, 8),
-                            'type': line_type, 'status': status,
-                            'added_at': str(pd.Timestamp.now()),
-                            'slope': float(m), 'intercept': intercept,
-                            'base_idx': int(last_idx),
-                            'base_open_time': base_open_time,
-                            'tf_ms': tf_ms
-                        })
-                        save_alerts(current_alerts)
+                current_alerts = load_alerts() or []
+                if not any(a['symbol'] == symbol and a['tf'] == tf_name for a in current_alerts):
+                    tf_ms = 14400000 if tf_name == "4H" else 86400000
+                    current_alerts.append({
+                        'symbol': symbol, 'tf': tf_name,
+                        'trigger_price': round(trigger_price, 8),
+                        'line_price': round(line_price_now, 8),
+                        'base_price': round(current_price, 8),
+                        'type': line_type, 'status': status,
+                        'added_at': str(pd.Timestamp.now()),
+                        'slope': float(m), 'intercept': intercept,
+                        'base_idx': int(last_idx),
+                        'base_open_time': base_open_time,
+                        'tf_ms': tf_ms
+                    })
+                    save_alerts(current_alerts)
             except Exception as e:
                 logging.error(f"❌ JSON Error: {e}")
 
