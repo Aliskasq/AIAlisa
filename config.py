@@ -106,7 +106,7 @@ ML_VIRTUAL_BANK_FILE = "data/virtual_bank_ml.json"
 VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
 
 # === SIGNAL PIPELINE SETTINGS ===
-SIGNAL_CONFIDENCE_FULL = 62.5    # % — full signal with entry
+SIGNAL_CONFIDENCE_FULL = 60.0    # % — full signal with entry
 SIGNAL_ADX_TRENDING = 20         # ADX below this = flat market
 SIGNAL_LEVERAGE = 1              # ALWAYS 1x, no leverage
 SIGNAL_DEPOSIT_PCT = 2           # ALWAYS 2% of bank per trade
