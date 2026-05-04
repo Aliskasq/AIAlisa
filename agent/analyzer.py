@@ -319,7 +319,7 @@ Output format:
 VERDICT: LONG or SHORT or SKIP
 LONG: [number]% / SHORT: [number]%
 ENTRY: [current price]
-SL: [minimum 2% from entry, use 1.5×ATR if larger]
+SL: [minimum 5% from entry, place at significant support/resistance level, use ATR if larger. NEVER closer than 5%]
 TP: [minimum 2× SL distance — R:R must be ≥ 2:1]
 LOGIC: [2-3 sentences — key factors driving the verdict]
 RISK: [1 sentence — main risk to watch]
@@ -646,12 +646,12 @@ def _validate_sl_tp_in_text(text: str) -> str:
             logging.warning(f"⚠️ [SL WARN] SHORT but SL({sl}) < Entry({entry}) in text response!")
             text += "\n\n⚠️ ВНИМАНИЕ: SL ниже входа для SHORT — проверьте уровни вручную!"
         
-        # Check minimum 2% SL distance
+        # Check minimum 5% SL distance
         if entry > 0:
             sl_pct = abs(sl - entry) / entry * 100
-            if sl_pct < 1.5:  # warn if SL is too tight (< 1.5%)
+            if sl_pct < 5.0:  # warn if SL is too tight (< 5%)
                 logging.warning(f"⚠️ [SL TIGHT] {direction} SL distance only {sl_pct:.1f}% (entry={entry}, sl={sl})")
-                text += f"\n\n⚠️ SL слишком близко ({sl_pct:.1f}%) — рекомендуется минимум 2%"
+                text += f"\n\n⚠️ SL слишком близко ({sl_pct:.1f}%) — минимум 5%"
         
         # Check R:R ratio (minimum 2:1)
         if entry > 0 and tp > 0 and sl > 0:
@@ -902,7 +902,7 @@ ${base_coin} Analysis🤔
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX
-🚫 SL: $X.XXXX ([reason])
+🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%
 
@@ -1035,7 +1035,7 @@ ${base_coin} Analysis
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX ([reason])
-🚫 SL: $X.XXXX ([reason])
+🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%{risk_prompt_rule}
 
@@ -1120,7 +1120,7 @@ ${base_coin} Analysis🤔
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX
-🚫 SL: $X.XXXX ([reason])
+🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%{risk_prompt_rule}
 
