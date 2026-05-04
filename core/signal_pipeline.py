@@ -135,7 +135,7 @@ def check_trailing_stop_from_candles(candles: list, direction: str, entry_price:
     Returns: (status, close_price, peak_price, final_trailing_sl)
         status: "sl" (initial SL hit), "trail" (trailing SL hit), "open" (still open)
     """
-    from config import BREAKEVEN_TRIGGER_PCT, BREAKEVEN_PROFIT_PCT
+    from config import BREAKEVEN_TRIGGER_PCT, BREAKEVEN_PROFIT_PCT, BREAKEVEN_TIME_TRIGGER_PCT, BREAKEVEN_TIME_CANDLES
     
     if not candles or not direction or entry_price <= 0:
         return ("open", entry_price, entry_price, initial_sl)
@@ -143,23 +143,32 @@ def check_trailing_stop_from_candles(candles: list, direction: str, entry_price:
     trail_mult = trail_pct / 100.0
     be_trigger_mult = BREAKEVEN_TRIGGER_PCT / 100.0
     be_profit_mult = BREAKEVEN_PROFIT_PCT / 100.0
+    be_time_trigger_mult = BREAKEVEN_TIME_TRIGGER_PCT / 100.0
     
     if direction == "LONG":
         peak = entry_price
         breakeven_activated = False
         breakeven_sl = entry_price * (1 + be_profit_mult)  # entry + 0.5%
+        candle_count = 0
         
         for candle in candles:
             high = float(candle[2])
             low = float(candle[3])
+            candle_count += 1
             
             # Update peak
             if high > peak:
                 peak = high
             
-            # Check if breakeven should activate (price reached +5% from entry)
-            if not breakeven_activated and peak >= entry_price * (1 + be_trigger_mult):
-                breakeven_activated = True
+            # Check if breakeven should activate
+            # Option 1: price reached +5% from entry (instant)
+            # Option 2: price is +3% AND 20+ candles passed (time-based)
+            if not breakeven_activated:
+                if peak >= entry_price * (1 + be_trigger_mult):
+                    breakeven_activated = True
+                elif (candle_count >= BREAKEVEN_TIME_CANDLES and
+                      peak >= entry_price * (1 + be_time_trigger_mult)):
+                    breakeven_activated = True
             
             if not breakeven_activated:
                 # Phase 1: only initial SL protects
@@ -192,18 +201,24 @@ def check_trailing_stop_from_candles(candles: list, direction: str, entry_price:
         trough = entry_price
         breakeven_activated = False
         breakeven_sl = entry_price * (1 - be_profit_mult)  # entry - 0.5%
+        candle_count = 0
         
         for candle in candles:
             high = float(candle[2])
             low = float(candle[3])
+            candle_count += 1
             
             # Update trough
             if low < trough:
                 trough = low
             
-            # Check if breakeven should activate (price dropped 5% from entry)
-            if not breakeven_activated and trough <= entry_price * (1 - be_trigger_mult):
-                breakeven_activated = True
+            # Check if breakeven should activate
+            if not breakeven_activated:
+                if trough <= entry_price * (1 - be_trigger_mult):
+                    breakeven_activated = True
+                elif (candle_count >= BREAKEVEN_TIME_CANDLES and
+                      trough <= entry_price * (1 - be_time_trigger_mult)):
+                    breakeven_activated = True
             
             if not breakeven_activated:
                 # Phase 1: only initial SL protects

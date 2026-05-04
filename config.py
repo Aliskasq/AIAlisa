@@ -118,6 +118,8 @@ SIGNAL_SL_MAX_PCT = 10.0          # SL cap — never more than 10% from entry
 TRAILING_STOP_PCT = 3.0            # Trailing stop distance from peak
 BREAKEVEN_TRIGGER_PCT = 5.0       # Move SL to breakeven+profit when price moves this % in our favor
 BREAKEVEN_PROFIT_PCT = 0.5        # Guaranteed profit % after breakeven trigger
+BREAKEVEN_TIME_TRIGGER_PCT = 3.0  # Alternative: +3% in our favor...
+BREAKEVEN_TIME_CANDLES = 20       # ...AND 20+ candles (5m) passed → also activate breakeven
 ML_SL_ATR_MULT = 1.5              # ML SL = 1.5 × ATR, clamped 5-10%
 ML_SL_MIN_PCT = 5.0               # ML SL minimum
 ML_SL_MAX_PCT = 10.0              # ML SL maximum
