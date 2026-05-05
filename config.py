@@ -45,27 +45,78 @@ KEY_ACCOUNT_LABELS = {
 
 # AI provider settings persistence
 AI_SETTINGS_FILE = "data/ai_settings.json"
-SL_MODE_FILE = "data/sl_mode.json"
+SL_SETTINGS_FILE = "data/sl_settings.json"
 
-def load_sl_mode() -> str:
-    """Load stop-loss mode: 'trail' (trailing stop) or 'stopai' (fixed AI SL/TP)."""
+_DEFAULT_SL_SETTINGS = {
+    "signals": {
+        "mode": "stopai",  # stopai | trailing | fixed | ema
+        "trailing": {
+            "anchor": "low-1",      # high-1 | low-1 | high-2 | low-2
+            "activation_candles": 3, # 3-10
+            "initial_sl_atr": 1.5,   # ATR multiplier for initial SL
+            "trail_atr": 1.0         # ATR multiplier buffer from candle level
+        },
+        "fixed": {
+            "sl_atr": 1.5,
+            "tp_atr": 3.0
+        },
+        "ema": {
+            "initial_sl_atr": 1.5,
+            "ema_period": 25,    # 25 | 50
+            "ema_tf": "15m"      # 5m | 15m
+        }
+    },
+    "bankml": {
+        "mode": "trailing",  # trailing | fixed | ema (no stopai)
+        "trailing": {
+            "anchor": "low-1",
+            "activation_candles": 3,
+            "initial_sl_atr": 1.5,
+            "trail_atr": 1.0
+        },
+        "fixed": {
+            "sl_atr": 1.5,
+            "tp_atr": 3.0
+        },
+        "ema": {
+            "initial_sl_atr": 1.5,
+            "ema_period": 25,
+            "ema_tf": "15m"
+        }
+    }
+}
+
+def load_sl_settings() -> dict:
+    """Load full SL settings for both banks."""
+    import copy
+    defaults = copy.deepcopy(_DEFAULT_SL_SETTINGS)
     try:
-        if os.path.exists(SL_MODE_FILE):
-            with open(SL_MODE_FILE, "r") as f:
-                data = json.load(f)
-                return data.get("mode", "trail")
-    except Exception:
-        pass
-    return "trail"
+        if os.path.exists(SL_SETTINGS_FILE):
+            with open(SL_SETTINGS_FILE, "r") as f:
+                saved = json.load(f)
+                for bank in ("signals", "bankml"):
+                    if bank in saved:
+                        defaults[bank]["mode"] = saved[bank].get("mode", defaults[bank]["mode"])
+                        for sub in ("trailing", "fixed", "ema"):
+                            if sub in saved[bank]:
+                                defaults[bank][sub].update(saved[bank][sub])
+    except Exception as e:
+        logging.error(f"Error reading SL settings: {e}")
+    return defaults
 
-def save_sl_mode(mode: str):
-    """Save stop-loss mode to disk."""
+def save_sl_settings(settings: dict):
+    """Save full SL settings to disk."""
     try:
         os.makedirs("data", exist_ok=True)
-        with open(SL_MODE_FILE, "w") as f:
-            json.dump({"mode": mode}, f)
+        with open(SL_SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
     except Exception as e:
-        logging.error(f"Error writing SL mode: {e}")
+        logging.error(f"Error writing SL settings: {e}")
+
+def load_sl_mode(bank: str = "signals") -> str:
+    """Quick helper — get mode for a bank. Backward compatible."""
+    s = load_sl_settings()
+    return s.get(bank, {}).get("mode", "stopai" if bank == "signals" else "trailing")
 
 def load_ai_settings():
     """Load persisted AI provider/model/key settings."""
@@ -372,7 +423,7 @@ def _validate_ai_prices(symbol, current_price, ai_entry, ai_sl, ai_tp, ai_direct
     return ai_entry, ai_sl, ai_tp
 
 
-def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_pump_filter=False):
+def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", ai_direction="", ai_entry=None, ai_sl=None, ai_tp=None, ai_leverage=None, ai_deposit_pct=None, is_pump_filter=False, atr_value=None):
     """Add a breakout event to the log (deduplicates by symbol+tf).
     If same symbol+tf exists but old verdict was SKIP/empty and new is LONG/SHORT, upgrade it.
     """
@@ -418,6 +469,8 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
         entry["ai_leverage"] = ai_leverage
     if ai_deposit_pct is not None:
         entry["ai_deposit_pct"] = ai_deposit_pct
+    if atr_value is not None:
+        entry["atr_value"] = round(atr_value, 8)
     if is_pump_filter:
         entry["is_pump_filter"] = True
     if symbol_has_active_trade:
@@ -498,7 +551,7 @@ def save_ml_breakout_log(log):
     except Exception as e:
         logging.error(f"Error writing ML breakout log: {e}")
 
-def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indicators=None):
+def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indicators=None, atr_value=None):
     """Add ML prediction to ML breakout log (deduplicates by symbol+tf).
     If same symbol+tf exists but direction was empty, upgrade it.
     """
@@ -521,6 +574,8 @@ def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indica
         "ml_sl": round(ml_sl, 8) if ml_sl else None,
         "time": datetime.now(timezone.utc).isoformat()
     }
+    if atr_value is not None:
+        entry["atr_value"] = round(atr_value, 8)
     log.append(entry)
     save_ml_breakout_log(log)
 

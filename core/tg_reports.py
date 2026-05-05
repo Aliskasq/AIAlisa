@@ -8,8 +8,9 @@ import logging
 from datetime import datetime, timezone, timedelta
 from config import (load_breakout_log, load_virtual_bank, VIRTUAL_BANK_POSITION_SIZE,
                      load_ml_breakout_log, load_ml_virtual_bank, TRAILING_STOP_PCT,
-                     load_sl_mode)
-from core.signal_pipeline import check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles
+                     load_sl_settings)
+from core.signal_pipeline import (check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles,
+                                   check_fixed_atr_sl_tp, check_candle_trailing, check_ema_sl)
 
 
 async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
@@ -29,69 +30,114 @@ async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
         return []
 
 
+async def _fetch_ema_candles(session: aiohttp.ClientSession, symbol: str,
+                             ema_tf: str, limit: int = 100) -> list:
+    """Fetch candles for EMA calculation (15m or 5m)."""
+    try:
+        url = (f"https://fapi.binance.com/fapi/v1/klines"
+               f"?symbol={symbol}&interval={ema_tf}&limit={limit}")
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                return []
+            return await resp.json()
+    except Exception as e:
+        logging.error(f"❌ _fetch_ema_candles {symbol} {ema_tf}: {e}")
+        return []
+
+
 async def _check_trailing_for_entry(session: aiohttp.ClientSession, symbol: str,
                                      direction: str, entry_price: float,
                                      initial_sl: float, entry_time_iso: str,
                                      trail_pct: float = None,
                                      tp_price: float = None,
-                                     sl_mode: str = None) -> tuple:
+                                     atr_value: float = None,
+                                     bank_settings: dict = None) -> tuple:
     """
-    Fetch 5m candles and check stop for a single entry.
-    
-    sl_mode='trail' → trailing stop (default)
-    sl_mode='stopai' → fixed AI SL/TP only
-    
-    Returns: (status, close_price, peak_price, trailing_sl)
-    status: 'sl', 'trail'/'tp', or 'open'
+    Fetch 5m candles and check stop based on bank_settings mode.
+
+    Modes:
+        stopai   — AI's fixed SL/TP
+        trailing — candle-based trailing with ATR buffer
+        fixed    — ATR-based fixed SL/TP
+        ema      — initial SL + EMA crossover exit
+
+    Returns: (status, close_price, peak_price, sl_used)
+    status: 'sl', 'tp', 'trail', 'ema', or 'open'
     """
     if trail_pct is None:
         trail_pct = TRAILING_STOP_PCT
-    if sl_mode is None:
-        sl_mode = load_sl_mode()
 
     if not direction or direction == "SKIP" or entry_price <= 0 or not entry_time_iso:
         return ("open", 0, entry_price, initial_sl)
 
-    # Fallback SL if none provided: 10% from entry
+    # Fallback SL
     if not initial_sl or initial_sl <= 0:
-        if direction == "LONG":
-            initial_sl = entry_price * 0.90
-        elif direction == "SHORT":
-            initial_sl = entry_price * 1.10
-
-    # Sanity: SL on correct side
+        initial_sl = entry_price * (0.90 if direction == "LONG" else 1.10)
     if direction == "LONG" and initial_sl >= entry_price:
         initial_sl = entry_price * 0.90
     elif direction == "SHORT" and initial_sl <= entry_price:
         initial_sl = entry_price * 1.10
 
+    # Fallback ATR
+    if not atr_value or atr_value <= 0:
+        atr_value = entry_price * 0.03
+
     candles = await _fetch_5m_candles_after(session, symbol, entry_time_iso)
     if not candles:
         return ("open", 0, entry_price, initial_sl)
 
-    if sl_mode == "stopai":
-        # Fixed SL/TP mode — use AI's SL and TP levels, no trailing
-        result = check_fixed_sl_tp_from_candles(candles, direction, entry_price, initial_sl, tp_price)
-        # Map "tp" status to "trail" for compatibility with report builder
-        status, close_price, peak, sl_used = result
-        if status == "tp":
-            return ("tp", close_price, peak, sl_used)
-        return result
+    mode = (bank_settings or {}).get("mode", "stopai")
+
+    if mode == "stopai":
+        return check_fixed_sl_tp_from_candles(candles, direction, entry_price, initial_sl, tp_price)
+
+    elif mode == "trailing":
+        t = (bank_settings or {}).get("trailing", {})
+        return check_candle_trailing(
+            candles, direction, entry_price, atr_value,
+            initial_sl_atr=t.get("initial_sl_atr", 1.5),
+            trail_atr=t.get("trail_atr", 1.0),
+            anchor=t.get("anchor", "low-1"),
+            activation_candles=t.get("activation_candles", 3)
+        )
+
+    elif mode == "fixed":
+        f = (bank_settings or {}).get("fixed", {})
+        return check_fixed_atr_sl_tp(
+            candles, direction, entry_price, atr_value,
+            sl_atr=f.get("sl_atr", 1.5),
+            tp_atr=f.get("tp_atr", 3.0)
+        )
+
+    elif mode == "ema":
+        e = (bank_settings or {}).get("ema", {})
+        ema_tf = e.get("ema_tf", "15m")
+        ema_period = e.get("ema_period", 25)
+        ema_candles = await _fetch_ema_candles(session, symbol, ema_tf, ema_period + 10)
+        return check_ema_sl(
+            candles, ema_candles, direction, entry_price, atr_value,
+            initial_sl_atr=e.get("initial_sl_atr", 1.5),
+            ema_period=ema_period
+        )
+
     else:
-        # Trailing stop mode (default)
+        # Fallback: old trailing stop
         return check_trailing_stop_from_candles(candles, direction, entry_price, initial_sl, trail_pct)
 
 
 async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
                                  price_map: dict, direction_key: str = "ai_direction",
-                                 sl_key: str = "ai_sl") -> dict:
+                                 sl_key: str = "ai_sl",
+                                 bank_name: str = "signals") -> dict:
     """
-    For all entries in a breakout log, check trailing stop via 5m candles.
+    For all entries in a breakout log, check stop via 5m candles.
+    bank_name: 'signals' or 'bankml' — selects settings.
     Returns dict: symbol_tf → (status, close_price, peak_price, trailing_sl)
     """
     sem = asyncio.Semaphore(35)
     results = {}
-    sl_mode = load_sl_mode()
+    all_settings = load_sl_settings()
+    bank_settings = all_settings.get(bank_name, all_settings.get("signals", {}))
 
     async def check_one(entry):
         sym = entry["symbol"]
@@ -101,6 +147,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
         entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
         initial_sl = entry.get(sl_key)
         tp_price = entry.get("ai_tp")
+        atr_value = entry.get("atr_value")
         entry_time = entry.get("time", "")
 
         if not direction or direction == "SKIP" or entry_price <= 0 or not entry_time:
@@ -110,7 +157,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
         async with sem:
             status, close_price, peak, trail_sl = await _check_trailing_for_entry(
                 session, sym, direction, entry_price, initial_sl, entry_time,
-                tp_price=tp_price, sl_mode=sl_mode
+                tp_price=tp_price, atr_value=atr_value, bank_settings=bank_settings
             )
 
         if status == "open":
@@ -245,6 +292,14 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
                 day_losses += 1
                 icon = "🔴"
             status_tag = " 🔄TRAIL"
+        elif status == "ema":
+            if pnl_pct >= 0:
+                day_wins += 1
+                icon = "🟢"
+            else:
+                day_losses += 1
+                icon = "🔴"
+            status_tag = " 📈EMA"
         elif is_close:
             # Close view: everything closed at market
             if pnl_pct >= 0:
@@ -326,12 +381,13 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
 # ============================
 
 async def build_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
-    """Build AI signals bank with trailing stops — live view."""
+    """Build AI signals bank — live view."""
     log = load_breakout_log()
     bank = load_virtual_bank()
     price_map = await _fetch_all_prices(session)
     trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ai_direction", sl_key="ai_sl")
+                                                    direction_key="ai_direction", sl_key="ai_sl",
+                                                    bank_name="signals")
     return _build_bank_report(log, bank, trailing_results, price_map, lang,
                                "Виртуальный банк (AI)", direction_key="ai_direction",
                                sl_key="ai_sl", is_close=False)
@@ -344,7 +400,8 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     bank = load_virtual_bank()
     price_map = await _fetch_all_prices(session)
     trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ai_direction", sl_key="ai_sl")
+                                                    direction_key="ai_direction", sl_key="ai_sl",
+                                                    bank_name="signals")
     return _build_bank_report(log, bank, trailing_results, price_map, lang,
                                "Виртуальный банк (AI)", direction_key="ai_direction",
                                sl_key="ai_sl", is_close=True, bank_already_updated=bank_already_updated)
@@ -355,12 +412,13 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
 # ============================
 
 async def build_ml_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
-    """Build ML bank with trailing stops — live view."""
+    """Build ML bank — live view."""
     log = load_ml_breakout_log()
     bank = load_ml_virtual_bank()
     price_map = await _fetch_all_prices(session)
     trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ml_direction", sl_key="ml_sl")
+                                                    direction_key="ml_direction", sl_key="ml_sl",
+                                                    bank_name="bankml")
     return _build_bank_report(log, bank, trailing_results, price_map, lang,
                                "Виртуальный банк (ML)", direction_key="ml_direction",
                                sl_key="ml_sl", is_close=False)
@@ -373,7 +431,8 @@ async def build_ml_signals_close_text(session: aiohttp.ClientSession, lang: str 
     bank = load_ml_virtual_bank()
     price_map = await _fetch_all_prices(session)
     trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ml_direction", sl_key="ml_sl")
+                                                    direction_key="ml_direction", sl_key="ml_sl",
+                                                    bank_name="bankml")
     return _build_bank_report(log, bank, trailing_results, price_map, lang,
                                "Виртуальный банк (ML)", direction_key="ml_direction",
                                sl_key="ml_sl", is_close=True, bank_already_updated=bank_already_updated)

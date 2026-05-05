@@ -122,6 +122,233 @@ def calculate_ml_sl(indicators: dict, direction: str, entry_price: float) -> flo
         return 0
 
 
+def check_fixed_atr_sl_tp(candles: list, direction: str, entry_price: float,
+                          atr_value: float, sl_atr: float, tp_atr: float) -> tuple:
+    """
+    Fixed SL/TP based on ATR multipliers.
+    SL = entry ± (atr_value × sl_atr), TP = entry ± (atr_value × tp_atr)
+    Returns: (status, close_price, peak_price, sl_used)
+    """
+    if not candles or not direction or entry_price <= 0 or not atr_value or atr_value <= 0:
+        return ("open", entry_price, entry_price, 0)
+
+    sl_dist = atr_value * sl_atr
+    tp_dist = atr_value * tp_atr
+
+    if direction == "LONG":
+        sl = entry_price - sl_dist
+        tp = entry_price + tp_dist
+    elif direction == "SHORT":
+        sl = entry_price + sl_dist
+        tp = entry_price - tp_dist
+    else:
+        return ("open", entry_price, entry_price, 0)
+
+    return check_fixed_sl_tp_from_candles(candles, direction, entry_price, sl, tp)
+
+
+def check_candle_trailing(candles: list, direction: str, entry_price: float,
+                          atr_value: float, initial_sl_atr: float, trail_atr: float,
+                          anchor: str = "low-1", activation_candles: int = 3) -> tuple:
+    """
+    Candle-based trailing stop.
+
+    Phase 1 (first N candles): initial SL = entry ± (atr × initial_sl_atr)
+    Phase 2 (after N candles): move SL to candle high/low ± (atr × trail_atr)
+        anchor: high-1/low-1/high-2/low-2 — which closed candle level to track.
+
+    For LONG: SL under the candle low (or high) minus trail buffer.
+    For SHORT: SL above the candle high (or low) plus trail buffer.
+
+    Returns: (status, close_price, peak_price, final_sl)
+    """
+    if not candles or not direction or entry_price <= 0:
+        return ("open", entry_price, entry_price, 0)
+
+    if not atr_value or atr_value <= 0:
+        atr_value = entry_price * 0.03  # fallback 3%
+
+    trail_buffer = atr_value * trail_atr
+    init_sl_dist = atr_value * initial_sl_atr
+
+    # Parse anchor: "high-1" → field=high, offset=1
+    anchor_parts = anchor.split("-")
+    anchor_field = anchor_parts[0]  # "high" or "low"
+    anchor_offset = int(anchor_parts[1]) if len(anchor_parts) > 1 else 1  # 1 or 2
+
+    # Candle indices: [2]=high, [3]=low
+    field_idx = 2 if anchor_field == "high" else 3
+
+    if direction == "LONG":
+        initial_sl = entry_price - init_sl_dist
+        current_sl = initial_sl
+        peak = entry_price
+
+        # Store closed candle levels for lookback
+        closed_levels = []
+
+        for i, candle in enumerate(candles):
+            high = float(candle[2])
+            low = float(candle[3])
+
+            if high > peak:
+                peak = high
+
+            # Check SL hit
+            if low <= current_sl:
+                status = "sl" if i < activation_candles else "trail"
+                return (status, current_sl, peak, current_sl)
+
+            # Record this candle's level for next candle's reference
+            closed_levels.append(float(candle[field_idx]))
+
+            # After activation period, update trailing SL
+            if i >= activation_candles and len(closed_levels) >= anchor_offset + 1:
+                # -1 offset means last closed = closed_levels[-2] (current candle is [-1] but still open-ish)
+                ref_idx = -(anchor_offset + 1)
+                if abs(ref_idx) <= len(closed_levels):
+                    ref_level = closed_levels[ref_idx]
+                    new_sl = ref_level - trail_buffer
+                    if new_sl > current_sl:
+                        current_sl = new_sl
+
+        last_close = float(candles[-1][4])
+        return ("open", last_close, peak, current_sl)
+
+    elif direction == "SHORT":
+        initial_sl = entry_price + init_sl_dist
+        current_sl = initial_sl
+        trough = entry_price
+
+        closed_levels = []
+
+        for i, candle in enumerate(candles):
+            high = float(candle[2])
+            low = float(candle[3])
+
+            if low < trough:
+                trough = low
+
+            if high >= current_sl:
+                status = "sl" if i < activation_candles else "trail"
+                return (status, current_sl, trough, current_sl)
+
+            closed_levels.append(float(candle[field_idx]))
+
+            if i >= activation_candles and len(closed_levels) >= anchor_offset + 1:
+                ref_idx = -(anchor_offset + 1)
+                if abs(ref_idx) <= len(closed_levels):
+                    ref_level = closed_levels[ref_idx]
+                    new_sl = ref_level + trail_buffer
+                    if new_sl < current_sl:
+                        current_sl = new_sl
+
+        last_close = float(candles[-1][4])
+        return ("open", last_close, trough, current_sl)
+
+    return ("open", entry_price, entry_price, 0)
+
+
+def check_ema_sl(candles_5m: list, candles_ema_tf: list, direction: str,
+                 entry_price: float, atr_value: float, initial_sl_atr: float,
+                 ema_period: int = 25) -> tuple:
+    """
+    EMA-based stop-loss.
+
+    Phase 1: Initial SL = entry ± (atr × initial_sl_atr)
+    Phase 2: Check EMA on the ema_tf candles.
+        LONG close: if prev_candle_close < EMA AND prev_prev_candle_close >= EMA → trend broken
+        SHORT close: if prev_candle_close > EMA AND prev_prev_candle_close <= EMA → trend broken
+
+    Uses 5m candles for SL check, ema_tf candles for EMA signal.
+
+    Returns: (status, close_price, peak_price, sl_used)
+    """
+    if not candles_5m or not direction or entry_price <= 0:
+        return ("open", entry_price, entry_price, 0)
+
+    if not atr_value or atr_value <= 0:
+        atr_value = entry_price * 0.03
+
+    init_sl_dist = atr_value * initial_sl_atr
+
+    # Calculate EMA on the ema_tf candles
+    if not candles_ema_tf or len(candles_ema_tf) < ema_period + 3:
+        # Not enough data for EMA — fall back to initial SL only
+        if direction == "LONG":
+            sl = entry_price - init_sl_dist
+        else:
+            sl = entry_price + init_sl_dist
+        return check_fixed_sl_tp_from_candles(candles_5m, direction, entry_price, sl, 0)
+
+    # Compute EMA from close prices
+    closes = [float(c[4]) for c in candles_ema_tf]
+    ema_values = _compute_ema(closes, ema_period)
+
+    # Check last 3 ema_tf candles: current(-1), prev(-2), prev_prev(-3)
+    ema_signal_close = False
+    if len(ema_values) >= 3:
+        prev_close = closes[-2]
+        prev_prev_close = closes[-3]
+        prev_ema = ema_values[-2]
+        prev_prev_ema = ema_values[-3]
+
+        if direction == "LONG":
+            # Trend broken: prev candle went below EMA while prev_prev was above
+            if prev_close < prev_ema and prev_prev_close >= prev_prev_ema:
+                ema_signal_close = True
+        elif direction == "SHORT":
+            # Trend broken: prev candle went above EMA while prev_prev was below
+            if prev_close > prev_ema and prev_prev_close <= prev_prev_ema:
+                ema_signal_close = True
+
+    # Walk 5m candles for initial SL check
+    if direction == "LONG":
+        sl = entry_price - init_sl_dist
+        peak = entry_price
+        for candle in candles_5m:
+            high = float(candle[2])
+            low = float(candle[3])
+            if high > peak:
+                peak = high
+            if low <= sl:
+                return ("sl", sl, peak, sl)
+
+        last_close = float(candles_5m[-1][4])
+        if ema_signal_close:
+            return ("ema", last_close, peak, sl)
+        return ("open", last_close, peak, sl)
+
+    elif direction == "SHORT":
+        sl = entry_price + init_sl_dist
+        trough = entry_price
+        for candle in candles_5m:
+            high = float(candle[2])
+            low = float(candle[3])
+            if low < trough:
+                trough = low
+            if high >= sl:
+                return ("sl", sl, trough, sl)
+
+        last_close = float(candles_5m[-1][4])
+        if ema_signal_close:
+            return ("ema", last_close, trough, sl)
+        return ("open", last_close, trough, sl)
+
+    return ("open", entry_price, entry_price, 0)
+
+
+def _compute_ema(values: list, period: int) -> list:
+    """Compute EMA over a list of floats. Returns list same length as input."""
+    if not values or period <= 0:
+        return values
+    ema = [values[0]]
+    k = 2.0 / (period + 1)
+    for i in range(1, len(values)):
+        ema.append(values[i] * k + ema[-1] * (1 - k))
+    return ema
+
+
 def check_fixed_sl_tp_from_candles(candles: list, direction: str, entry_price: float,
                                     initial_sl: float, tp_price: float) -> tuple:
     """

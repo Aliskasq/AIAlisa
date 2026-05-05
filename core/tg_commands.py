@@ -868,32 +868,26 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, deny, msg_id)
             return
 
-        from config import load_sl_mode
-        current_mode = load_sl_mode()
-        if current_mode == "stopai":
-            mode_text = "🎯 *StopAI* — фиксированный SL/TP от ИИ"
-            stopai_label = "✅ StopAI (активен)"
-            trail_label = "🔄 Trail"
-        else:
-            mode_text = "🔄 *Trail* — трейлинг-стоп 3% от пика"
-            stopai_label = "🎯 StopAI"
-            trail_label = "✅ Trail (активен)"
+        from config import load_sl_settings
+        s = load_sl_settings()
+        sig_mode = s["signals"]["mode"]
+        ml_mode = s["bankml"]["mode"]
 
-        kb = {"inline_keyboard": [
-            [
-                {"text": stopai_label, "callback_data": "sl_mode_stopai"},
-                {"text": trail_label, "callback_data": "sl_mode_trail"},
-            ]
-        ]}
+        _mode_names = {"stopai": "🎯 StopAI", "trailing": "🔄 Trailing",
+                       "fixed": "📏 Fixed ATR", "ema": "📈 EMA SL"}
 
         msg_text = (
-            f"⚙️ *Режим стоп-лосса*\n\n"
-            f"Текущий: {mode_text}\n\n"
-            f"🎯 *StopAI* — бот закрывает сделку строго по SL и TP, которые дал ИИ. "
-            f"Без трейлинга. Позволяет прибыли дойти до цели.\n\n"
-            f"🔄 *Trail* — трейлинг-стоп: после безубытка стоп двигается за ценой "
-            f"на расстоянии 3%. Фиксирует прибыль раньше, но может срезать большие движения."
+            f"⚙️ *Настройки стоп-лосса*\n\n"
+            f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
+            f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n\n"
+            f"Выберите банк для настройки:"
         )
+        kb = {"inline_keyboard": [
+            [
+                {"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
+                {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"},
+            ]
+        ]}
         await send_response(app_session, chat_id, msg_text, msg_id,
                            reply_markup=kb, parse_mode="Markdown")
         return

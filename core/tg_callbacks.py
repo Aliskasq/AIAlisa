@@ -22,6 +22,203 @@ from agent.skills import (
 )
 
 
+# ============================
+# SLM MENU RENDERERS
+# ============================
+
+def _ck(val, current, label):
+    """Checkbox helper: ✅ if val == current, else plain label."""
+    return f"✅ {label}" if val == current else label
+
+
+async def _slm_edit(session, chat_id, msg_id, text, kb, cq_id, toast=""):
+    """Edit message + answer callback in one call."""
+    await session.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+        json={"chat_id": chat_id, "message_id": msg_id,
+              "text": text, "parse_mode": "Markdown", "reply_markup": kb},
+    )
+    await session.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+        json={"callback_query_id": cq_id, "text": toast or "✅"},
+    )
+
+
+def _slm_bank_prefix(bank_key):
+    return "slm_s" if bank_key == "signals" else "slm_m"
+
+
+def _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names):
+    """Render mode selection for a bank."""
+    p = _slm_bank_prefix(bank_key)
+    mode = bs["mode"]
+
+    modes = ["stopai", "trailing", "fixed", "ema"] if bank_key == "signals" else ["trailing", "fixed", "ema"]
+    rows = []
+    row = []
+    for m in modes:
+        label = _ck(m, mode, _mode_names[m])
+        row.append({"text": label, "callback_data": f"{p}_{m}"})
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([{"text": "⬅️ Назад", "callback_data": f"{p}_top"}])
+
+    # Summary
+    summary = _slm_mode_summary(bs)
+    text = f"⚙️ *{bank_label} — Режим стоп-лосса*\n\nТекущий: {_mode_names.get(mode, mode)}\n{summary}"
+    return text, {"inline_keyboard": rows}
+
+
+def _slm_mode_summary(bs):
+    """One-line summary of current mode settings."""
+    mode = bs["mode"]
+    if mode == "stopai":
+        return "SL/TP от ИИ"
+    elif mode == "trailing":
+        t = bs["trailing"]
+        anchor_names = {"high-1": "High-1", "low-1": "Low-1", "high-2": "High-2", "low-2": "Low-2"}
+        return (f"📐 {anchor_names.get(t['anchor'], t['anchor'])} | "
+                f"⏱ {t['activation_candles']} свечей | "
+                f"🛡 {t['initial_sl_atr']} ATR | "
+                f"🔄 {t['trail_atr']} ATR")
+    elif mode == "fixed":
+        f = bs["fixed"]
+        return f"🛡 SL: {f['sl_atr']} ATR | 🎯 TP: {f['tp_atr']} ATR"
+    elif mode == "ema":
+        e = bs["ema"]
+        return f"🛡 SL: {e['initial_sl_atr']} ATR | EMA{e['ema_period']} {e['ema_tf']}"
+    return ""
+
+
+def _slm_render_trailing(bank_key, bank_label, bs, _mode_names, _anchor_names):
+    """Render trailing stop config page with all options."""
+    p = _slm_bank_prefix(bank_key)
+    t = bs["trailing"]
+
+    text = (
+        f"🔄 *{bank_label} — Trailing Stop*\n\n"
+        f"📐 *Привязка:* {_anchor_names.get(t['anchor'], t['anchor'])}\n"
+        f"⏱ *Активация:* {t['activation_candles']} свечей 5м\n"
+        f"🛡 *Начальный SL:* {t['initial_sl_atr']} ATR\n"
+        f"🔄 *Трейлинг буфер:* {t['trail_atr']} ATR\n\n"
+        f"_Привязка = от какой закрытой 5м-свечи считаем стоп_"
+    )
+
+    anchor_map = {"high-1": "h1", "low-1": "l1", "high-2": "h2", "low-2": "l2"}
+    rows = [
+        # Anchor
+        [{"text": _ck("high-1", t["anchor"], "High -1"), "callback_data": f"{p}_t_h1"},
+         {"text": _ck("low-1", t["anchor"], "Low -1"), "callback_data": f"{p}_t_l1"},
+         {"text": _ck("high-2", t["anchor"], "High -2"), "callback_data": f"{p}_t_h2"},
+         {"text": _ck("low-2", t["anchor"], "Low -2"), "callback_data": f"{p}_t_l2"}],
+        # Activation candles label
+        [{"text": "── Активация (свечи 5м) ──", "callback_data": "noop"}],
+    ]
+    # Candles 3-10 in two rows
+    candle_row1 = []
+    candle_row2 = []
+    for c in range(3, 11):
+        btn = {"text": _ck(c, t["activation_candles"], str(c)), "callback_data": f"{p}_t_c{c}"}
+        if c <= 6:
+            candle_row1.append(btn)
+        else:
+            candle_row2.append(btn)
+    rows.append(candle_row1)
+    rows.append(candle_row2)
+
+    # Initial SL ATR
+    rows.append([{"text": "── Начальный SL (ATR) ──", "callback_data": "noop"}])
+    sl_row = []
+    for v in [10, 15, 20, 25, 30]:
+        val = v / 10.0
+        sl_row.append({"text": _ck(val, t["initial_sl_atr"], f"{val}"), "callback_data": f"{p}_t_is{v}"})
+    rows.append(sl_row)
+
+    # Trail buffer ATR
+    rows.append([{"text": "── Трейлинг буфер (ATR) ──", "callback_data": "noop"}])
+    tr_row = []
+    for v in [5, 10, 15, 20]:
+        val = v / 10.0
+        tr_row.append({"text": _ck(val, t["trail_atr"], f"{val}"), "callback_data": f"{p}_t_ts{v}"})
+    rows.append(tr_row)
+
+    rows.append([{"text": "⬅️ Назад", "callback_data": f"{p}_back"}])
+    return text, {"inline_keyboard": rows}
+
+
+def _slm_render_fixed(bank_key, bank_label, bs, _mode_names):
+    """Render fixed ATR SL/TP config page."""
+    p = _slm_bank_prefix(bank_key)
+    f = bs["fixed"]
+
+    text = (
+        f"📏 *{bank_label} — Fixed SL/TP*\n\n"
+        f"🛡 *Stop-Loss:* {f['sl_atr']} ATR\n"
+        f"🎯 *Take-Profit:* {f['tp_atr']} ATR\n\n"
+        f"_ATR14 от таймфрейма сигнала (4H/1D)_"
+    )
+
+    rows = [
+        [{"text": "── Stop-Loss (ATR) ──", "callback_data": "noop"}],
+    ]
+    sl_row = []
+    for v in [10, 15, 20, 25, 30]:
+        val = v / 10.0
+        sl_row.append({"text": _ck(val, f["sl_atr"], f"{val}"), "callback_data": f"{p}_f_s{v}"})
+    rows.append(sl_row)
+
+    rows.append([{"text": "── Take-Profit (ATR) ──", "callback_data": "noop"}])
+    tp_row = []
+    for v in [20, 30, 40, 50, 60]:
+        val = v / 10.0
+        tp_row.append({"text": _ck(val, f["tp_atr"], f"{val}"), "callback_data": f"{p}_f_t{v}"})
+    rows.append(tp_row)
+
+    rows.append([{"text": "⬅️ Назад", "callback_data": f"{p}_back"}])
+    return text, {"inline_keyboard": rows}
+
+
+def _slm_render_ema(bank_key, bank_label, bs, _mode_names):
+    """Render EMA SL config page."""
+    p = _slm_bank_prefix(bank_key)
+    e = bs["ema"]
+
+    text = (
+        f"📈 *{bank_label} — EMA Stop-Loss*\n\n"
+        f"🛡 *Начальный SL:* {e['initial_sl_atr']} ATR\n"
+        f"📊 *EMA период:* {e['ema_period']}\n"
+        f"⏱ *Таймфрейм:* {e['ema_tf']}\n\n"
+        f"_Закрытие по пересечению EMA. LONG: свеча ушла под EMA. SHORT: свеча ушла над EMA._"
+    )
+
+    rows = [
+        [{"text": "── Начальный SL (ATR) ──", "callback_data": "noop"}],
+    ]
+    sl_row = []
+    for v in [10, 15, 20, 25, 30]:
+        val = v / 10.0
+        sl_row.append({"text": _ck(val, e["initial_sl_atr"], f"{val}"), "callback_data": f"{p}_e_is{v}"})
+    rows.append(sl_row)
+
+    rows.append([{"text": "── EMA период ──", "callback_data": "noop"}])
+    rows.append([
+        {"text": _ck(25, e["ema_period"], "EMA 25"), "callback_data": f"{p}_e_p25"},
+        {"text": _ck(50, e["ema_period"], "EMA 50"), "callback_data": f"{p}_e_p50"},
+    ])
+
+    rows.append([{"text": "── Таймфрейм ──", "callback_data": "noop"}])
+    rows.append([
+        {"text": _ck("5m", e["ema_tf"], "5 мин"), "callback_data": f"{p}_e_tf5m"},
+        {"text": _ck("15m", e["ema_tf"], "15 мин"), "callback_data": f"{p}_e_tf15m"},
+    ])
+
+    rows.append([{"text": "⬅️ Назад", "callback_data": f"{p}_back"}])
+    return text, {"inline_keyboard": rows}
+
+
 async def handle_callback_query(app_session, update):
     """Handle all callback_query (inline button press) events.
 
@@ -38,9 +235,9 @@ async def handle_callback_query(app_session, update):
     cb_lang = _load_langs().get(str(chat_id), "ru") if chat_id else "ru"
 
     # ------------------------------------------------------------------ #
-    # 0. Stop-Loss Mode Toggle
+    # 0. Stop-Loss Settings (slm_ prefix)
     # ------------------------------------------------------------------ #
-    if cb_data.startswith("sl_mode_"):
+    if cb_data.startswith("slm_"):
         user_id = cq.get("from", {}).get("id", 0)
         if user_id != ADMIN_ID:
             await app_session.post(
@@ -49,54 +246,181 @@ async def handle_callback_query(app_session, update):
             )
             return
 
-        from config import load_sl_mode, save_sl_mode
-        new_mode = cb_data.replace("sl_mode_", "")
-        if new_mode not in ("stopai", "trail"):
+        from config import load_sl_settings, save_sl_settings
+        settings = load_sl_settings()
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        toast = ""
+
+        # Helper maps
+        _mode_names = {"stopai": "🎯 StopAI", "trailing": "🔄 Trailing",
+                       "fixed": "📏 Fixed ATR", "ema": "📈 EMA SL"}
+        _anchor_names = {"high-1": "High -1", "low-1": "Low -1",
+                         "high-2": "High -2", "low-2": "Low -2"}
+
+        # --- PARSE callback data ---
+        parts = cb_data.split("_")  # slm_s, slm_m, slm_s_stopai, slm_s_t_h1, etc.
+
+        # Determine bank
+        bank_key = None
+        bank_label = ""
+        if len(parts) >= 2:
+            if parts[1] == "s":
+                bank_key = "signals"
+                bank_label = "📊 Signals"
+            elif parts[1] == "m":
+                bank_key = "bankml"
+                bank_label = "🤖 BankML"
+
+        if not bank_key:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id},
+            )
             return
 
-        save_sl_mode(new_mode)
+        bs = settings[bank_key]
 
-        if new_mode == "stopai":
-            mode_text = "🎯 *StopAI* — фиксированный SL/TP от ИИ"
-            stopai_label = "✅ StopAI (активен)"
-            trail_label = "🔄 Trail"
-            toast = "✅ Режим: StopAI (фикс SL/TP)"
-        else:
-            mode_text = "🔄 *Trail* — трейлинг-стоп 3% от пика"
-            stopai_label = "🎯 StopAI"
-            trail_label = "✅ Trail (активен)"
-            toast = "✅ Режим: Trail (трейлинг-стоп)"
+        # --- TOP LEVEL: slm_s or slm_m → show mode selection ---
+        if len(parts) == 2:
+            text, kb = _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names)
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
 
-        kb = {"inline_keyboard": [
-            [
-                {"text": stopai_label, "callback_data": "sl_mode_stopai"},
-                {"text": trail_label, "callback_data": "sl_mode_trail"},
-            ]
-        ]}
+        # --- MODE SELECT: slm_s_stopai, slm_s_trailing, slm_s_fixed, slm_s_ema ---
+        action = parts[2] if len(parts) > 2 else ""
 
-        msg_text = (
-            f"⚙️ *Режим стоп-лосса*\n\n"
-            f"Текущий: {mode_text}\n\n"
-            f"🎯 *StopAI* — бот закрывает сделку строго по SL и TP, которые дал ИИ. "
-            f"Без трейлинга. Позволяет прибыли дойти до цели.\n\n"
-            f"🔄 *Trail* — трейлинг-стоп: после безубытка стоп двигается за ценой "
-            f"на расстоянии 3%. Фиксирует прибыль раньше, но может срезать большие движения."
-        )
+        if action in ("stopai", "trailing", "fixed", "ema"):
+            # For bankml, no stopai
+            if bank_key == "bankml" and action == "stopai":
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": "⛔️ StopAI только для Signals", "show_alert": True},
+                )
+                return
+            bs["mode"] = action
+            save_sl_settings(settings)
+            toast = f"✅ {bank_label}: {_mode_names[action]}"
 
-        # Update the message in-place
-        await app_session.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-            json={
-                "chat_id": chat_id,
-                "message_id": cq.get("message", {}).get("message_id"),
-                "text": msg_text,
-                "parse_mode": "Markdown",
-                "reply_markup": kb,
-            },
-        )
+            if action == "trailing":
+                text, kb = _slm_render_trailing(bank_key, bank_label, bs, _mode_names, _anchor_names)
+            elif action == "fixed":
+                text, kb = _slm_render_fixed(bank_key, bank_label, bs, _mode_names)
+            elif action == "ema":
+                text, kb = _slm_render_ema(bank_key, bank_label, bs, _mode_names)
+            else:
+                text, kb = _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names)
+
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
+            return
+
+        # --- BACK: slm_s_back → back to bank menu ---
+        if action == "back":
+            text, kb = _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names)
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # --- BACK TO TOP: slm_s_top ---
+        if action == "top":
+            sig_mode = settings["signals"]["mode"]
+            ml_mode = settings["bankml"]["mode"]
+            text = (
+                f"⚙️ *Настройки стоп-лосса*\n\n"
+                f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
+                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n\n"
+                f"Выберите банк для настройки:"
+            )
+            kb = {"inline_keyboard": [
+                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
+                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}]
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # --- TRAILING SUB-SETTINGS: slm_s_t_XX ---
+        if action == "t" and len(parts) > 3:
+            sub = parts[3]
+            t = bs["trailing"]
+
+            # Anchor: h1, l1, h2, l2
+            if sub in ("h1", "l1", "h2", "l2"):
+                anchor_map = {"h1": "high-1", "l1": "low-1", "h2": "high-2", "l2": "low-2"}
+                t["anchor"] = anchor_map[sub]
+                toast = f"Привязка: {_anchor_names[t['anchor']]}"
+
+            # Activation candles: c3..c10
+            elif sub.startswith("c") and sub[1:].isdigit():
+                t["activation_candles"] = int(sub[1:])
+                toast = f"Активация: {t['activation_candles']} свечей"
+
+            # Initial SL ATR: is10 = 1.0, is15 = 1.5, is20 = 2.0, etc.
+            elif sub.startswith("is"):
+                val = int(sub[2:]) / 10.0
+                t["initial_sl_atr"] = val
+                toast = f"Начальный SL: {val} ATR"
+
+            # Trail ATR: ts05 = 0.5, ts10 = 1.0, etc.
+            elif sub.startswith("ts"):
+                val = int(sub[2:]) / 10.0
+                t["trail_atr"] = val
+                toast = f"Трейлинг: {val} ATR"
+
+            save_sl_settings(settings)
+            text, kb = _slm_render_trailing(bank_key, bank_label, bs, _mode_names, _anchor_names)
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
+            return
+
+        # --- FIXED SUB-SETTINGS: slm_s_f_XX ---
+        if action == "f" and len(parts) > 3:
+            sub = parts[3]
+            f = bs["fixed"]
+
+            # SL ATR: s10 = 1.0, s15 = 1.5, etc.
+            if sub.startswith("s") and sub[1:].isdigit():
+                val = int(sub[1:]) / 10.0
+                f["sl_atr"] = val
+                toast = f"SL: {val} ATR"
+
+            # TP ATR: t20 = 2.0, t30 = 3.0, etc.
+            elif sub.startswith("t") and sub[1:].isdigit():
+                val = int(sub[1:]) / 10.0
+                f["tp_atr"] = val
+                toast = f"TP: {val} ATR"
+
+            save_sl_settings(settings)
+            text, kb = _slm_render_fixed(bank_key, bank_label, bs, _mode_names)
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
+            return
+
+        # --- EMA SUB-SETTINGS: slm_s_e_XX ---
+        if action == "e" and len(parts) > 3:
+            sub = parts[3]
+            e = bs["ema"]
+
+            # Initial SL ATR
+            if sub.startswith("is"):
+                val = int(sub[2:]) / 10.0
+                e["initial_sl_atr"] = val
+                toast = f"Начальный SL: {val} ATR"
+
+            # EMA period: p25, p50
+            elif sub.startswith("p") and sub[1:].isdigit():
+                e["ema_period"] = int(sub[1:])
+                toast = f"EMA период: {e['ema_period']}"
+
+            # EMA timeframe: tf5m, tf15m
+            elif sub.startswith("tf"):
+                e["ema_tf"] = sub[2:]
+                toast = f"EMA таймфрейм: {e['ema_tf']}"
+
+            save_sl_settings(settings)
+            text, kb = _slm_render_ema(bank_key, bank_label, bs, _mode_names)
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
+            return
+
+        # Fallback: just ack
         await app_session.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-            json={"callback_query_id": cq_id, "text": toast},
+            json={"callback_query_id": cq_id},
         )
         return
 

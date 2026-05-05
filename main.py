@@ -606,7 +606,8 @@ async def main():
                                 _ml_dir = _ml_result.get("direction", "")
                                 if _ml_dir in ("LONG", "SHORT"):
                                     _ml_sl = calculate_ml_sl(last_indic_row, _ml_dir, item["current_price"])
-                                    add_ml_breakout_entry(sym, tf, item["current_price"], _ml_dir, _ml_sl)
+                                    add_ml_breakout_entry(sym, tf, item["current_price"], _ml_dir, _ml_sl,
+                                                         atr_value=last_indic_row.get("atr14_value"))
                                     logging.info(f"🧠 ML bank entry: {sym} {_ml_dir} @ {item['current_price']} SL={_ml_sl}")
                             except Exception as _ml_e:
                                 logging.error(f"❌ ML bank entry error for {sym}: {_ml_e}")
@@ -661,7 +662,8 @@ async def main():
                                                ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
                                                ai_leverage=FIXED_LEVERAGE,       # ALWAYS 1x
                                                ai_deposit_pct=FIXED_DEPOSIT_PCT, # ALWAYS 2%
-                                               is_pump_filter=_is_pump_filter)
+                                               is_pump_filter=_is_pump_filter,
+                                               atr_value=last_indic_row.get("atr14_value"))
                             logging.info(f"🟢 SIGNAL: {sym} {_ai_dir} (conf {_confidence:.0f}%)")
                             alerts_to_remove.append(item["alert"])
                         else:
@@ -892,7 +894,8 @@ async def main():
                                     _ml_dir_v = _ml_result_vol.get("direction", "")
                                     if _ml_dir_v in ("LONG", "SHORT"):
                                         _ml_sl_v = calculate_ml_sl(last_indic_row, _ml_dir_v, current_price)
-                                        add_ml_breakout_entry(sym, tf, current_price, _ml_dir_v, _ml_sl_v)
+                                        add_ml_breakout_entry(sym, tf, current_price, _ml_dir_v, _ml_sl_v,
+                                                             atr_value=last_indic_row.get("atr14_value"))
                                         logging.info(f"🧠 ML bank (VOL): {sym} {_ml_dir_v} @ {current_price}")
                                 except Exception:
                                     pass
@@ -926,7 +929,8 @@ async def main():
                                                    ai_tp=_ai_params.get("ai_tp") if _ai_params else None,
                                                    ai_leverage=FIXED_LEVERAGE,
                                                    ai_deposit_pct=FIXED_DEPOSIT_PCT,
-                                                   is_pump_filter=_is_pump_filter)
+                                                   is_pump_filter=_is_pump_filter,
+                                                   atr_value=last_indic_row.get("atr14_value"))
 
                             # Remove alert if it was stored (by symbol+tf key for reliability)
                             _vw_alert = vw_item.get("alert")

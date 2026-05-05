@@ -26,7 +26,8 @@ async def _daily_ml_close(session: aiohttp.ClientSession):
         price_map = await _fetch_all_prices(session)
         bank = load_ml_virtual_bank()
         trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                        direction_key="ml_direction", sl_key="ml_sl")
+                                                        direction_key="ml_direction", sl_key="ml_sl",
+                                                        bank_name="bankml")
 
         trades_pnl = calc_trailing_pnl_for_daily(log, trailing_results, price_map, bank,
                                                    direction_key="ml_direction")
@@ -78,7 +79,8 @@ async def auto_trend_sender(session: aiohttp.ClientSession):
             price_map = await _fetch_all_prices(session)
             bank = load_virtual_bank()
             trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                            direction_key="ai_direction", sl_key="ai_sl")
+                                                            direction_key="ai_direction", sl_key="ai_sl",
+                                                            bank_name="signals")
 
             trades_pnl = calc_trailing_pnl_for_daily(log, trailing_results, price_map, bank,
                                                        direction_key="ai_direction")
