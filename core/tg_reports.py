@@ -7,8 +7,9 @@ import aiohttp
 import logging
 from datetime import datetime, timezone, timedelta
 from config import (load_breakout_log, load_virtual_bank, VIRTUAL_BANK_POSITION_SIZE,
-                     load_ml_breakout_log, load_ml_virtual_bank, TRAILING_STOP_PCT)
-from core.signal_pipeline import check_trailing_stop_from_candles
+                     load_ml_breakout_log, load_ml_virtual_bank, TRAILING_STOP_PCT,
+                     load_sl_mode)
+from core.signal_pipeline import check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles
 
 
 async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
@@ -31,14 +32,22 @@ async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
 async def _check_trailing_for_entry(session: aiohttp.ClientSession, symbol: str,
                                      direction: str, entry_price: float,
                                      initial_sl: float, entry_time_iso: str,
-                                     trail_pct: float = None) -> tuple:
+                                     trail_pct: float = None,
+                                     tp_price: float = None,
+                                     sl_mode: str = None) -> tuple:
     """
-    Fetch 5m candles and check trailing stop for a single entry.
+    Fetch 5m candles and check stop for a single entry.
+    
+    sl_mode='trail' → trailing stop (default)
+    sl_mode='stopai' → fixed AI SL/TP only
+    
     Returns: (status, close_price, peak_price, trailing_sl)
-    status: 'sl', 'trail', or 'open'
+    status: 'sl', 'trail'/'tp', or 'open'
     """
     if trail_pct is None:
         trail_pct = TRAILING_STOP_PCT
+    if sl_mode is None:
+        sl_mode = load_sl_mode()
 
     if not direction or direction == "SKIP" or entry_price <= 0 or not entry_time_iso:
         return ("open", 0, entry_price, initial_sl)
@@ -60,7 +69,17 @@ async def _check_trailing_for_entry(session: aiohttp.ClientSession, symbol: str,
     if not candles:
         return ("open", 0, entry_price, initial_sl)
 
-    return check_trailing_stop_from_candles(candles, direction, entry_price, initial_sl, trail_pct)
+    if sl_mode == "stopai":
+        # Fixed SL/TP mode — use AI's SL and TP levels, no trailing
+        result = check_fixed_sl_tp_from_candles(candles, direction, entry_price, initial_sl, tp_price)
+        # Map "tp" status to "trail" for compatibility with report builder
+        status, close_price, peak, sl_used = result
+        if status == "tp":
+            return ("tp", close_price, peak, sl_used)
+        return result
+    else:
+        # Trailing stop mode (default)
+        return check_trailing_stop_from_candles(candles, direction, entry_price, initial_sl, trail_pct)
 
 
 async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
@@ -72,6 +91,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
     """
     sem = asyncio.Semaphore(35)
     results = {}
+    sl_mode = load_sl_mode()
 
     async def check_one(entry):
         sym = entry["symbol"]
@@ -80,6 +100,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
         direction = entry.get(direction_key, "")
         entry_price = entry.get("ai_entry") or entry.get("current_price", 0) or entry.get("breakout_price", 0)
         initial_sl = entry.get(sl_key)
+        tp_price = entry.get("ai_tp")
         entry_time = entry.get("time", "")
 
         if not direction or direction == "SKIP" or entry_price <= 0 or not entry_time:
@@ -88,7 +109,8 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
 
         async with sem:
             status, close_price, peak, trail_sl = await _check_trailing_for_entry(
-                session, sym, direction, entry_price, initial_sl, entry_time
+                session, sym, direction, entry_price, initial_sl, entry_time,
+                tp_price=tp_price, sl_mode=sl_mode
             )
 
         if status == "open":
@@ -211,6 +233,10 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             day_losses += 1
             icon = "🔴"
             status_tag = " 🚫SL"
+        elif status == "tp":
+            day_wins += 1
+            icon = "🟢"
+            status_tag = " ✅TP"
         elif status == "trail":
             if pnl_pct >= 0:
                 day_wins += 1

@@ -298,6 +298,7 @@ async def handle_message(app_session, update):
                 "🏆 `/signals` — signal winrate & bank\n"
                 "🔒 `/signals close` — snapshot: close all open now\n"
                 "🔄 `/signals clear` — reset bank to $10k\n"
+                "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
                 "🧠 `/bankml` — ML bank & trades\n"
                 "🔒 `/bankml close` — close all ML positions now\n"
                 "🔄 `/bankml clear` — reset ML bank to $10k\n"
@@ -856,6 +857,45 @@ async def handle_message(app_session, update):
         else:
             hint = "📚 Usage: `/learn BTC` — explains all indicators for any coin" if lang_pref == "en" else "📚 Использование: `/learn BTC` — объяснит все индикаторы"
             await send_response(app_session, chat_id, hint, msg_id, parse_mode="Markdown")
+        return
+
+    # ==========================================
+    # STOPLOSS MODE (/stoploss)
+    # ==========================================
+    if text.startswith("/stoploss"):
+        if not is_admin(msg):
+            deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
+            await send_response(app_session, chat_id, deny, msg_id)
+            return
+
+        from config import load_sl_mode
+        current_mode = load_sl_mode()
+        if current_mode == "stopai":
+            mode_text = "🎯 *StopAI* — фиксированный SL/TP от ИИ"
+            stopai_label = "✅ StopAI (активен)"
+            trail_label = "🔄 Trail"
+        else:
+            mode_text = "🔄 *Trail* — трейлинг-стоп 3% от пика"
+            stopai_label = "🎯 StopAI"
+            trail_label = "✅ Trail (активен)"
+
+        kb = {"inline_keyboard": [
+            [
+                {"text": stopai_label, "callback_data": "sl_mode_stopai"},
+                {"text": trail_label, "callback_data": "sl_mode_trail"},
+            ]
+        ]}
+
+        msg_text = (
+            f"⚙️ *Режим стоп-лосса*\n\n"
+            f"Текущий: {mode_text}\n\n"
+            f"🎯 *StopAI* — бот закрывает сделку строго по SL и TP, которые дал ИИ. "
+            f"Без трейлинга. Позволяет прибыли дойти до цели.\n\n"
+            f"🔄 *Trail* — трейлинг-стоп: после безубытка стоп двигается за ценой "
+            f"на расстоянии 3%. Фиксирует прибыль раньше, но может срезать большие движения."
+        )
+        await send_response(app_session, chat_id, msg_text, msg_id,
+                           reply_markup=kb, parse_mode="Markdown")
         return
 
     # ==========================================

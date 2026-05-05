@@ -122,6 +122,64 @@ def calculate_ml_sl(indicators: dict, direction: str, entry_price: float) -> flo
         return 0
 
 
+def check_fixed_sl_tp_from_candles(candles: list, direction: str, entry_price: float,
+                                    initial_sl: float, tp_price: float) -> tuple:
+    """
+    Walk 5m candles and check FIXED SL and TP levels (no trailing).
+    
+    - If price hits SL → loss
+    - If price hits TP → win  
+    - If neither hit → still open at last close
+    
+    Returns: (status, close_price, peak_price, sl_used)
+        status: "sl" (SL hit), "tp" (TP hit), "open" (still open)
+    """
+    if not candles or not direction or entry_price <= 0:
+        return ("open", entry_price, entry_price, initial_sl)
+    
+    if direction == "LONG":
+        peak = entry_price
+        for candle in candles:
+            high = float(candle[2])
+            low = float(candle[3])
+            
+            if high > peak:
+                peak = high
+            
+            # Check SL first (worst case)
+            if initial_sl and initial_sl > 0 and low <= initial_sl:
+                return ("sl", initial_sl, peak, initial_sl)
+            
+            # Check TP
+            if tp_price and tp_price > 0 and high >= tp_price:
+                return ("tp", tp_price, peak, initial_sl)
+        
+        last_close = float(candles[-1][4])
+        return ("open", last_close, peak, initial_sl)
+    
+    elif direction == "SHORT":
+        trough = entry_price
+        for candle in candles:
+            high = float(candle[2])
+            low = float(candle[3])
+            
+            if low < trough:
+                trough = low
+            
+            # Check SL first
+            if initial_sl and initial_sl > 0 and high >= initial_sl:
+                return ("sl", initial_sl, trough, initial_sl)
+            
+            # Check TP
+            if tp_price and tp_price > 0 and low <= tp_price:
+                return ("tp", tp_price, trough, initial_sl)
+        
+        last_close = float(candles[-1][4])
+        return ("open", last_close, trough, initial_sl)
+    
+    return ("open", entry_price, entry_price, initial_sl)
+
+
 def check_trailing_stop_from_candles(candles: list, direction: str, entry_price: float,
                                       initial_sl: float, trail_pct: float = 3.0) -> tuple:
     """

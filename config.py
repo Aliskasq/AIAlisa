@@ -45,6 +45,27 @@ KEY_ACCOUNT_LABELS = {
 
 # AI provider settings persistence
 AI_SETTINGS_FILE = "data/ai_settings.json"
+SL_MODE_FILE = "data/sl_mode.json"
+
+def load_sl_mode() -> str:
+    """Load stop-loss mode: 'trail' (trailing stop) or 'stopai' (fixed AI SL/TP)."""
+    try:
+        if os.path.exists(SL_MODE_FILE):
+            with open(SL_MODE_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("mode", "trail")
+    except Exception:
+        pass
+    return "trail"
+
+def save_sl_mode(mode: str):
+    """Save stop-loss mode to disk."""
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(SL_MODE_FILE, "w") as f:
+            json.dump({"mode": mode}, f)
+    except Exception as e:
+        logging.error(f"Error writing SL mode: {e}")
 
 def load_ai_settings():
     """Load persisted AI provider/model/key settings."""

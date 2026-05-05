@@ -38,6 +38,69 @@ async def handle_callback_query(app_session, update):
     cb_lang = _load_langs().get(str(chat_id), "ru") if chat_id else "ru"
 
     # ------------------------------------------------------------------ #
+    # 0. Stop-Loss Mode Toggle
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("sl_mode_"):
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True},
+            )
+            return
+
+        from config import load_sl_mode, save_sl_mode
+        new_mode = cb_data.replace("sl_mode_", "")
+        if new_mode not in ("stopai", "trail"):
+            return
+
+        save_sl_mode(new_mode)
+
+        if new_mode == "stopai":
+            mode_text = "🎯 *StopAI* — фиксированный SL/TP от ИИ"
+            stopai_label = "✅ StopAI (активен)"
+            trail_label = "🔄 Trail"
+            toast = "✅ Режим: StopAI (фикс SL/TP)"
+        else:
+            mode_text = "🔄 *Trail* — трейлинг-стоп 3% от пика"
+            stopai_label = "🎯 StopAI"
+            trail_label = "✅ Trail (активен)"
+            toast = "✅ Режим: Trail (трейлинг-стоп)"
+
+        kb = {"inline_keyboard": [
+            [
+                {"text": stopai_label, "callback_data": "sl_mode_stopai"},
+                {"text": trail_label, "callback_data": "sl_mode_trail"},
+            ]
+        ]}
+
+        msg_text = (
+            f"⚙️ *Режим стоп-лосса*\n\n"
+            f"Текущий: {mode_text}\n\n"
+            f"🎯 *StopAI* — бот закрывает сделку строго по SL и TP, которые дал ИИ. "
+            f"Без трейлинга. Позволяет прибыли дойти до цели.\n\n"
+            f"🔄 *Trail* — трейлинг-стоп: после безубытка стоп двигается за ценой "
+            f"на расстоянии 3%. Фиксирует прибыль раньше, но может срезать большие движения."
+        )
+
+        # Update the message in-place
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+            json={
+                "chat_id": chat_id,
+                "message_id": cq.get("message", {}).get("message_id"),
+                "text": msg_text,
+                "parse_mode": "Markdown",
+                "reply_markup": kb,
+            },
+        )
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id, "text": toast},
+        )
+        return
+
+    # ------------------------------------------------------------------ #
     # 1. Square Integration (Admin check)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("sq_"):
