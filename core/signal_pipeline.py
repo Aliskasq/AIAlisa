@@ -122,6 +122,56 @@ def calculate_ml_sl(indicators: dict, direction: str, entry_price: float) -> flo
         return 0
 
 
+async def check_btc_shield(session, ema_period: int = 25) -> dict:
+    """
+    Check BTC EMA25 on 15m — is the last closed candle fully below/above EMA?
+
+    Returns: {
+        "bearish": bool,   # candle fully below EMA → close losing LONGs
+        "bullish": bool,   # candle fully above EMA → close losing SHORTs
+        "btc_price": float,
+        "ema_value": float,
+        "candle_high": float,
+        "candle_low": float,
+    }
+    """
+    try:
+        url = (f"https://fapi.binance.com/fapi/v1/klines"
+               f"?symbol=BTCUSDT&interval=15m&limit={ema_period + 5}")
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                return {"bearish": False, "bullish": False}
+            candles = await resp.json()
+            if not candles or len(candles) < ema_period + 2:
+                return {"bearish": False, "bullish": False}
+
+        closes = [float(c[4]) for c in candles]
+        ema_values = _compute_ema(closes, ema_period)
+
+        # Last CLOSED candle = candles[-2] (candles[-1] is still open)
+        last_closed_high = float(candles[-2][2])
+        last_closed_low = float(candles[-2][3])
+        last_closed_close = float(candles[-2][4])
+        last_ema = ema_values[-2]
+
+        # "Fully below EMA" = candle high < EMA → bearish
+        is_bearish = last_closed_high < last_ema
+        # "Fully above EMA" = candle low > EMA → bullish
+        is_bullish = last_closed_low > last_ema
+
+        return {
+            "bearish": is_bearish,
+            "bullish": is_bullish,
+            "btc_price": last_closed_close,
+            "ema_value": round(last_ema, 2),
+            "candle_high": last_closed_high,
+            "candle_low": last_closed_low,
+        }
+    except Exception as e:
+        logging.error(f"❌ check_btc_shield: {e}")
+        return {"bearish": False, "bullish": False}
+
+
 def check_fixed_atr_sl_tp(candles: list, direction: str, entry_price: float,
                           atr_value: float, sl_atr: float, tp_atr: float) -> tuple:
     """

@@ -271,6 +271,33 @@ async def handle_callback_query(app_session, update):
                 bank_key = "bankml"
                 bank_label = "🤖 BankML"
 
+        # --- BTC SHIELD TOGGLE: slm_btc ---
+        if len(parts) >= 2 and parts[1] == "btc":
+            _shield_names = {"off": "ВЫКЛ", "soft": "Soft"}
+            current = settings.get("btc_shield", "off")
+            # Toggle: off → soft → off
+            new_val = "soft" if current == "off" else "off"
+            settings["btc_shield"] = new_val
+            save_sl_settings(settings)
+            toast = f"🅱️ BTC Shield: {_shield_names[new_val]}"
+
+            sig_mode = settings["signals"]["mode"]
+            ml_mode = settings["bankml"]["mode"]
+            text = (
+                f"⚙️ *Настройки стоп-лосса*\n\n"
+                f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
+                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
+                f"🅱️ *BTC Shield:* {_shield_names[new_val]}\n\n"
+                f"Выберите банк для настройки:"
+            )
+            kb = {"inline_keyboard": [
+                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
+                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}],
+                [{"text": f"🅱️ BTC Shield: {_shield_names[new_val]}", "callback_data": "slm_btc"}]
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
+            return
+
         if not bank_key:
             await app_session.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
@@ -323,15 +350,19 @@ async def handle_callback_query(app_session, update):
         if action == "top":
             sig_mode = settings["signals"]["mode"]
             ml_mode = settings["bankml"]["mode"]
+            btc_shield = settings.get("btc_shield", "off")
+            _shield_names = {"off": "ВЫКЛ", "soft": "Soft"}
             text = (
                 f"⚙️ *Настройки стоп-лосса*\n\n"
                 f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
-                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n\n"
+                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
+                f"🅱️ *BTC Shield:* {_shield_names.get(btc_shield, btc_shield)}\n\n"
                 f"Выберите банк для настройки:"
             )
             kb = {"inline_keyboard": [
                 [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
-                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}]
+                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}],
+                [{"text": f"🅱️ BTC Shield: {_shield_names.get(btc_shield, btc_shield)}", "callback_data": "slm_btc"}]
             ]}
             await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
             return

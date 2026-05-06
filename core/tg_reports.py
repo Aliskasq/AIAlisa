@@ -10,7 +10,8 @@ from config import (load_breakout_log, load_virtual_bank, VIRTUAL_BANK_POSITION_
                      load_ml_breakout_log, load_ml_virtual_bank, TRAILING_STOP_PCT,
                      load_sl_settings)
 from core.signal_pipeline import (check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles,
-                                   check_fixed_atr_sl_tp, check_candle_trailing, check_ema_sl)
+                                   check_fixed_atr_sl_tp, check_candle_trailing, check_ema_sl,
+                                   check_btc_shield)
 
 
 async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
@@ -139,6 +140,19 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
     all_settings = load_sl_settings()
     bank_settings = all_settings.get(bank_name, all_settings.get("signals", {}))
 
+    # BTC Shield check (once for all entries)
+    btc_shield_mode = all_settings.get("btc_shield", "off")
+    btc_bearish = False
+    btc_bullish = False
+    if btc_shield_mode == "soft":
+        btc_data = await check_btc_shield(session, ema_period=25)
+        btc_bearish = btc_data.get("bearish", False)
+        btc_bullish = btc_data.get("bullish", False)
+        if btc_bearish:
+            logging.info(f"🅱️ BTC Shield BEARISH: 15m candle high {btc_data.get('candle_high')} < EMA25 {btc_data.get('ema_value')}")
+        if btc_bullish:
+            logging.info(f"🅱️ BTC Shield BULLISH: 15m candle low {btc_data.get('candle_low')} > EMA25 {btc_data.get('ema_value')}")
+
     async def check_one(entry):
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
@@ -162,6 +176,21 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
 
         if status == "open":
             close_price = price_map.get(sym, entry_price)
+
+            # BTC Shield: close losing LONG positions when BTC 15m candle fully below EMA
+            if btc_bearish and direction == "LONG":
+                pnl_pct = ((close_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+                if pnl_pct < -1.0:
+                    results[key] = ("btc", close_price, peak, trail_sl)
+                    return
+
+            # BTC Shield: close losing SHORT positions when BTC 15m candle fully above EMA
+            if btc_bullish and direction == "SHORT":
+                pnl_pct = ((entry_price - close_price) / entry_price) * 100 if entry_price > 0 else 0
+                if pnl_pct < -1.0:
+                    results[key] = ("btc", close_price, peak, trail_sl)
+                    return
+
         results[key] = (status, close_price, peak, trail_sl)
 
     await asyncio.gather(*(check_one(e) for e in log))
@@ -300,6 +329,10 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
                 day_losses += 1
                 icon = "🔴"
             status_tag = " 📈EMA"
+        elif status == "btc":
+            day_losses += 1
+            icon = "🔴"
+            status_tag = " 🅱️"
         elif is_close:
             # Close view: everything closed at market
             if pnl_pct >= 0:
@@ -349,13 +382,17 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
     else:
         title_line = ""
 
+    # Count BTC shield closures
+    btc_count = sum(1 for key, (st, *_) in trailing_results.items() if st == "btc")
+    btc_line = f"\n🅱️ BTC Shield: {btc_count} закрыто" if btc_count > 0 else ""
+
     header = (
         f"{title_line}"
         f"🏦 *{bank_title}*\n"
         f"💰 Старт: `${bank['starting_balance']:,.2f}` | Текущий: `${projected_balance:,.2f}`\n"
         f"📊 Общий P&L: `{'+' if total_pnl_dollar >= 0 else ''}{total_pnl_dollar:,.2f}$` (`{total_pnl_pct:+.2f}%`)\n\n"
         f"📅 *Сегодня ({day_total} сигналов):*\n"
-        f"✅ {day_wins} | ❌ {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}\n"
+        f"✅ {day_wins} | ❌ {day_losses} | WR: {day_wr:.0f}%{pending_text}{skip_text}{btc_line}\n"
         f"💵 Дневной P&L: `{'+' if day_pnl_dollar >= 0 else ''}{day_pnl_dollar:.2f}$`\n\n"
         f"📈 *Всего:*\n"
         f"✅ {total_w} ({wr_all:.0f}%) | ❌ {total_l} ({100-wr_all:.0f}%) | 🔢 {total_t} сделок\n"

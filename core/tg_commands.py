@@ -872,20 +872,26 @@ async def handle_message(app_session, update):
         s = load_sl_settings()
         sig_mode = s["signals"]["mode"]
         ml_mode = s["bankml"]["mode"]
+        btc_shield = s.get("btc_shield", "off")
 
         _mode_names = {"stopai": "🎯 StopAI", "trailing": "🔄 Trailing",
                        "fixed": "📏 Fixed ATR", "ema": "📈 EMA SL"}
+        _shield_names = {"off": "ВЫКЛ", "soft": "Soft"}
 
         msg_text = (
             f"⚙️ *Настройки стоп-лосса*\n\n"
             f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
-            f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n\n"
+            f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
+            f"🅱️ *BTC Shield:* {_shield_names.get(btc_shield, btc_shield)}\n\n"
             f"Выберите банк для настройки:"
         )
         kb = {"inline_keyboard": [
             [
                 {"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"},
+            ],
+            [
+                {"text": f"🅱️ BTC Shield: {_shield_names.get(btc_shield, btc_shield)}", "callback_data": "slm_btc"},
             ]
         ]}
         await send_response(app_session, chat_id, msg_text, msg_id,

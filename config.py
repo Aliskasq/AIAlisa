@@ -48,6 +48,7 @@ AI_SETTINGS_FILE = "data/ai_settings.json"
 SL_SETTINGS_FILE = "data/sl_settings.json"
 
 _DEFAULT_SL_SETTINGS = {
+    "btc_shield": "off",  # off | soft
     "signals": {
         "mode": "stopai",  # stopai | trailing | fixed | ema
         "trailing": {
@@ -94,6 +95,8 @@ def load_sl_settings() -> dict:
         if os.path.exists(SL_SETTINGS_FILE):
             with open(SL_SETTINGS_FILE, "r") as f:
                 saved = json.load(f)
+                if "btc_shield" in saved:
+                    defaults["btc_shield"] = saved["btc_shield"]
                 for bank in ("signals", "bankml"):
                     if bank in saved:
                         defaults[bank]["mode"] = saved[bank].get("mode", defaults[bank]["mode"])
