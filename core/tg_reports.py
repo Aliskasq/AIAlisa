@@ -153,7 +153,12 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
         if btc_bullish:
             logging.info(f"🅱️ BTC Shield BULLISH: 15m candle low {btc_data.get('candle_low')} > EMA25 {btc_data.get('ema_value')}")
 
+    import time as _time
+    _t0 = _time.monotonic()
+    _api_count = 0
+
     async def check_one(entry):
+        nonlocal _api_count
         sym = entry["symbol"]
         tf = entry.get("tf", "?")
         key = f"{sym}_{tf}"
@@ -168,6 +173,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
             results[key] = ("open", price_map.get(sym, entry_price), entry_price, 0)
             return
 
+        _api_count += 1
         async with sem:
             status, close_price, peak, trail_sl = await _check_trailing_for_entry(
                 session, sym, direction, entry_price, initial_sl, entry_time,
@@ -194,6 +200,9 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
         results[key] = (status, close_price, peak, trail_sl)
 
     await asyncio.gather(*(check_one(e) for e in log))
+    _elapsed = _time.monotonic() - _t0
+    _skipped = len(log) - _api_count
+    logging.info(f"📊 _batch_check_trailing [{bank_name}]: {len(log)} entries, {_api_count} API calls, {_skipped} skipped, {_elapsed:.2f}s")
     return results
 
 
