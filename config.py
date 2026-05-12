@@ -12,6 +12,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GROUP_CHAT_ID = os.getenv("TELEGRAM_GROUP_CHAT_ID")
+BOTTOM_GROUP_CHAT_ID = os.getenv("TELEGRAM_BOTTOM_GROUP_CHAT_ID")  # Second group: bottom-only signals
 
 # AI Service configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")

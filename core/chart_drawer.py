@@ -9,7 +9,7 @@ import aiohttp
 import pandas as pd
 import logging
 import uuid
-from config import BOT_TOKEN, GROUP_CHAT_ID
+from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID
 
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
@@ -289,6 +289,85 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             except Exception as e:
                 logging.error(f"❌ Error sending overflow (Attempt {attempt}): {repr(e)}")
                 await asyncio.sleep(2)
+
+    # === BOTTOM FILTER: duplicate to second group if signal is from the bottom ===
+    if send_success and BOTTOM_GROUP_CHAT_ID and not target_chat_id:
+        try:
+            _view = min(len(df), 199)
+            _plot = df.iloc[-_view:].copy().reset_index(drop=True)
+            _chart_high = float(_plot['high'].max())
+            _chart_low = float(_plot['low'].min())
+            _range = _chart_high - _chart_low
+            _lower_third_ceiling = _chart_low + _range / 3.0
+            _current_close = float(_plot['close'].iloc[-1])
+
+            # Point B position relative to end of chart
+            _last_idx = _view - 1
+
+            # Calculate index_B in view coordinates (same sync as chart drawing)
+            _tf_ms = 14400000 if tf == "4H" else 86400000
+            _curr_last_time = int(_plot['open_time'].iloc[-1])
+            _base_open_time = line.get('base_open_time', _curr_last_time)
+            _shift = round((_curr_last_time - _base_open_time) / _tf_ms)
+            if _shift < 0: _shift = 0
+            _base_idx = line.get('base_idx', _last_idx)
+            _last_math_x = _base_idx + _shift
+            _offset = _last_math_x - _last_idx
+            _idx_b_math = line.get('index_B', _last_idx)
+            _idx_b_view = _idx_b_math - _offset
+
+            _b_not_recent = _idx_b_view <= (_last_idx - 5)
+            _price_in_bottom = _current_close <= _lower_third_ceiling
+
+            if _price_in_bottom and _b_not_recent:
+                logging.info(f"📡 BOTTOM FILTER PASS: {symbol} ({tf}) — price {_current_close:.6f} ≤ lower third {_lower_third_ceiling:.6f}, B at view idx {_idx_b_view}/{_last_idx}")
+                # Re-send chart to bottom group
+                if os.path.exists(file_path):
+                    _bottom_caption = photo_caption
+                    for _attempt in range(1, 4):
+                        try:
+                            with open(file_path, 'rb') as _f:
+                                _data = aiohttp.FormData()
+                                _data.add_field('chat_id', str(BOTTOM_GROUP_CHAT_ID))
+                                _data.add_field('caption', _bottom_caption)
+                                _data.add_field('parse_mode', 'Markdown')
+                                _data.add_field('photo', _f, filename=f"{symbol}_bottom.png", content_type='image/png')
+                                async with session.post(photo_url, data=_data, timeout=30) as _resp:
+                                    if _resp.status == 200:
+                                        logging.info(f"✅ Bottom signal sent: {symbol} ({tf})")
+                                        break
+                                    elif _resp.status == 429:
+                                        _ra = 5
+                                        try:
+                                            _rj = await _resp.json()
+                                            _ra = _rj.get('parameters', {}).get('retry_after', 5)
+                                        except: pass
+                                        await asyncio.sleep(_ra + 1)
+                                    else:
+                                        _rt = await _resp.text()
+                                        logging.error(f"❌ Bottom group send error ({_attempt}): {_resp.status} - {_rt}")
+                                        await asyncio.sleep(2)
+                        except Exception as _e:
+                            logging.error(f"❌ Bottom group error ({_attempt}): {repr(_e)}")
+                            await asyncio.sleep(2)
+
+                    # Send overflow to bottom group too
+                    if overflow_text:
+                        await asyncio.sleep(0.5)
+                        try:
+                            async with session.post(msg_url, json={
+                                'chat_id': str(BOTTOM_GROUP_CHAT_ID),
+                                'text': overflow_text,
+                                'parse_mode': 'Markdown'
+                            }, timeout=30) as _resp:
+                                if _resp.status == 200:
+                                    logging.info(f"✅ Bottom overflow sent: {symbol} ({tf})")
+                        except Exception as _e:
+                            logging.error(f"❌ Bottom overflow error: {repr(_e)}")
+            else:
+                logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — price_in_bottom={_price_in_bottom} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, ceiling: {_lower_third_ceiling:.6f})")
+        except Exception as _e:
+            logging.error(f"❌ Bottom filter error for {symbol}: {repr(_e)}")
 
     try:
         if os.path.exists(file_path):
