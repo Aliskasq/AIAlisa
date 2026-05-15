@@ -319,14 +319,14 @@ Output format:
 VERDICT: LONG or SHORT or SKIP
 LONG: [number]% / SHORT: [number]%
 ENTRY: [current price]
-SL: [minimum 5% from entry, place at significant support/resistance level, use ATR if larger. NEVER closer than 5%]
+SL: [5-10% from entry, place at significant support/resistance level. NEVER closer than 5%, NEVER farther than 10%]
 TP: [minimum 2× SL distance — R:R must be ≥ 2:1]
 LOGIC: [2-3 sentences — key factors driving the verdict]
 RISK: [1 sentence — main risk to watch]
 
 Rules:
 - Weights: 4H=50%, 1H=30%, 15m=20%. 1D is context-only (risk warnings like overbought RSI) — do NOT include 1D in the weighted score.
-- If ALL TFs agree and Overall ≥ 60% → SIGNAL. If TFs conflict and overriding TFs < 65% → SKIP. If ADX<20 → SKIP (FLAT).
+- If ALL TFs agree and Overall ≥ 60% → SIGNAL. If TFs conflict and overriding TFs < 65% → SKIP.
 - Leverage: always 1x. Deposit: always 2%.
 - Do NOT assume direction from indicators alone. When 8+ indicators are bullish, ACTIVELY look for exhaustion signals:
   * RSI > 70 on ANY timeframe = potential reversal, consider SHORT or SKIP
@@ -347,14 +347,14 @@ FAST_VERDICT_PROMPT_RU = """Ты крипто-трейдинг аналитик.
 ВЕРДИКТ: ЛОНГ или ШОРТ или ПРОПУСК
 ЛОНГ: [число]% / ШОРТ: [число]%
 ВХОД: [текущая цена]
-СЛ: [минимум 2% от входа, 1.5×ATR если больше]
+СЛ: [5-10% от входа, на значимом уровне поддержки/сопротивления. НЕ ближе 5%, НЕ дальше 10%]
 ТП: [минимум 2× расстояние СЛ — R:R должен быть ≥ 2:1]
 ЛОГИКА: [2-3 предложения — ключевые факторы вердикта]
 РИСК: [1 предложение — главный риск]
 
 Правила:
 - Веса: 4H=50%, 1H=30%, 15m=20%. 1D — только контекст (предупреждения о рисках, перекупленность RSI) — НЕ включай 1D в взвешенный счёт.
-- Если ВСЕ таймфреймы согласны и Overall ≥ 60% → СИГНАЛ. Если таймфреймы конфликтуют и перевешивающие < 65% → ПРОПУСК. Если ADX<20 → ПРОПУСК (ФЛЭТ).
+- Если ВСЕ таймфреймы согласны и Overall ≥ 60% → СИГНАЛ. Если таймфреймы конфликтуют и перевешивающие < 65% → ПРОПУСК.
 - Плечо: всегда 1x. Депозит: всегда 2%.
 - НЕ следуй за большинством индикаторов слепо. Когда 8+ индикаторов бычьи, АКТИВНО ищи сигналы истощения:
   * RSI > 70 на ЛЮБОМ таймфрейме = потенциальный разворот, рассмотри ШОРТ или ПРОПУСК
@@ -912,7 +912,7 @@ ${base_coin} Analysis🤔
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX
-🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
+🚫 SL: $X.XXXX (5-10% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%
 
@@ -954,7 +954,7 @@ CRITICAL RULES:
 3. Separate parts with exactly --- on its own line
 4. Do NOT write any labels, headers, or markers like "Part 1", "Part 2", "=== PART ===" etc.
 5. Entry = CURRENT PRICE. Safe Entry = better entry from support/OB
-6. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+6. SL/TP: CONFLUENCE of multiple indicators. SL distance: 5-10% from entry, at significant support/resistance level. NEVER closer than 5%, NEVER farther than 10%. TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 7. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. These are FIXED. In REC always write: 1x | 2%
 8. DO NOT ADD HASHTAGS
 9. RSI RULES (MOMENTUM-AWARE):
@@ -963,7 +963,7 @@ CRITICAL RULES:
    - ADX > 30 (STRONG TREND): high RSI (up to ~82 on RSI14) is normal momentum. Do NOT reduce confidence. Warn but trade.
    - ADX < 30 (WEAK TREND): RSI > 82 on 4H = reduce confidence 10%. RSI > 82 on 2+ TFs = consider SKIP.
    - 15m RSI spikes are normal in breakouts — never penalize 15m RSI alone.
-10. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
+10. SKIP only if truly 50/50. Do NOT skip just because RSI is high in a strong trend. Low ADX is NOT a reason to skip.
 12. EXHAUSTION CHECK (MANDATORY when 8+ indicators bullish): Actively look for reversal signals:
    - RSI > 70 on ANY TF = potential reversal, consider SHORT or SKIP
    - Bearish RSI-Mom divergence = momentum exhausting, strongly consider SHORT
@@ -983,7 +983,7 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- Low ADX is informational only — do NOT skip based on ADX alone
 - SKIP signals are not traded
 """
     elif square:
@@ -1045,14 +1045,14 @@ ${base_coin} Analysis
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX ([reason])
-🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
+🚫 SL: $X.XXXX (5-10% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%{risk_prompt_rule}
 
 RULES:
 1. PLAIN TEXT ONLY — no bold, no markdown, no * or ** symbols. Binance Square does not render formatting.
 2. Entry = current price. Safe = better entry from support/OB
-3. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+3. SL/TP: CONFLUENCE of multiple indicators. SL distance: 5-10% from entry, at significant support/resistance level. NEVER closer than 5%, NEVER farther than 10%. TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 4. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 5. Response MUST be 1300-1900 characters. Header/footer will add ~200 chars to reach 1500-2100 total.
 6. DO NOT ADD HASHTAGS — they are added automatically
@@ -1062,7 +1062,7 @@ RULES:
    - ADX > 30: high RSI is normal momentum, don't reduce confidence.
    - ADX < 30: RSI > 82 on 4H = reduce 10%.
    - 15m RSI spikes = normal in breakouts, never penalize alone.
-8. SKIP only if truly 50/50 or ADX < 20 (flat). Do NOT skip just because RSI is high in a strong trend.
+8. SKIP only if truly 50/50. Do NOT skip just because RSI is high in a strong trend. Low ADX is NOT a reason to skip.
 9. EXHAUSTION CHECK (MANDATORY when 8+ indicators bullish): Actively look for reversal signals:
    - RSI > 70 on ANY TF = potential reversal, consider SHORT or SKIP
    - Bearish RSI-Mom divergence = momentum exhausting, strongly consider SHORT
@@ -1081,7 +1081,7 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- Low ADX is informational only — do NOT skip based on ADX alone
 - SKIP signals are not traded
 """
     else:
@@ -1130,13 +1130,13 @@ ${base_coin} Analysis🤔
 
 💰 Entry: ${price:.6f}
 🔰 Safe: $X.XXXX
-🚫 SL: $X.XXXX (min 5% from entry, at key support/resistance level)
+🚫 SL: $X.XXXX (5-10% from entry, at key support/resistance level)
 🎯 TP: $X.XXXX ([reason])
 💼 REC: Xx | X%{risk_prompt_rule}
 
 RULES:
 1. Entry = current price. Safe = better entry from support/OB
-2. SL/TP: CONFLUENCE of multiple indicators. SL distance: MINIMUM 2% from entry (use 1.5×ATR if larger). TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
+2. SL/TP: CONFLUENCE of multiple indicators. SL distance: 5-10% from entry, at significant support/resistance level. NEVER closer than 5%, NEVER farther than 10%. TP distance: MINIMUM 2× SL distance (R:R ≥ 2:1 ALWAYS). CRITICAL: For LONG — SL MUST be BELOW entry, TP MUST be ABOVE entry. For SHORT — SL MUST be ABOVE entry, TP MUST be BELOW entry. NEVER place SL on the wrong side of entry!
 3. LEVERAGE: ALWAYS 1x. DEPOSIT: ALWAYS 2%. In REC always write: 1x | 2%
 4. Each TF line: brief reason in parentheses
 5. Keep response concise. Do NOT count characters.
@@ -1152,7 +1152,7 @@ SKIP RULES:
   * 4H disagrees with 1H+15m: if BOTH 1H and 15m are ≥ 65% → follow 1H+15m (4H may lag). If < 65% → SKIP
   * 1H disagrees with 4H+15m: if BOTH 4H and 15m are ≥ 65% → follow 4H+15m. If < 65% → SKIP
   * 15m disagrees with 4H+1H: if BOTH 4H and 1H are ≥ 65% → follow 4H+1H. If < 65% → SKIP
-- If ADX < 20 on 4H, set VERDICT: SKIP (FLAT) — market ranging, add note "⚠️ ADX flat, flat"
+- Low ADX is informational only — do NOT skip based on ADX alone
 - SKIP signals are not traded
 """
 
