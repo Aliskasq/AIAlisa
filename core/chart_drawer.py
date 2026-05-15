@@ -297,8 +297,15 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             _plot = df.iloc[-_view:].copy().reset_index(drop=True)
             _chart_high = float(_plot['high'].max())
             _chart_low = float(_plot['low'].min())
-            _range = _chart_high - _chart_low
-            _lower_third_ceiling = _chart_low + _range / 3.0
+            # Calculate bottom third in LOG scale (matches visual chart rendering)
+            import math
+            if _chart_low > 0 and _chart_high > _chart_low:
+                _log_low = math.log(_chart_low)
+                _log_high = math.log(_chart_high)
+                _lower_third_ceiling = math.exp(_log_low + (_log_high - _log_low) / 3.0)
+            else:
+                _range = _chart_high - _chart_low
+                _lower_third_ceiling = _chart_low + _range / 3.0
             _current_close = float(_plot['close'].iloc[-1])
 
             # Point B position relative to end of chart
