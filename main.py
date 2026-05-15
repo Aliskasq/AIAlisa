@@ -810,26 +810,17 @@ async def main():
                             dynamic_trigger = line_data.get('trigger_price', current_price)
 
                             # --- VOL WAIT: verify breakout still valid (price >= 2% above trendline) ---
+                            # Use FRESH line_price from stored_lines (recalculated every cycle)
+                            # instead of stale slope/intercept from old alert
                             _vw_alert = vw_item.get("alert", {})
-                            _vw_slope = _vw_alert.get("slope", 0.0)
-                            _vw_intercept = _vw_alert.get("intercept", 0.0)
-                            _vw_base_idx = _vw_alert.get("base_idx", 198)
-                            _vw_base_ot = _vw_alert.get("base_open_time", 0)
-
-                            if _vw_slope != 0.0 and full_raw:
-                                _vw_curr_ot = int(full_df.iloc[-1].get('open_time', 0))
-                                _vw_tf_ms = 86400000 if tf == "1D" else 14400000
-                                _vw_candles_passed = max(0, int((_vw_curr_ot - _vw_base_ot) / _vw_tf_ms)) if _vw_base_ot and _vw_tf_ms else 0
-                                _vw_dynamic_idx = _vw_base_idx + _vw_candles_passed
-                                _vw_line_price = np.exp(_vw_slope * _vw_dynamic_idx + _vw_intercept)
-                            else:
+                            _vw_line_price = line_data.get("line_price", 0)
+                            if _vw_line_price <= 0:
                                 _vw_line_price = _vw_alert.get("line_price", 0)
 
                             if _vw_line_price > 0:
                                 _vw_above_pct = ((current_price / _vw_line_price) - 1) * 100
                                 if _vw_above_pct < 2.0:
                                     logging.info(f"📊❌ VOL PASS REJECTED: {sym} price {current_price:.6f} only {_vw_above_pct:.1f}% above line {_vw_line_price:.6f} (need ≥2%)")
-                                    # Return to waitlist — keep monitoring
                                     add_to_volume_waitlist(
                                         sym, tf, _vw_alert,
                                         vw_item.get("vol_12h", 0), vw_item.get("vol_1h", 0),
@@ -837,7 +828,7 @@ async def main():
                                     )
                                     continue
                                 else:
-                                    logging.info(f"📊✅ VOL PASS CONFIRMED: {sym} price {current_price:.6f} is {_vw_above_pct:.1f}% above line {_vw_line_price:.6f}")
+                                    logging.info(f"📊✅ VOL PASS CONFIRMED: {sym} price {current_price:.6f} is {_vw_above_pct:.1f}% above fresh line {_vw_line_price:.6f}")
 
                             # ML prediction for volume waitlist pipeline
                             _ml_result_vol = None
