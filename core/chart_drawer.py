@@ -324,10 +324,22 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             _idx_b_view = _idx_b_math - _offset
 
             _b_not_recent = _idx_b_view <= (_last_idx - 5)
-            _price_in_bottom = _current_close <= _lower_third_ceiling
+            _price_in_bottom_third = _current_close <= _lower_third_ceiling
+            # Lower quarter ceiling in log scale
+            if _chart_low > 0 and _chart_high > _chart_low:
+                _lower_quarter_ceiling = math.exp(_log_low + (_log_high - _log_low) / 4.0)
+            else:
+                _lower_quarter_ceiling = _chart_low + (_chart_high - _chart_low) / 4.0
+            _price_in_bottom_quarter = _current_close <= _lower_quarter_ceiling
 
-            if _price_in_bottom and _b_not_recent:
-                logging.info(f"📡 BOTTOM FILTER PASS: {symbol} ({tf}) — price {_current_close:.6f} ≤ lower third {_lower_third_ceiling:.6f}, B at view idx {_idx_b_view}/{_last_idx}")
+            # Two conditions for bottom group:
+            # 1) Price in bottom THIRD + point B not on last 5 candles
+            # 2) Price in bottom QUARTER (any B position)
+            _pass_filter = (_price_in_bottom_third and _b_not_recent) or _price_in_bottom_quarter
+
+            if _pass_filter:
+                _reason = "QUARTER (any B)" if _price_in_bottom_quarter else "THIRD + B not recent"
+                logging.info(f"📡 BOTTOM FILTER PASS [{_reason}]: {symbol} ({tf}) — price {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f}, B view idx {_idx_b_view}/{_last_idx}")
                 # Re-send chart to bottom group
                 if os.path.exists(file_path):
                     _bottom_caption = photo_caption
@@ -372,7 +384,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                         except Exception as _e:
                             logging.error(f"❌ Bottom overflow error: {repr(_e)}")
             else:
-                logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — price_in_bottom={_price_in_bottom} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, ceiling: {_lower_third_ceiling:.6f})")
+                logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — third={_price_in_bottom_third} quarter={_price_in_bottom_quarter} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f})")
         except Exception as _e:
             logging.error(f"❌ Bottom filter error for {symbol}: {repr(_e)}")
 
