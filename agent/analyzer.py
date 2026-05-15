@@ -638,13 +638,23 @@ def _validate_sl_tp_in_text(text: str) -> str:
             logging.warning(f"⚠️ [PARSE FAIL] Could not parse entry/sl/tp from AI text")
             return text
         
-        # Check SL on wrong side
+        # Check SL on wrong side — FIX by mirroring to correct side
+        _sl_fixed = False
+        _orig_sl_str = sl_m.group(1)  # original string like "0.3543"
         if direction == "LONG" and sl > entry:
-            logging.warning(f"⚠️ [SL WARN] LONG but SL({sl}) > Entry({entry}) in text response!")
-            text += "\n\n⚠️ ВНИМАНИЕ: SL выше входа для LONG — проверьте уровни вручную!"
+            new_sl = entry - (sl - entry)
+            if new_sl <= 0:
+                new_sl = entry * 0.95  # fallback: 5% below
+            logging.warning(f"⚠️ [SL FIX] LONG but SL({sl}) > Entry({entry}) → mirrored to {new_sl:.6f}")
+            text = text.replace(_orig_sl_str, f"{new_sl:.6f}", 1)
+            sl = new_sl
+            _sl_fixed = True
         elif direction == "SHORT" and sl < entry:
-            logging.warning(f"⚠️ [SL WARN] SHORT but SL({sl}) < Entry({entry}) in text response!")
-            text += "\n\n⚠️ ВНИМАНИЕ: SL ниже входа для SHORT — проверьте уровни вручную!"
+            new_sl = entry + (entry - sl)
+            logging.warning(f"⚠️ [SL FIX] SHORT but SL({sl}) < Entry({entry}) → mirrored to {new_sl:.6f}")
+            text = text.replace(_orig_sl_str, f"{new_sl:.6f}", 1)
+            sl = new_sl
+            _sl_fixed = True
         
         # Check minimum 5% SL distance
         if entry > 0:

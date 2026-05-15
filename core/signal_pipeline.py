@@ -35,16 +35,16 @@ def parse_confidence_from_ai(ai_text: str) -> tuple:
     """
     import re
     
-    # English: "LONG XX% / SHORT YY%"
-    pattern_en = r'LONG[:\s]*(\d+)%?\s*/\s*SHORT[:\s]*(\d+)%?'
+    # English: "LONG XX.X% / SHORT YY.Y%" (supports decimals)
+    pattern_en = r'LONG[:\s]*(\d+(?:\.\d+)?)%?\s*/\s*SHORT[:\s]*(\d+(?:\.\d+)?)%?'
     matches = re.findall(pattern_en, ai_text, re.IGNORECASE)
     
     if matches:
         last_match = matches[-1]
         return (float(last_match[0]), float(last_match[1]))
     
-    # Russian: "ЛОНГ XX% / ШОРТ YY%"
-    pattern_ru = r'ЛОНГ[:\s]*(\d+)%?\s*/\s*ШОРТ[:\s]*(\d+)%?'
+    # Russian: "ЛОНГ XX.X% / ШОРТ YY.Y%" (supports decimals)
+    pattern_ru = r'ЛОНГ[:\s]*(\d+(?:\.\d+)?)%?\s*/\s*ШОРТ[:\s]*(\d+(?:\.\d+)?)%?'
     matches = re.findall(pattern_ru, ai_text, re.IGNORECASE)
     
     if matches:
