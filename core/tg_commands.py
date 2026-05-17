@@ -1806,13 +1806,34 @@ async def handle_message(app_session, update):
     matched_prefix = next((p for p in analysis_prefixes if text.startswith(p)), None)
 
     if matched_prefix:
-        symbol_raw = text.replace(matched_prefix, "").strip().split()[0].upper()
+        # --- Parse optional timeframe: "посмотри 1ч BTC", "scan 15m BTC", etc. ---
+        remaining = text.replace(matched_prefix, "").strip()
+        tf_aliases = {
+            "15m": "15m", "15м": "15m", "15min": "15m",
+            "1h": "1h", "1ч": "1h", "1час": "1h",
+            "4h": "4h", "4ч": "4h", "4час": "4h",
+            "1d": "1d", "1д": "1d", "1день": "1d", "1day": "1d",
+        }
+        parts = remaining.split()
+        scan_tf = "4h"  # default
+        if len(parts) >= 2 and parts[0].lower() in tf_aliases:
+            scan_tf = tf_aliases[parts[0].lower()]
+            symbol_raw = parts[1].upper()
+        elif len(parts) >= 1:
+            symbol_raw = parts[0].upper()
+        else:
+            symbol_raw = remaining.upper()
+
+        # Map scan_tf to Binance interval and label
+        tf_map = {"15m": ("15m", "15m"), "1h": ("1h", "1H"), "4h": ("4h", "4H"), "1d": ("1d", "1D")}
+        binance_interval, tf_label = tf_map.get(scan_tf, ("4h", "4H"))
+
         symbol = symbol_raw + "USDT" if not symbol_raw.endswith("USDT") else symbol_raw
 
-        fetch_msg = f"⏳ Fetching chart data + building trend line... ({symbol})" if lang_pref == "en" else f"⏳ Загружаю график + строю трендовую линию... ({symbol})"
+        fetch_msg = f"⏳ Fetching chart data + building trend line... ({symbol} {tf_label})" if lang_pref == "en" else f"⏳ Загружаю график + строю трендовую линию... ({symbol} {tf_label})"
         stream_msg_id = await send_and_get_msg_id(app_session, chat_id, fetch_msg, msg_id)
 
-        raw_df_full = await fetch_klines(app_session, symbol, "4h", 199)
+        raw_df_full = await fetch_klines(app_session, symbol, binance_interval, 199)
         raw_df_4h = await fetch_klines(app_session, symbol, "4h", 250)
         raw_df_1h = await fetch_klines(app_session, symbol, "1h", 250)
         raw_df_15m = await fetch_klines(app_session, symbol, "15m", 250)
@@ -1850,9 +1871,16 @@ async def handle_message(app_session, update):
                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
                 elif raw_df_4h:
                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H")
-                if raw_df_1h:
+                # 1H and 15m also need 500 candles for proper SMC swing structure
+                raw_smc_1h = await fetch_klines(app_session, symbol, "1h", 500) if raw_df_1h else None
+                raw_smc_15m = await fetch_klines(app_session, symbol, "15m", 500) if raw_df_15m else None
+                if raw_smc_1h:
+                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H")
+                elif raw_df_1h:
                     smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H")
-                if raw_df_15m:
+                if raw_smc_15m:
+                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m")
+                elif raw_df_15m:
                     smc_data["15m"] = analyze_smc(pd.DataFrame(raw_df_15m), "15m")
             except Exception as e:
                 logging.error(f"❌ SMC scan error: {e}")
@@ -1879,7 +1907,7 @@ async def handle_message(app_session, update):
             except Exception:
                 pass
 
-            ai_msg = await ask_ai_analysis(symbol, "4H", last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_scan)
+            ai_msg = await ask_ai_analysis(symbol, tf_label, last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_scan)
 
             async def _delayed_delete(sess, cid, mid, delay=15):
                 await asyncio.sleep(delay)
@@ -1894,11 +1922,13 @@ async def handle_message(app_session, update):
             chart_path = None
             if raw_df_full:
                 df_full = pd.DataFrame(raw_df_full)
-                line_data, _ = await find_trend_line(df_full, "4H", symbol)
+                line_data, _ = await find_trend_line(df_full, tf_label, symbol)
+                # Pass SMC data for the selected timeframe to chart drawer
+                chart_smc = smc_data.get(tf_label)
                 if line_data:
-                    chart_path = await draw_scan_chart(symbol, df_full, line_data, "4H")
+                    chart_path = await draw_scan_chart(symbol, df_full, line_data, tf_label, smc_overlay=chart_smc)
                 else:
-                    chart_path = await draw_simple_chart(symbol, df_full, "4H")
+                    chart_path = await draw_simple_chart(symbol, df_full, tf_label, smc_overlay=chart_smc)
 
             import uuid
             import os as _os
@@ -2077,9 +2107,16 @@ async def handle_message(app_session, update):
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
                     elif raw_4h:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
-                    if raw_1h:
+                    # 1H and 15m also need 500 candles for proper SMC swing structure
+                    raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 500) if raw_1h else None
+                    raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 500) if raw_15m else None
+                    if raw_smc_1h:
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H")
+                    elif raw_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
-                    if raw_15m:
+                    if raw_smc_15m:
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m")
+                    elif raw_15m:
                         smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
                 except Exception as e:
                     logging.error(f"❌ SMC look error: {e}")

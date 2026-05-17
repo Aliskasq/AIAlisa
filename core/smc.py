@@ -253,14 +253,14 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200) for volatility filter (exact LuxAlgo: ta.atr(200))
+    # ATR(200) for volatility filter — EMA like Pine ta.atr(200)
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).rolling(200, min_periods=1).mean().values
+    atr200 = pd.Series(tr).ewm(span=200, min_periods=1, adjust=False).mean().values
 
     # Build parsed highs/lows arrays (exact LuxAlgo high-volatility bar logic)
     parsed_highs = np.copy(highs)
@@ -425,14 +425,14 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200)
+    # ATR(200) — EMA like Pine ta.atr(200)
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).rolling(200, min_periods=1).mean().values
+    atr200 = pd.Series(tr).ewm(span=200, min_periods=1, adjust=False).mean().values
 
     equals = []
 
@@ -478,8 +478,11 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
     """
     Port of LuxAlgo updateTrailingExtremes() + drawHighLowSwings().
 
-    trailing.top    = running max(high) since last swing pivot update
-    trailing.bottom = running min(low)  since last swing pivot update
+    Exact Pine Script logic:
+    - getCurrentStructure() sets trailing.top/bottom to new pivot price on each new swing
+    - updateTrailingExtremes() runs EVERY bar: trailing.top = max(high, trailing.top),
+      trailing.bottom = min(low, trailing.bottom)
+    - So trailing values are running max/min that RESET at each new swing pivot
 
     Strong/Weak logic:
     - swingTrend == BEARISH → top is 'Strong High', bottom is 'Weak Low'
@@ -489,23 +492,40 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
     lows = df["low"].values
     n = len(df)
 
-    # Find the last swing pivot (the point where trailing extremes reset)
-    last_swing_idx = 0
-    if swing_pivots:
-        last_swing_idx = max(p["index"] for p in swing_pivots)
+    # Build pivot events map: bar_index → pivot
+    pivot_events = {}
+    for p in swing_pivots:
+        idx = p["index"]
+        if idx not in pivot_events:
+            pivot_events[idx] = []
+        pivot_events[idx].append(p)
 
-    # Track trailing high/low from last swing pivot to end
-    trailing_high = highs[last_swing_idx] if last_swing_idx < n else highs[-1]
-    trailing_low = lows[last_swing_idx] if last_swing_idx < n else lows[-1]
-    trailing_high_idx = last_swing_idx
-    trailing_low_idx = last_swing_idx
+    # Initialize trailing values
+    trailing_high = highs[0] if n > 0 else 0.0
+    trailing_low = lows[0] if n > 0 else 0.0
+    trailing_high_idx = 0
+    trailing_low_idx = 0
 
-    for i in range(last_swing_idx, n):
+    # Walk through every bar (exact Pine Script execution order)
+    for i in range(n):
+        # 1. getCurrentStructure resets trailing on new pivots
+        if i in pivot_events:
+            for p in pivot_events[i]:
+                if p["type"] == "high":
+                    # New swing high pivot → reset trailing.top
+                    trailing_high = p["price"]
+                    trailing_high_idx = i
+                elif p["type"] == "low":
+                    # New swing low pivot → reset trailing.bottom
+                    trailing_low = p["price"]
+                    trailing_low_idx = i
+
+        # 2. updateTrailingExtremes runs every bar AFTER pivot update
         if highs[i] >= trailing_high:
-            trailing_high = highs[i]
+            trailing_high = float(highs[i])
             trailing_high_idx = i
         if lows[i] <= trailing_low:
-            trailing_low = lows[i]
+            trailing_low = float(lows[i])
             trailing_low_idx = i
 
     # Strong/Weak labels (exact LuxAlgo logic)

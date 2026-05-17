@@ -417,7 +417,128 @@ async def delete_telegram_message(session, message_id):
     return False
 
 
-async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) -> str | None:
+def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
+    """
+    Draw Smart Money Concepts overlay on chart — matching LuxAlgo TradingView visuals.
+    Elements: Order Blocks, BOS/CHoCH lines, Strong/Weak High/Low.
+    """
+    from matplotlib.patches import Rectangle
+
+    if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
+        return
+
+    # Calculate index offset: SMC uses N candles (e.g. 500), chart shows last view_limit (199).
+    # chart_x = smc_global_index - idx_offset
+    smc_n = 500
+    all_indices = []
+    for s in smc_data.get("swing_structures", []):
+        all_indices.append(s.get("break_index", 0))
+        all_indices.append(s.get("pivot_index", 0))
+    for ob in smc_data.get("swing_order_blocks", []) + smc_data.get("internal_order_blocks", []):
+        all_indices.append(ob.get("index", 0))
+    trailing = smc_data.get("trailing", {})
+    all_indices.append(trailing.get("trailing_high_index", 0))
+    all_indices.append(trailing.get("trailing_low_index", 0))
+    if all_indices:
+        smc_n = max(max(all_indices) + 1, view_limit)
+    idx_offset = smc_n - view_limit
+
+    # ─── 1. ORDER BLOCKS ────────────────────────────────────────────────
+    for ob_list, is_internal in [
+        (smc_data.get("swing_order_blocks", []), False),
+        (smc_data.get("internal_order_blocks", []), True),
+    ]:
+        for ob in ob_list:
+            ob_x_start = ob["index"] - idx_offset
+            ob_x_end = view_limit - 1
+
+            if ob_x_end < 0 or ob_x_start >= view_limit:
+                continue
+            ob_x_start = max(ob_x_start, -0.5)
+
+            ob_low = ob["low"]
+            ob_high = ob["high"]
+
+            if ob["bias"] == 1:  # BULLISH
+                fc = (0.19, 0.47, 0.96, 0.20) if is_internal else (0.09, 0.28, 0.80, 0.20)
+            else:  # BEARISH
+                fc = (0.97, 0.49, 0.50, 0.20) if is_internal else (0.70, 0.16, 0.20, 0.20)
+
+            width = ob_x_end - ob_x_start + 0.5
+            rect = Rectangle(
+                (ob_x_start, ob_low), width, ob_high - ob_low,
+                linewidth=0 if is_internal else 0.5,
+                edgecolor=fc[:3] + (0.5,) if not is_internal else None,
+                facecolor=fc, zorder=1
+            )
+            ax.add_patch(rect)
+
+    # ─── 2. BOS / CHoCH LINES ──────────────────────────────────────────
+    for struct_list, is_internal in [
+        (smc_data.get("swing_structures", []), False),
+        (smc_data.get("internal_structures", []), True),
+    ]:
+        for s in struct_list[-15:]:
+            pivot_x = s["pivot_index"] - idx_offset
+            break_x = s["break_index"] - idx_offset
+
+            if break_x < 0 or pivot_x >= view_limit:
+                continue
+
+            price = s["price"]
+            is_bullish = s["bias"] == 1
+            tag = s["type"]
+
+            color = '#089981' if is_bullish else '#F23645'
+            line_style = '--' if is_internal else '-'
+
+            x_start = max(pivot_x, -0.5)
+            x_end = min(break_x, view_limit - 0.5)
+
+            ax.hlines(y=price, xmin=x_start, xmax=x_end,
+                      colors=color, linestyles=line_style,
+                      linewidths=1.0 if is_internal else 1.5,
+                      zorder=3, alpha=0.8)
+
+            label_x = (x_start + x_end) / 2
+            label_va = 'bottom' if is_bullish else 'top'
+            fontsize = 7 if is_internal else 8
+
+            ax.text(label_x, price, tag,
+                    color=color, fontsize=fontsize, fontweight='bold',
+                    ha='center', va=label_va, zorder=4, alpha=0.9)
+
+    # ─── 3. STRONG/WEAK HIGH/LOW ───────────────────────────────────────
+    if trailing:
+        t_high = trailing.get("trailing_high")
+        t_low = trailing.get("trailing_low")
+        high_label = trailing.get("high_label", "High")
+        low_label = trailing.get("low_label", "Low")
+        t_high_idx = trailing.get("trailing_high_index", 0) - idx_offset
+        t_low_idx = trailing.get("trailing_low_index", 0) - idx_offset
+
+        if t_high is not None:
+            x_start_h = max(t_high_idx, -0.5)
+            h_color = '#F23645'  # swingBearishColor (highs always red in LuxAlgo)
+            ax.hlines(y=t_high, xmin=x_start_h, xmax=view_limit + 2,
+                      colors=h_color, linestyles='-', linewidths=1.0,
+                      zorder=3, alpha=0.7)
+            ax.text(view_limit + 1, t_high, high_label,
+                    color=h_color, fontsize=8, fontweight='bold',
+                    ha='left', va='bottom', zorder=4)
+
+        if t_low is not None:
+            x_start_l = max(t_low_idx, -0.5)
+            l_color = '#089981'  # swingBullishColor (lows always green in LuxAlgo)
+            ax.hlines(y=t_low, xmin=x_start_l, xmax=view_limit + 2,
+                      colors=l_color, linestyles='-', linewidths=1.0,
+                      zorder=3, alpha=0.7)
+            ax.text(view_limit + 1, t_low, low_label,
+                    color=l_color, fontsize=8, fontweight='bold',
+                    ha='left', va='top', zorder=4)
+
+
+async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, smc_overlay: dict = None) -> str | None:
     """
     Draw a logarithmic chart with trend line for /scan commands.
     Returns the file path to the PNG image, or None on failure.
@@ -430,7 +551,8 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) ->
     plot_df.set_index('ds', inplace=True)
 
     # --- Time sync (same logic as breakout notification) ---
-    tf_ms = 14400000 if tf == "4H" else 86400000
+    tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
+    tf_ms = tf_ms_map.get(tf, 14400000)
     curr_last_time = int(plot_df['open_time'].iloc[-1])
     base_open_time = line.get('base_open_time', curr_last_time)
 
@@ -519,6 +641,13 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) ->
         ax.text(0.5, 0.97, price_label, transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='green' if diff_pct >= 0 else 'red', alpha=0.7))
 
+        # SMC overlay (Order Blocks, BOS/CHoCH, Strong/Weak High/Low)
+        if smc_overlay:
+            try:
+                _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, offset)
+            except Exception as e:
+                logging.error(f"❌ SMC overlay error: {repr(e)}")
+
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
     except Exception as e:
@@ -535,7 +664,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str) ->
     return None
 
 
-async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str) -> str | None:
+async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay: dict = None) -> str | None:
     """
     Draw a simple candlestick chart WITHOUT trend line.
     Used when trend line construction fails.
@@ -567,6 +696,13 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str) -> str | Non
         # No trendline label
         ax.text(0.5, 0.97, "No trendline detected", transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='gray', alpha=0.7))
+
+        # SMC overlay
+        if smc_overlay:
+            try:
+                _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, 0)
+            except Exception as e:
+                logging.error(f"❌ SMC overlay error (simple): {repr(e)}")
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
