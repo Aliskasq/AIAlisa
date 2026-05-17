@@ -795,6 +795,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             "trailing": trailing,
             "swing_trend": swing_trend,
             "internal_trend": internal_trend,
+            "n": n,  # total candles used for SMC — needed for chart overlay index offset
             "summary": summary,
         }
 

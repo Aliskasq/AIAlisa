@@ -429,19 +429,9 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
 
     # Calculate index offset: SMC uses N candles (e.g. 500), chart shows last view_limit (199).
     # chart_x = smc_global_index - idx_offset
-    smc_n = 500
-    all_indices = []
-    for s in smc_data.get("swing_structures", []):
-        all_indices.append(s.get("break_index", 0))
-        all_indices.append(s.get("pivot_index", 0))
-    for ob in smc_data.get("swing_order_blocks", []) + smc_data.get("internal_order_blocks", []):
-        all_indices.append(ob.get("index", 0))
-    trailing = smc_data.get("trailing", {})
-    all_indices.append(trailing.get("trailing_high_index", 0))
-    all_indices.append(trailing.get("trailing_low_index", 0))
-    if all_indices:
-        smc_n = max(max(all_indices) + 1, view_limit)
+    smc_n = smc_data.get("n", 500)  # exact candle count from analyze_smc()
     idx_offset = smc_n - view_limit
+    trailing = smc_data.get("trailing", {})
 
     # ─── 1. ORDER BLOCKS ────────────────────────────────────────────────
     for ob_list, is_internal in [
