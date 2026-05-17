@@ -528,7 +528,8 @@ async def main():
                             logging.warning(f"⚠️ AI {error_type} for {sym}, sending chart with placeholder, will retry...")
                             _sent_err, error_msg_id = await send_breakout_notification(
                                 sym, full_df, line_data, tf, alert_type, session,
-                                dynamic_trigger, f"⏳ AI {error_type} — retrying..."
+                                dynamic_trigger, f"⏳ AI {error_type} — retrying...",
+                                smc_overlay=item.get("smc_data", {}).get(tf)
                             )
                             await asyncio.sleep(15)
                             ai_verdict_full = await ask_ai_analysis(
@@ -643,9 +644,11 @@ async def main():
                         if ai_has_error:
                             is_sent = True
                         else:
+                            _breakout_smc = item.get("smc_data", {}).get(tf)
                             is_sent, _ = await send_breakout_notification(
                                 sym, full_df, line_data, tf, alert_type, session,
-                                dynamic_trigger, ai_verdict or ""
+                                dynamic_trigger, ai_verdict or "",
+                                smc_overlay=_breakout_smc
                             )
                             # Delete old error chart ONLY after new one sent successfully
                             if is_sent and error_msg_id:
@@ -938,7 +941,8 @@ async def main():
 
                             is_sent, _ = await send_breakout_notification(
                                 sym, full_df, line_data, tf, alert_type, session,
-                                dynamic_trigger, ai_verdict or ""
+                                dynamic_trigger, ai_verdict or "",
+                                smc_overlay=smc_data.get(tf)
                             )
                             logging.info(f"🟢 VOL PASS: {sym} {_ai_dir} (conf {_confidence:.0f}%)")
 

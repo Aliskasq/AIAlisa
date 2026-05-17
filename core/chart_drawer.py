@@ -13,7 +13,7 @@ from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID
 
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
-async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None):
+async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None, smc_overlay=None):
     # FIX: Sync view limit perfectly with scanner (199)
     view_limit = min(len(df), 199)
     custom_style = 'charles'
@@ -100,6 +100,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             ax.text(idx_b_view, line['price_B'], f"{line['price_B']:.4f}", color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
 
         ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
+
+        # SMC overlay on breakout chart
+        if smc_overlay:
+            try:
+                _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, offset)
+            except Exception as e:
+                logging.error(f"❌ SMC overlay error (breakout): {repr(e)}")
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
