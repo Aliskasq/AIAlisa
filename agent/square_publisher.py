@@ -165,7 +165,7 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
-                    raw_smc_4h = await fetch_klines(session, symbol, "4h", 500)
+                    raw_smc_4h = await fetch_klines(session, symbol, "4h", 1500)
                     if raw_smc_4h:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
                     else:

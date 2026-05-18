@@ -1860,9 +1860,10 @@ async def handle_message(app_session, update):
             from core.smc import analyze_smc
             smc_data = {}
             try:
-                # SMC needs 500 candles for proper swing structure (size=50)
-                raw_smc_1d = await fetch_klines(app_session, symbol, "1d", 500) if raw_df_1d else None
-                raw_smc_4h = await fetch_klines(app_session, symbol, "4h", 500) if raw_df_4h else None
+                # SMC needs 1500 candles for 1D to match TradingView full history,
+                # 500 candles for shorter TFs (enough for swing_size=50)
+                raw_smc_1d = await fetch_klines(app_session, symbol, "1d", 1500) if raw_df_1d else None
+                raw_smc_4h = await fetch_klines(app_session, symbol, "4h", 1500) if raw_df_4h else None
                 if raw_smc_1d:
                     smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol)
                 elif raw_df_1d:
@@ -2096,9 +2097,9 @@ async def handle_message(app_session, update):
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
-                    # SMC needs 500 candles for proper swing structure
-                    raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 500) if raw_1d else None
-                    raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 500) if raw_4h else None
+                    # SMC needs 1500 candles for 1D/4H to match TradingView full history
+                    raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 1500) if raw_1d else None
+                    raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 1500) if raw_4h else None
                     if raw_smc_1d:
                         smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze)
                     elif raw_1d:
