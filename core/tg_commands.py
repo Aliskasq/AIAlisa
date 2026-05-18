@@ -1864,24 +1864,24 @@ async def handle_message(app_session, update):
                 raw_smc_1d = await fetch_klines(app_session, symbol, "1d", 500) if raw_df_1d else None
                 raw_smc_4h = await fetch_klines(app_session, symbol, "4h", 500) if raw_df_4h else None
                 if raw_smc_1d:
-                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D")
+                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol)
                 elif raw_df_1d:
-                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D")
+                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D", symbol=symbol)
                 if raw_smc_4h:
-                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
                 elif raw_df_4h:
-                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H")
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H", symbol=symbol)
                 # 1H and 15m also need 500 candles for proper SMC swing structure
                 raw_smc_1h = await fetch_klines(app_session, symbol, "1h", 500) if raw_df_1h else None
                 raw_smc_15m = await fetch_klines(app_session, symbol, "15m", 500) if raw_df_15m else None
                 if raw_smc_1h:
-                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H")
+                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol)
                 elif raw_df_1h:
-                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H")
+                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H", symbol=symbol)
                 if raw_smc_15m:
-                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m")
+                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol)
                 elif raw_df_15m:
-                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_df_15m), "15m")
+                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_df_15m), "15m", symbol=symbol)
             except Exception as e:
                 logging.error(f"❌ SMC scan error: {e}")
 
@@ -2100,24 +2100,24 @@ async def handle_message(app_session, update):
                     raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 500) if raw_1d else None
                     raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 500) if raw_4h else None
                     if raw_smc_1d:
-                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D")
+                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze)
                     elif raw_1d:
-                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D")
+                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D", symbol=coin_to_analyze)
                     if raw_smc_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=coin_to_analyze)
                     elif raw_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=coin_to_analyze)
                     # 1H and 15m also need 500 candles for proper SMC swing structure
                     raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 500) if raw_1h else None
                     raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 500) if raw_15m else None
                     if raw_smc_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H")
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=coin_to_analyze)
                     elif raw_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=coin_to_analyze)
                     if raw_smc_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m")
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=coin_to_analyze)
                     elif raw_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=coin_to_analyze)
                 except Exception as e:
                     logging.error(f"❌ SMC look error: {e}")
 

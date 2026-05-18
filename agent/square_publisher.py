@@ -167,13 +167,13 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                     from core.smc import analyze_smc
                     raw_smc_4h = await fetch_klines(session, symbol, "4h", 500)
                     if raw_smc_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H")
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
                     else:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H")
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=symbol)
                     if raw_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H")
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=symbol)
                     if raw_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m")
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=symbol)
                 except Exception as e:
                     logging.error(f"❌ SMC autopost error: {e}")
 
