@@ -326,11 +326,12 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
                 ob["mitigated_index"] = k
                 break
 
+        mit_idx = ob.get("mitigated_index", "")
+        mit_info = f" @bar {mit_idx}" if ob["mitigated"] else ""
         logging.debug(
             f"OB {'BULL' if ob['bias']==BULLISH else 'BEAR'} idx={ob_idx} "
-            f"[{ob['low']:.6f}–{ob['high']:.6f}] break@{break_idx} "
-            f"mitigated={ob['mitigated']}"
-            f"{f' @bar {ob[\"mitigated_index\"]}' if ob['mitigated'] else ''}"
+            f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
+            f"mitigated={ob['mitigated']}{mit_info}"
         )
         order_blocks.append(ob)
 
