@@ -185,7 +185,6 @@ def detect_structure(df: pd.DataFrame, size: int,
                             "price": last_high["price"],
                             "break_index": i,
                             "pivot_index": last_high["index"],
-                            "ob_search_index": last_low["index"] if last_low["price"] is not None else last_high["index"],
                         })
                 else:
                     tag = "CHoCH" if trend == BEARISH else "BOS"
@@ -197,7 +196,6 @@ def detect_structure(df: pd.DataFrame, size: int,
                         "price": last_high["price"],
                         "break_index": i,
                         "pivot_index": last_high["index"],
-                        "ob_search_index": last_low["index"] if last_low["price"] is not None else last_high["index"],
                     })
 
         # Check bearish break: close crosses below last low
@@ -218,7 +216,6 @@ def detect_structure(df: pd.DataFrame, size: int,
                             "price": last_low["price"],
                             "break_index": i,
                             "pivot_index": last_low["index"],
-                            "ob_search_index": last_high["index"] if last_high["price"] is not None else last_low["index"],
                         })
                 else:
                     tag = "CHoCH" if trend == BULLISH else "BOS"
@@ -230,7 +227,6 @@ def detect_structure(df: pd.DataFrame, size: int,
                         "price": last_low["price"],
                         "break_index": i,
                         "pivot_index": last_low["index"],
-                        "ob_search_index": last_high["index"] if last_high["price"] is not None else last_low["index"],
                     })
 
     return structures, raw_pivots, trend
@@ -279,29 +275,26 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     order_blocks = []
 
     for s in structures:
-        # LuxAlgo: OB search starts from the OPPOSITE pivot
-        # Bullish break → search from last LOW to break (demand zone)
-        # Bearish break → search from last HIGH to break (supply zone)
-        search_idx = s.get("ob_search_index", s["pivot_index"])
+        pivot_idx = s["pivot_index"]
         break_idx = s["break_index"]
 
-        if search_idx >= break_idx or search_idx < 0:
+        if pivot_idx >= break_idx or pivot_idx < 0:
             continue
 
         if s["bias"] == BEARISH:
-            # Bearish OB: find max parsedHigh between last HIGH and break
-            segment = parsed_highs[search_idx:break_idx]
+            # Bearish OB: find max parsedHigh between pivot and break
+            segment = parsed_highs[pivot_idx:break_idx]
             if len(segment) == 0:
                 continue
             local_idx = int(np.argmax(segment))
-            ob_idx = search_idx + local_idx
+            ob_idx = pivot_idx + local_idx
         else:
-            # Bullish OB: find min parsedLow between last LOW and break
-            segment = parsed_lows[search_idx:break_idx]
+            # Bullish OB: find min parsedLow between pivot and break
+            segment = parsed_lows[pivot_idx:break_idx]
             if len(segment) == 0:
                 continue
             local_idx = int(np.argmin(segment))
-            ob_idx = search_idx + local_idx
+            ob_idx = pivot_idx + local_idx
 
         # OB boundaries use PARSED values (exact LuxAlgo)
         ob = {
@@ -661,20 +654,12 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             if swing_high_level is not None and swing_low_level is not None:
                 break
 
-        # Debug: log swing structures
-        sym_tag = f" [{symbol}]" if symbol else ""
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
-        for s in swing_structures[-10:]:
-            logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
-
         # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
         internal_structures, internal_pivots, internal_trend = detect_structure(
             df, internal_size, internal=True,
             swing_high_level=swing_high_level,
             swing_low_level=swing_low_level
         )
-
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
 
         # ── 3. EQUAL HIGHS / LOWS (using size=3 pivots, like LuxAlgo default) ──
         eqhl_legs = _compute_legs(df["high"].values, df["low"].values, 3)
