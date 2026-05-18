@@ -465,9 +465,23 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
         if not dominated:
             filtered_internal.append(iob)
 
+    # Also deduplicate internal-vs-internal (keep more recent on overlap)
+    deduped_internal = []
+    for iob in filtered_internal:
+        merged = False
+        for j in range(len(deduped_internal) - 1, -1, -1):
+            existing = deduped_internal[j]
+            if iob["bias"] == existing["bias"] and _obs_overlap(iob, existing) > 0.5:
+                if iob["index"] > existing["index"]:
+                    deduped_internal[j] = iob
+                merged = True
+                break
+        if not merged:
+            deduped_internal.append(iob)
+
     for ob_list, is_internal in [
         (swing_obs_list, False),
-        (filtered_internal, True),
+        (deduped_internal, True),
     ]:
         for ob in ob_list:
             ob_x_start = ob["index"] - idx_offset

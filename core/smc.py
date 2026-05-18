@@ -145,13 +145,16 @@ def detect_structure(df: pd.DataFrame, size: int,
     last_low = {"price": None, "last_price": None, "index": 0, "crossed": False}
 
     # Process pivots in bar order, interleave with close checks
-    # Build a per-bar event map
+    # Build a per-bar event map keyed by DETECTION bar (not pivot bar).
+    # Pine: pivot at bar X is detected at bar X+size (when leg() changes).
+    # The pivot level only becomes available for crossover checks from that bar.
     pivot_at_bar = {}
     for p in raw_pivots:
-        idx = p["index"]
-        if idx not in pivot_at_bar:
-            pivot_at_bar[idx] = []
-        pivot_at_bar[idx].append(p)
+        detection_bar = p["index"] + size  # bar when Pine detects this pivot
+        if detection_bar < n:
+            if detection_bar not in pivot_at_bar:
+                pivot_at_bar[detection_bar] = []
+            pivot_at_bar[detection_bar].append(p)
 
     for i in range(n):
         # Update pivots that occur at this bar
@@ -335,6 +338,36 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     # Return unmitigated, most recent blocks (capped)
     active = [ob for ob in order_blocks if not ob["mitigated"]]
     mitigated_count = len(order_blocks) - len(active)
+
+    # Deduplicate overlapping OBs of the same bias (keep the more recent one)
+    def _dedup_overlapping(obs: List[Dict]) -> List[Dict]:
+        if len(obs) <= 1:
+            return obs
+        result = []
+        for ob in obs:
+            merged = False
+            for j in range(len(result) - 1, -1, -1):
+                existing = result[j]
+                if ob["bias"] != existing["bias"]:
+                    continue
+                # Check price overlap
+                overlap_lo = max(ob["low"], existing["low"])
+                overlap_hi = min(ob["high"], existing["high"])
+                if overlap_hi <= overlap_lo:
+                    continue
+                smaller_range = min(ob["high"] - ob["low"], existing["high"] - existing["low"])
+                if smaller_range > 0 and (overlap_hi - overlap_lo) / smaller_range > 0.5:
+                    # >50% overlap — keep the more recent one
+                    if ob["index"] > existing["index"]:
+                        result[j] = ob
+                    merged = True
+                    break
+            if not merged:
+                result.append(ob)
+        return result
+
+    active = _dedup_overlapping(active)
+
     sym_tag = f" [{symbol}]" if symbol else ""
     logging.info(f"📦 OB summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
     if len(active) > max_blocks:
@@ -481,7 +514,7 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
 # ─── TRAILING EXTREMES + STRONG/WEAK HIGH/LOW (exact LuxAlgo) ───────────────
 
 def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
-                              swing_trend: int) -> Dict:
+                              swing_trend: int, swing_size: int = 50) -> Dict:
     """
     Port of LuxAlgo updateTrailingExtremes() + drawHighLowSwings().
 
@@ -499,13 +532,19 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
     lows = df["low"].values
     n = len(df)
 
-    # Build pivot events map: bar_index → pivot
+    # Build pivot events map: DETECTION bar → pivot
+    # Pine: getCurrentStructure updates trailing on detection bar (pivot bar + swing_size)
+    # swing_size is passed via the pivots' detection offset
+    # We infer swing_size from the calling context (swing pivots use swing_size=50)
+    # For safety, accept swing_size as parameter or infer from pivot spacing
     pivot_events = {}
     for p in swing_pivots:
-        idx = p["index"]
-        if idx not in pivot_events:
-            pivot_events[idx] = []
-        pivot_events[idx].append(p)
+        # Detection bar = pivot bar + swing_size
+        detection_bar = p["index"] + swing_size
+        if detection_bar < n:
+            if detection_bar not in pivot_events:
+                pivot_events[detection_bar] = []
+            pivot_events[detection_bar].append(p)
 
     # Initialize trailing values
     trailing_high = highs[0] if n > 0 else 0.0
@@ -711,7 +750,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         active_fvgs = [f for f in all_fvgs if not f["mitigated"]]
 
         # ── 7. TRAILING EXTREMES + STRONG/WEAK HIGH/LOW ──
-        trailing = compute_trailing_extremes(df, swing_pivots, swing_trend)
+        trailing = compute_trailing_extremes(df, swing_pivots, swing_trend, swing_size=swing_size)
 
         # ── 8. PREMIUM / DISCOUNT ZONES ──
         zones = get_premium_discount(trailing, current_price)
