@@ -109,7 +109,9 @@ def _detect_pivots_from_legs(highs: np.ndarray, lows: np.ndarray,
 def detect_structure(df: pd.DataFrame, size: int,
                      internal: bool = False,
                      swing_high_level: float = None,
-                     swing_low_level: float = None) -> Tuple[List[Dict], List[Dict], int]:
+                     swing_low_level: float = None,
+                     swing_high_per_bar: np.ndarray = None,
+                     swing_low_per_bar: np.ndarray = None) -> Tuple[List[Dict], List[Dict], int]:
     """
     Detect BOS and CHoCH from structure breaks.
 
@@ -171,22 +173,18 @@ def detect_structure(df: pd.DataFrame, size: int,
             # Crossover: previous close <= level AND current close > level
             prev_close = closes[i - 1] if i > 0 else 0
             if prev_close <= last_high["price"] and closes[i] > last_high["price"]:
-                # Internal confluence filter
-                if internal and swing_high_level is not None:
-                    if last_high["price"] == swing_high_level:
-                        pass  # skip — same as swing level
-                    else:
-                        tag = "CHoCH" if trend == BEARISH else "BOS"
-                        last_high["crossed"] = True
-                        trend = BULLISH
-                        structures.append({
-                            "type": tag,
-                            "bias": BULLISH,
-                            "price": last_high["price"],
-                            "break_index": i,
-                            "pivot_index": last_high["index"],
-                        })
-                else:
+                # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
+                # Pine: extraCondition = internalHigh.currentLevel != swingHigh.currentLevel
+                skip = False
+                if internal:
+                    if swing_high_per_bar is not None and i < len(swing_high_per_bar):
+                        if last_high["price"] == swing_high_per_bar[i]:
+                            skip = True
+                    elif swing_high_level is not None:
+                        if last_high["price"] == swing_high_level:
+                            skip = True
+
+                if not skip:
                     tag = "CHoCH" if trend == BEARISH else "BOS"
                     last_high["crossed"] = True
                     trend = BULLISH
@@ -202,22 +200,17 @@ def detect_structure(df: pd.DataFrame, size: int,
         if last_low["price"] is not None and not last_low["crossed"]:
             prev_close = closes[i - 1] if i > 0 else float('inf')
             if prev_close >= last_low["price"] and closes[i] < last_low["price"]:
-                # Internal confluence filter
-                if internal and swing_low_level is not None:
-                    if last_low["price"] == swing_low_level:
-                        pass  # skip
-                    else:
-                        tag = "CHoCH" if trend == BULLISH else "BOS"
-                        last_low["crossed"] = True
-                        trend = BEARISH
-                        structures.append({
-                            "type": tag,
-                            "bias": BEARISH,
-                            "price": last_low["price"],
-                            "break_index": i,
-                            "pivot_index": last_low["index"],
-                        })
-                else:
+                # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
+                skip = False
+                if internal:
+                    if swing_low_per_bar is not None and i < len(swing_low_per_bar):
+                        if last_low["price"] == swing_low_per_bar[i]:
+                            skip = True
+                    elif swing_low_level is not None:
+                        if last_low["price"] == swing_low_level:
+                            skip = True
+
+                if not skip:
                     tag = "CHoCH" if trend == BULLISH else "BOS"
                     last_low["crossed"] = True
                     trend = BEARISH
@@ -254,14 +247,16 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200) for volatility filter — EMA like Pine ta.atr(200)
+    # ATR(200) for volatility filter — Pine ta.atr(200) uses ta.rma(tr, 200)
+    # ta.rma: alpha = 1/length, equivalent to ewm(com=length-1) in pandas
+    # First value initialized with SMA, then EWM (Pine RMA behavior)
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).ewm(span=200, min_periods=1, adjust=False).mean().values
+    atr200 = pd.Series(tr).ewm(com=199, min_periods=1, adjust=False).mean().values
 
     # Build parsed highs/lows arrays (exact LuxAlgo high-volatility bar logic)
     parsed_highs = np.copy(highs)
@@ -437,14 +432,14 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200) — EMA like Pine ta.atr(200)
+    # ATR(200) — Pine ta.rma(tr, 200): alpha = 1/200, ewm(com=199)
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).ewm(span=200, min_periods=1, adjust=False).mean().values
+    atr200 = pd.Series(tr).ewm(com=199, min_periods=1, adjust=False).mean().values
 
     equals = []
 
@@ -643,23 +638,58 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             df, swing_size, internal=False
         )
 
-        # Get last swing high/low levels for internal confluence filter
-        swing_high_level = None
-        swing_low_level = None
-        for p in reversed(swing_pivots):
-            if p["type"] == "high" and swing_high_level is None:
-                swing_high_level = p["price"]
-            if p["type"] == "low" and swing_low_level is None:
-                swing_low_level = p["price"]
-            if swing_high_level is not None and swing_low_level is not None:
-                break
+        # Build per-bar swing levels for internal confluence filter
+        # Pine: swingHigh.currentLevel / swingLow.currentLevel change on each new pivot detection
+        # Pivot at bar idx is DETECTED at bar idx + swing_size
+        swing_high_per_bar = np.full(n, np.nan)
+        swing_low_per_bar = np.full(n, np.nan)
+        swing_legs = _compute_legs(df["high"].values, df["low"].values, swing_size)
+
+        current_sh = np.nan
+        current_sl = np.nan
+        # Build detection bar → pivot level map
+        for p in swing_pivots:
+            detection_bar = p["index"] + swing_size
+            if detection_bar < n:
+                if p["type"] == "high":
+                    current_sh = p["price"]
+                elif p["type"] == "low":
+                    current_sl = p["price"]
+            # Fill forward from detection_bar
+        # Simpler approach: walk swing pivots in order and fill forward
+        current_sh = np.nan
+        current_sl = np.nan
+        pivot_events = {}
+        for p in swing_pivots:
+            det = p["index"] + swing_size
+            if det not in pivot_events:
+                pivot_events[det] = []
+            pivot_events[det].append(p)
+
+        for i in range(n):
+            if i in pivot_events:
+                for p in pivot_events[i]:
+                    if p["type"] == "high":
+                        current_sh = p["price"]
+                    elif p["type"] == "low":
+                        current_sl = p["price"]
+            swing_high_per_bar[i] = current_sh
+            swing_low_per_bar[i] = current_sl
+
+        # Debug: log swing structures
+        sym_tag = f" [{symbol}]" if symbol else ""
+        logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
+        for s in swing_structures[-10:]:
+            logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
 
         # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
         internal_structures, internal_pivots, internal_trend = detect_structure(
             df, internal_size, internal=True,
-            swing_high_level=swing_high_level,
-            swing_low_level=swing_low_level
+            swing_high_per_bar=swing_high_per_bar,
+            swing_low_per_bar=swing_low_per_bar,
         )
+
+        logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
 
         # ── 3. EQUAL HIGHS / LOWS (using size=3 pivots, like LuxAlgo default) ──
         eqhl_legs = _compute_legs(df["high"].values, df["low"].values, 3)
