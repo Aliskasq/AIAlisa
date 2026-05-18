@@ -120,18 +120,19 @@ def is_line_valid_advanced(df_full, idx_A, idx_B, price_A, price_B, is_fallback=
         logging.exception("Error in is_line_valid_advanced")
         return False, 0.0, False
 
-async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
+async def find_trend_line(df, tf_name, symbol, mode="ROOF", save_alert=True):
     if df is None or df.empty:
         logging.warning(f"⚠️ {symbol:10} {tf_name}: Data is empty.")
         return None, {"error": "no_data"}
 
-    try:
-        current_alerts = load_alerts() or []
-        filtered_alerts = [a for a in current_alerts if not (a['symbol'] == symbol and a['tf'] == tf_name)]
-        if len(current_alerts) != len(filtered_alerts):
-            save_alerts(filtered_alerts)
-    except Exception:
-        pass
+    if save_alert:
+        try:
+            current_alerts = load_alerts() or []
+            filtered_alerts = [a for a in current_alerts if not (a['symbol'] == symbol and a['tf'] == tf_name)]
+            if len(current_alerts) != len(filtered_alerts):
+                save_alerts(filtered_alerts)
+        except Exception:
+            pass
 
     df[['high', 'low', 'close', 'open']] = df[['high', 'low', 'close', 'open']].apply(pd.to_numeric)
     
@@ -352,7 +353,7 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF"):
         base_open_time = int(df_l['open_time'].iloc[-1])
         intercept = float(np.log(price_A) - float(m) * idx_A)
 
-        if status in ["WAITING_2_PERCENT", "WAITING_RED_CLOSE"]:
+        if save_alert and status in ["WAITING_2_PERCENT", "WAITING_RED_CLOSE"]:
             try:
                 current_alerts = load_alerts() or []
                 if not any(a['symbol'] == symbol and a['tf'] == tf_name for a in current_alerts):

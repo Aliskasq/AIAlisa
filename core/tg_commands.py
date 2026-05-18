@@ -1922,7 +1922,7 @@ async def handle_message(app_session, update):
             chart_path = None
             if raw_df_full:
                 df_full = pd.DataFrame(raw_df_full)
-                line_data, _ = await find_trend_line(df_full, tf_label, symbol)
+                line_data, _ = await find_trend_line(df_full, tf_label, symbol, save_alert=False)
                 # Pass SMC data for the selected timeframe to chart drawer
                 chart_smc = smc_data.get(tf_label)
                 if line_data:
