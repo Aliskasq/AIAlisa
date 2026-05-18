@@ -161,18 +161,24 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 if raw_15m:
                     mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0]
 
-                # SMC Indicator (500 candles for proper swing detection)
+                # SMC Indicator — primary 4H gets 1500, others 999
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
                     raw_smc_4h = await fetch_klines(session, symbol, "4h", 1500)
+                    raw_smc_1h = await fetch_klines(session, symbol, "1h", 999) if raw_1h else None
+                    raw_smc_15m = await fetch_klines(session, symbol, "15m", 999) if raw_15m else None
                     if raw_smc_4h:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
                     else:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=symbol)
-                    if raw_1h:
+                    if raw_smc_1h:
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol)
+                    elif raw_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=symbol)
-                    if raw_15m:
+                    if raw_smc_15m:
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol)
+                    elif raw_15m:
                         smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=symbol)
                 except Exception as e:
                     logging.error(f"❌ SMC autopost error: {e}")

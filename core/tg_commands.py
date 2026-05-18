@@ -1860,10 +1860,16 @@ async def handle_message(app_session, update):
             from core.smc import analyze_smc
             smc_data = {}
             try:
-                # SMC needs 1500 candles for 1D to match TradingView full history,
-                # 500 candles for shorter TFs (enough for swing_size=50)
-                raw_smc_1d = await fetch_klines(app_session, symbol, "1d", 1500) if raw_df_1d else None
-                raw_smc_4h = await fetch_klines(app_session, symbol, "4h", 1500) if raw_df_4h else None
+                # Primary TF (scan_tf) gets 1500 candles, others get 999
+                # 999 is the sweet spot: same Binance weight as 500 (weight=5), but more data
+                smc_candles = {"1d": 999, "4h": 999, "1h": 999, "15m": 999}
+                smc_candles[scan_tf] = 1500  # primary TF gets max
+
+                raw_smc_1d = await fetch_klines(app_session, symbol, "1d", smc_candles["1d"]) if raw_df_1d else None
+                raw_smc_4h = await fetch_klines(app_session, symbol, "4h", smc_candles["4h"]) if raw_df_4h else None
+                raw_smc_1h = await fetch_klines(app_session, symbol, "1h", smc_candles["1h"]) if raw_df_1h else None
+                raw_smc_15m = await fetch_klines(app_session, symbol, "15m", smc_candles["15m"]) if raw_df_15m else None
+
                 if raw_smc_1d:
                     smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol)
                 elif raw_df_1d:
@@ -1872,9 +1878,6 @@ async def handle_message(app_session, update):
                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
                 elif raw_df_4h:
                     smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H", symbol=symbol)
-                # 1H and 15m also need 500 candles for proper SMC swing structure
-                raw_smc_1h = await fetch_klines(app_session, symbol, "1h", 500) if raw_df_1h else None
-                raw_smc_15m = await fetch_klines(app_session, symbol, "15m", 500) if raw_df_15m else None
                 if raw_smc_1h:
                     smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol)
                 elif raw_df_1h:
@@ -2097,9 +2100,12 @@ async def handle_message(app_session, update):
                 smc_data = {}
                 try:
                     from core.smc import analyze_smc
-                    # SMC needs 1500 candles for 1D/4H to match TradingView full history
-                    raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 1500) if raw_1d else None
+                    # Margin scan: primary TF is 4h → 1500 candles, others → 999
+                    raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 999) if raw_1d else None
                     raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 1500) if raw_4h else None
+                    raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 999) if raw_1h else None
+                    raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 999) if raw_15m else None
+
                     if raw_smc_1d:
                         smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze)
                     elif raw_1d:
@@ -2108,9 +2114,6 @@ async def handle_message(app_session, update):
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=coin_to_analyze)
                     elif raw_4h:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=coin_to_analyze)
-                    # 1H and 15m also need 500 candles for proper SMC swing structure
-                    raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 500) if raw_1h else None
-                    raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 500) if raw_15m else None
                     if raw_smc_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=coin_to_analyze)
                     elif raw_1h:
