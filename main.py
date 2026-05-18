@@ -381,8 +381,8 @@ async def main():
                             smc_data = {}
                             try:
                                 from core.smc import analyze_smc
-                                # SMC needs 500 candles for proper swing detection (size=50)
-                                raw_smc_main = await fetch_klines(http_session, sym, interval_fetch, 500)
+                                # SMC needs 1500 candles for proper swing detection (max Binance limit)
+                                raw_smc_main = await fetch_klines(http_session, sym, interval_fetch, 1500)
                                 if raw_smc_main:
                                     smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf)
                                 else:
@@ -788,7 +788,7 @@ async def main():
                             smc_data = {}
                             try:
                                 from core.smc import analyze_smc
-                                raw_smc_main = await fetch_klines(session, sym, interval_fetch, 500)
+                                raw_smc_main = await fetch_klines(session, sym, interval_fetch, 1500)
                                 if raw_smc_main:
                                     smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf)
                                 else:

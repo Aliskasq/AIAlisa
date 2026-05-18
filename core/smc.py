@@ -326,10 +326,17 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
                 ob["mitigated_index"] = k
                 break
 
+        logging.debug(
+            f"OB {'BULL' if ob['bias']==BULLISH else 'BEAR'} idx={ob_idx} "
+            f"[{ob['low']:.6f}–{ob['high']:.6f}] break@{break_idx} "
+            f"mitigated={ob['mitigated']}"
+            f"{f' @bar {ob[\"mitigated_index\"]}' if ob['mitigated'] else ''}"
+        )
         order_blocks.append(ob)
 
     # Return unmitigated, most recent blocks (capped)
     active = [ob for ob in order_blocks if not ob["mitigated"]]
+    logging.debug(f"OB total={len(order_blocks)} active={len(active)} max={max_blocks}")
     if len(active) > max_blocks:
         active = active[-max_blocks:]
     return active
@@ -657,10 +664,10 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
 
         # ── 4-5. ORDER BLOCKS ──
         internal_obs = find_order_blocks(
-            df, internal_structures, max_blocks=5, mitigation=ob_mitigation
+            df, internal_structures, max_blocks=10, mitigation=ob_mitigation
         )
         swing_obs = find_order_blocks(
-            df, swing_structures, max_blocks=5, mitigation=ob_mitigation
+            df, swing_structures, max_blocks=10, mitigation=ob_mitigation
         )
 
         # ── 6. FAIR VALUE GAPS ──
