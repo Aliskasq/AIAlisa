@@ -328,8 +328,8 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
 
         mit_idx = ob.get("mitigated_index", "")
         mit_info = f" @bar {mit_idx}" if ob["mitigated"] else ""
-        logging.debug(
-            f"OB {'BULL' if ob['bias']==BULLISH else 'BEAR'} idx={ob_idx} "
+        logging.info(
+            f"📦 OB {'BULL' if ob['bias']==BULLISH else 'BEAR'} idx={ob_idx} "
             f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
             f"mitigated={ob['mitigated']}{mit_info}"
         )
@@ -337,7 +337,8 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
 
     # Return unmitigated, most recent blocks (capped)
     active = [ob for ob in order_blocks if not ob["mitigated"]]
-    logging.debug(f"OB total={len(order_blocks)} active={len(active)} max={max_blocks}")
+    mitigated_count = len(order_blocks) - len(active)
+    logging.info(f"📦 OB summary: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
     if len(active) > max_blocks:
         active = active[-max_blocks:]
     return active

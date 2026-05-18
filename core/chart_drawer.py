@@ -441,9 +441,33 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
     trailing = smc_data.get("trailing", {})
 
     # ─── 1. ORDER BLOCKS ────────────────────────────────────────────────
+    # Deduplicate: skip internal OBs that overlap >50% with a swing OB
+    swing_obs_list = smc_data.get("swing_order_blocks", [])
+    internal_obs_list = smc_data.get("internal_order_blocks", [])
+
+    def _obs_overlap(a, b):
+        """Return overlap ratio (0-1) of two OBs by price range."""
+        overlap_lo = max(a["low"], b["low"])
+        overlap_hi = min(a["high"], b["high"])
+        if overlap_hi <= overlap_lo:
+            return 0.0
+        overlap = overlap_hi - overlap_lo
+        smaller = min(a["high"] - a["low"], b["high"] - b["low"])
+        return overlap / smaller if smaller > 0 else 0.0
+
+    filtered_internal = []
+    for iob in internal_obs_list:
+        dominated = False
+        for sob in swing_obs_list:
+            if iob["bias"] == sob["bias"] and _obs_overlap(iob, sob) > 0.5:
+                dominated = True
+                break
+        if not dominated:
+            filtered_internal.append(iob)
+
     for ob_list, is_internal in [
-        (smc_data.get("swing_order_blocks", []), False),
-        (smc_data.get("internal_order_blocks", []), True),
+        (swing_obs_list, False),
+        (filtered_internal, True),
     ]:
         for ob in ob_list:
             ob_x_start = ob["index"] - idx_offset
