@@ -83,17 +83,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     fig = None
 
     try:
-        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
-        _dummy_panels = [
-            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
-        ]
+        # Compute indicator addplots for panels 1, 2, 3
+        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style=custom_style,
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
-            addplot=addplots + _dummy_panels, yscale='log',
+            addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {line_type} (LOG-MODE)",
             figsize=(14, 13), returnfig=True, tight_layout=True,
             panel_ratios=(6, 1, 1, 1)
@@ -116,19 +112,19 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (breakout): {repr(e)}")
 
-        # Custom grid + date labels + right margin SMC
+        # Custom grid + right margin SMC
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
             _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
 
-        # Indicator panels (OBV, RSI, MACD)
+        # Style indicator panels (RSI levels, MACD zero, grid off)
         try:
-            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+            _style_indicator_panels(axlist)
         except Exception as e:
-            logging.error(f"❌ Indicator panels error: {repr(e)}")
+            logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
-        # Date labels on bottom panel
-        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
+        # Date labels on bottom-most axis
+        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -598,51 +594,41 @@ def _draw_right_margin_smc(ax, smc_data, view_limit, plot_df):
                 ha='left', va='bottom', zorder=5)
 
 
-def _add_indicator_panels(fig, axlist, plot_df, view_limit):
+def _compute_indicator_addplots(plot_df, view_limit):
     """
-    Add OBV, RSI(6,12,24), MACD panels below the main chart.
-    Expects fig created with panel_ratios that include space for 3 extra panels.
-    mplfinance returns 2 axes per panel (main + secondary/volume).
-    axlist[0]=panel0_main, axlist[1]=panel0_vol, axlist[2]=panel1_main, ...
-    So: panel1=axlist[2], panel2=axlist[4], panel3=axlist[6]
+    Compute OBV, RSI(6,12,24), MACD from plot_df and return list of
+    mpf.make_addplot() objects for panels 1, 2, 3.
+    Also returns the MACD histogram colors for bar chart (drawn post-render).
     """
-    from core.indicators import rma
-
-    # Recalculate indicators on chart data
-    calc_df = plot_df.copy()
-    calc_df = calc_df.reset_index()
-    for col in ['open', 'high', 'low', 'close', 'volume']:
-        if col in calc_df.columns:
-            calc_df[col] = calc_df[col].astype(float)
-
-    close = calc_df['close']
-    volume = calc_df['volume']
+    close = plot_df['close'].astype(float)
+    volume = plot_df['volume'].astype(float)
+    n = len(close)
 
     # --- OBV ---
     obv_change = np.sign(close.diff()) * volume
     obv = obv_change.fillna(0).cumsum()
-    obv_sma20 = obv.rolling(20).mean()
+    obv_sma20 = obv.rolling(20).mean().fillna(obv.iloc[0] if n > 0 else 0)
 
     # --- RSI 6, 12, 24 ---
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
+    loss_s = -delta.where(delta < 0, 0.0)
 
     def _rsi(g, l, period):
         alpha = 1.0 / period
         avg_g = np.zeros(len(g))
         avg_l = np.zeros(len(g))
-        avg_g[0] = g.iloc[0]
-        avg_l[0] = l.iloc[0]
+        avg_g[0] = g.iloc[0] if len(g) > 0 else 0
+        avg_l[0] = l.iloc[0] if len(l) > 0 else 0
         for i in range(1, len(g)):
             avg_g[i] = alpha * g.iloc[i] + (1 - alpha) * avg_g[i - 1]
             avg_l[i] = alpha * l.iloc[i] + (1 - alpha) * avg_l[i - 1]
         rs = np.where(avg_l == 0, 100, avg_g / avg_l)
-        return 100 - (100 / (1 + rs))
+        return pd.Series(100 - (100 / (1 + rs)), index=g.index)
 
-    rsi6 = _rsi(gain, loss, 6)
-    rsi12 = _rsi(gain, loss, 12)
-    rsi24 = _rsi(gain, loss, 24)
+    rsi6 = _rsi(gain, loss_s, 6)
+    rsi12 = _rsi(gain, loss_s, 12)
+    rsi24 = _rsi(gain, loss_s, 24)
 
     # --- MACD ---
     ema12 = close.ewm(span=12, adjust=False).mean()
@@ -651,46 +637,70 @@ def _add_indicator_panels(fig, axlist, plot_df, view_limit):
     macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
-    x = np.arange(view_limit)
+    # Build addplots using mplfinance panels
+    addplots = [
+        # Panel 1: OBV
+        mpf.make_addplot(obv, panel=1, color='#26a69a', width=1.0, ylabel='OBV'),
+        mpf.make_addplot(obv_sma20, panel=1, color='#ef5350', width=0.8, linestyle='--'),
+        # Panel 2: RSI 6, 12, 24
+        mpf.make_addplot(rsi6, panel=2, color='#2196F3', width=1.0, ylabel='RSI'),
+        mpf.make_addplot(rsi12, panel=2, color='#1565C0', width=0.8),
+        mpf.make_addplot(rsi24, panel=2, color='#0D47A1', width=0.8),
+        # Panel 3: MACD line + signal
+        mpf.make_addplot(macd_line, panel=3, color='#F0B90B', width=1.0, ylabel='MACD'),
+        mpf.make_addplot(macd_signal, panel=3, color='#E040FB', width=0.8),
+        # Panel 3: MACD histogram as bar
+        mpf.make_addplot(macd_hist, panel=3, type='bar',
+                         color=['#26a69a' if v >= 0 else '#ef5350' for v in macd_hist],
+                         width=0.8, alpha=0.6),
+    ]
 
-    # --- Panel 1: OBV (green) ---
-    # mplfinance: 2 axes per panel → panel1=axlist[2], panel2=axlist[4], panel3=axlist[6]
-    ax_obv = axlist[2]
-    ax_obv.fill_between(x, obv.values, alpha=0.3, color='#26a69a')
-    ax_obv.plot(x, obv.values, color='#26a69a', linewidth=1.0)
-    ax_obv.plot(x, obv_sma20.values, color='#ef5350', linewidth=0.8, linestyle='--', alpha=0.7)
-    ax_obv.set_xlim(-0.5, view_limit - 0.5)
-    ax_obv.set_ylabel('OBV', fontsize=7, color='#26a69a')
-    ax_obv.tick_params(axis='both', labelsize=5, colors='#888888')
-    ax_obv.grid(False)
-    ax_obv.tick_params(axis='x', labelbottom=False)
+    return addplots
 
-    # --- Panel 2: RSI 6, 12, 24 (blue tones) ---
-    ax_rsi = axlist[4]
-    ax_rsi.plot(x, rsi6, color='#2196F3', linewidth=1.0, label='RSI 6')
-    ax_rsi.plot(x, rsi12, color='#1565C0', linewidth=0.8, label='RSI 12')
-    ax_rsi.plot(x, rsi24, color='#0D47A1', linewidth=0.8, label='RSI 24')
-    ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
-    ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
-    ax_rsi.set_ylim(0, 100)
-    ax_rsi.set_xlim(-0.5, view_limit - 0.5)
-    ax_rsi.set_ylabel('RSI', fontsize=7, color='#2196F3')
-    ax_rsi.tick_params(axis='both', labelsize=5, colors='#888888')
-    ax_rsi.grid(False)
-    ax_rsi.tick_params(axis='x', labelbottom=False)
 
-    # --- Panel 3: MACD (yellow/gold) ---
-    ax_macd = axlist[6]
-    colors_hist = ['#26a69a' if v >= 0 else '#ef5350' for v in macd_hist.values]
-    ax_macd.bar(x, macd_hist.values, color=colors_hist, width=0.8, alpha=0.6)
-    ax_macd.plot(x, macd_line.values, color='#F0B90B', linewidth=1.0, label='MACD')
-    ax_macd.plot(x, macd_signal.values, color='#E040FB', linewidth=0.8, label='Signal')
-    ax_macd.axhline(y=0, color='#888888', linewidth=0.3)
-    ax_macd.set_xlim(-0.5, view_limit - 0.5)
-    ax_macd.set_ylabel('MACD', fontsize=7, color='#F0B90B')
-    ax_macd.tick_params(axis='both', labelsize=5, colors='#888888')
-    ax_macd.grid(False)
-    ax_macd.tick_params(axis='x', labelbottom=False)
+def _style_indicator_panels(axlist):
+    """
+    Style the indicator panels after rendering:
+    - Remove grids, set tick sizes
+    - Add RSI 70/30 lines
+    - Add MACD zero line
+    axlist from mplfinance with 4 panels: indices depend on volume presence.
+    We find panels by checking axis count.
+    """
+    # Collect all unique panels (mplfinance may return varying # of axes)
+    # Panels 1,2,3 are the indicator panels; find them dynamically
+    panels = {}
+    for ax in axlist:
+        # mplfinance tags axes with _panel_num attribute (unofficial but reliable)
+        pnum = getattr(ax, '_panel_num', None)
+        if pnum is not None and pnum not in panels:
+            panels[pnum] = ax
+
+    # Fallback: if _panel_num not available, use index-based (skip first 2 = panel 0)
+    if len(panels) < 4 and len(axlist) >= 8:
+        panels = {0: axlist[0], 1: axlist[2], 2: axlist[4], 3: axlist[6]}
+    elif len(panels) < 4 and len(axlist) >= 4:
+        panels = {i: axlist[i] for i in range(min(4, len(axlist)))}
+
+    for pnum in [1, 2, 3]:
+        ax = panels.get(pnum)
+        if not ax:
+            continue
+        ax.grid(False)
+        ax.tick_params(axis='both', labelsize=5, colors='#888888')
+        ax.tick_params(axis='x', labelbottom=False)
+
+    # RSI panel: add 70/30 levels
+    ax_rsi = panels.get(2)
+    if ax_rsi:
+        ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
+        ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
+        ax_rsi.set_ylim(0, 100)
+
+    # MACD panel: add zero line
+    ax_macd = panels.get(3)
+    if ax_macd:
+        ax_macd.axhline(y=0, color='#888888', linewidth=0.3)
 
 
 def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
@@ -918,17 +928,13 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
     fig = None
 
     try:
-        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
-        _dummy_panels = [
-            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
-        ]
+        # Compute indicator addplots for panels 1, 2, 3
+        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
-            addplot=addplots + _dummy_panels, yscale='log',
+            addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
             figsize=(14, 13), returnfig=True, tight_layout=True,
             panel_ratios=(6, 1, 1, 1)
@@ -949,26 +955,26 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         ax.text(0.5, 0.97, price_label, transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='green' if diff_pct >= 0 else 'red', alpha=0.7))
 
-        # SMC overlay (Order Blocks, BOS/CHoCH, Strong/Weak High/Low)
+        # SMC overlay
         if smc_overlay:
             try:
                 _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, offset)
             except Exception as e:
                 logging.error(f"❌ SMC overlay error: {repr(e)}")
 
-        # Custom grid + date labels + right margin SMC
+        # Custom grid + right margin SMC
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
             _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
 
-        # Indicator panels (OBV, RSI, MACD)
+        # Style indicator panels
         try:
-            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+            _style_indicator_panels(axlist)
         except Exception as e:
-            logging.error(f"❌ Indicator panels error (scan): {repr(e)}")
+            logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
-        # Date labels on bottom panel
-        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
+        # Date labels on bottom-most axis
+        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -1002,16 +1008,12 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
     fig = None
 
     try:
-        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
-        _dummy_panels = [
-            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
-            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
-        ]
+        # Compute indicator addplots for panels 1, 2, 3
+        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
-            addplot=_dummy_panels, yscale='log',
+            addplot=_ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
             figsize=(14, 13), returnfig=True, tight_layout=True,
             panel_ratios=(6, 1, 1, 1)
@@ -1034,19 +1036,19 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (simple): {repr(e)}")
 
-        # Custom grid + date labels + right margin SMC
+        # Custom grid + right margin SMC
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
             _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
 
-        # Indicator panels (OBV, RSI, MACD)
+        # Style indicator panels
         try:
-            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+            _style_indicator_panels(axlist)
         except Exception as e:
-            logging.error(f"❌ Indicator panels error (simple): {repr(e)}")
+            logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 
-        # Date labels on bottom panel
-        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
+        # Date labels on bottom-most axis
+        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
