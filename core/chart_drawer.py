@@ -83,12 +83,20 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     fig = None
 
     try:
+        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
+        _dummy_panels = [
+            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
+        ]
+
         fig, axlist = mpf.plot(
             plot_df, type='candle', style=custom_style,
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
-            addplot=addplots, yscale='log',
+            addplot=addplots + _dummy_panels, yscale='log',
             title=f"\n{symbol} {line_type} (LOG-MODE)",
-            figsize=(14, 8), returnfig=True, tight_layout=True
+            figsize=(14, 13), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1, 1)
         )
 
         ax = axlist[0]
@@ -107,6 +115,20 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                 _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, offset)
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (breakout): {repr(e)}")
+
+        # Custom grid + date labels + right margin SMC
+        _apply_custom_grid(ax, plot_df, view_limit)
+        if smc_overlay:
+            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+
+        # Indicator panels (OBV, RSI, MACD)
+        try:
+            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+        except Exception as e:
+            logging.error(f"❌ Indicator panels error: {repr(e)}")
+
+        # Date labels on bottom panel
+        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -424,6 +446,253 @@ async def delete_telegram_message(session, message_id):
     return False
 
 
+def _apply_custom_grid(ax, plot_df, view_limit):
+    """
+    Custom grid: vertical lines every 20 candles, horizontal every 10% price.
+    Date labels horizontal in 2 lines (Apr 16 / 12:00) under each vertical line.
+    Removes default matplotlib grid and x/y tick labels.
+    """
+    import matplotlib.ticker as mticker
+    from matplotlib.dates import num2date
+
+    # Remove default grid and tick labels
+    ax.grid(False)
+    ax.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
+    ax.tick_params(axis='y', which='both', labelright=False, labelleft=False, right=False, left=False)
+
+    # --- Vertical lines every 20 candles ---
+    for i in range(0, view_limit, 20):
+        ax.axvline(x=i, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+
+    # Date labels are drawn by _apply_date_labels_bottom on the lowest panel
+
+    # --- Horizontal lines every 10% price ---
+    y_low, y_high = ax.get_ylim()
+    if y_low > 0 and y_high > 0:
+        import math
+        # Log scale: find nice 10% steps
+        log_low = math.log10(y_low)
+        log_high = math.log10(y_high)
+        # Step through prices: start from a round base, go up in 10% steps
+        # Find starting price (round down to nearest power of 10)
+        base = 10 ** math.floor(log_low)
+        price = base
+        while price < y_low:
+            price *= 1.1
+        while price <= y_high:
+            ax.axhline(y=price, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+            price *= 1.1
+
+
+def _apply_date_labels_bottom(ax_bottom, plot_df, view_limit):
+    """
+    Add date labels at the bottom of the figure (below all panels).
+    Called on the lowest axis. Labels at every 20-candle mark.
+    """
+    ax_bottom.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
+    import matplotlib.transforms as mtransforms
+    trans = mtransforms.blended_transform_factory(ax_bottom.transData, ax_bottom.transAxes)
+    for i in range(0, view_limit, 20):
+        if i < len(plot_df):
+            dt = plot_df.index[i]
+            line1 = dt.strftime('%b %d')
+            line2 = dt.strftime('%H:%M')
+            label = f"{line1}\n{line2}"
+            ax_bottom.text(i, -0.3, label,
+                    color='#888888', fontsize=6, ha='center', va='top',
+                    transform=trans, clip_on=False,
+                    zorder=5)
+
+
+def _draw_right_margin_smc(ax, smc_data, view_limit, plot_df):
+    """
+    Draw SMC annotations on right margin:
+    - Strong High / Weak Low with price
+    - Visible OB prices (top & bottom of each block)
+    - Arrows for off-screen OBs (max 2 up, max 2 down)
+    Replaces the standard Y-axis scale.
+    """
+    if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
+        return
+
+    y_low, y_high = ax.get_ylim()
+    trailing = smc_data.get("trailing", {})
+    right_x = view_limit + 1  # X position for right margin text
+
+    # --- Strong High / Weak Low ---
+    t_high = trailing.get("trailing_high")
+    t_low = trailing.get("trailing_low")
+    high_label = trailing.get("high_label", "High")
+    low_label = trailing.get("low_label", "Low")
+
+    if t_high is not None:
+        price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
+        ax.text(right_x, t_high, f"{high_label}\n{price_str}",
+                color='#F23645', fontsize=7, fontweight='bold',
+                ha='left', va='center', zorder=5)
+
+    if t_low is not None:
+        price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
+        ax.text(right_x, t_low, f"{low_label}\n{price_str}",
+                color='#089981', fontsize=7, fontweight='bold',
+                ha='left', va='center', zorder=5)
+
+    # --- Collect all OBs ---
+    all_obs = []
+    for ob in smc_data.get("swing_order_blocks", []):
+        all_obs.append(ob)
+    for ob in smc_data.get("internal_order_blocks", []):
+        all_obs.append(ob)
+
+    # Classify: visible vs above vs below chart area
+    visible_obs = []
+    above_obs = []
+    below_obs = []
+
+    for ob in all_obs:
+        ob_mid = (ob["high"] + ob["low"]) / 2
+        if ob["low"] > y_high:
+            above_obs.append(ob)
+        elif ob["high"] < y_low:
+            below_obs.append(ob)
+        else:
+            visible_obs.append(ob)
+
+    # Sort by price for clean layout
+    above_obs.sort(key=lambda o: o["low"])
+    below_obs.sort(key=lambda o: -o["high"])
+
+    # --- Visible OB prices on right margin ---
+    for ob in visible_obs:
+        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
+        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        color = '#F23645' if ob["bias"] == -1 else '#089981'
+        # Top price of block
+        ax.text(right_x, ob["high"], hi_str,
+                color=color, fontsize=6, ha='left', va='bottom', zorder=5)
+        # Bottom price of block
+        ax.text(right_x, ob["low"], lo_str,
+                color=color, fontsize=6, ha='left', va='top', zorder=5)
+
+    # --- Arrows for off-screen OBs (max 2 each direction) ---
+    arrow_x = right_x + 0.5
+
+    # Above (↑ arrows near top)
+    for i, ob in enumerate(above_obs[:2]):
+        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
+        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        y_pos = y_high * (0.97 - i * 0.06)  # stack from top
+        color = '#F23645' if ob["bias"] == -1 else '#089981'
+        ax.text(arrow_x, y_pos, f"↑ {lo_str}-{hi_str}",
+                color=color, fontsize=6, fontweight='bold',
+                ha='left', va='top', zorder=5)
+
+    # Below (↓ arrows near bottom)
+    for i, ob in enumerate(below_obs[:2]):
+        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
+        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        y_pos = y_low * (1.03 + i * 0.06)  # stack from bottom
+        color = '#F23645' if ob["bias"] == -1 else '#089981'
+        ax.text(arrow_x, y_pos, f"↓ {lo_str}-{hi_str}",
+                color=color, fontsize=6, fontweight='bold',
+                ha='left', va='bottom', zorder=5)
+
+
+def _add_indicator_panels(fig, axlist, plot_df, view_limit):
+    """
+    Add OBV, RSI(6,12,24), MACD panels below the main chart.
+    Expects fig created with panel_ratios that include space for 3 extra panels.
+    mplfinance returns 2 axes per panel (main + secondary/volume).
+    axlist[0]=panel0_main, axlist[1]=panel0_vol, axlist[2]=panel1_main, ...
+    So: panel1=axlist[2], panel2=axlist[4], panel3=axlist[6]
+    """
+    from core.indicators import rma
+
+    # Recalculate indicators on chart data
+    calc_df = plot_df.copy()
+    calc_df = calc_df.reset_index()
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        if col in calc_df.columns:
+            calc_df[col] = calc_df[col].astype(float)
+
+    close = calc_df['close']
+    volume = calc_df['volume']
+
+    # --- OBV ---
+    obv_change = np.sign(close.diff()) * volume
+    obv = obv_change.fillna(0).cumsum()
+    obv_sma20 = obv.rolling(20).mean()
+
+    # --- RSI 6, 12, 24 ---
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+
+    def _rsi(g, l, period):
+        alpha = 1.0 / period
+        avg_g = np.zeros(len(g))
+        avg_l = np.zeros(len(g))
+        avg_g[0] = g.iloc[0]
+        avg_l[0] = l.iloc[0]
+        for i in range(1, len(g)):
+            avg_g[i] = alpha * g.iloc[i] + (1 - alpha) * avg_g[i - 1]
+            avg_l[i] = alpha * l.iloc[i] + (1 - alpha) * avg_l[i - 1]
+        rs = np.where(avg_l == 0, 100, avg_g / avg_l)
+        return 100 - (100 / (1 + rs))
+
+    rsi6 = _rsi(gain, loss, 6)
+    rsi12 = _rsi(gain, loss, 12)
+    rsi24 = _rsi(gain, loss, 24)
+
+    # --- MACD ---
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - macd_signal
+
+    x = np.arange(view_limit)
+
+    # --- Panel 1: OBV (green) ---
+    # mplfinance: 2 axes per panel → panel1=axlist[2], panel2=axlist[4], panel3=axlist[6]
+    ax_obv = axlist[2]
+    ax_obv.fill_between(x, obv.values, alpha=0.3, color='#26a69a')
+    ax_obv.plot(x, obv.values, color='#26a69a', linewidth=1.0)
+    ax_obv.plot(x, obv_sma20.values, color='#ef5350', linewidth=0.8, linestyle='--', alpha=0.7)
+    ax_obv.set_xlim(-0.5, view_limit - 0.5)
+    ax_obv.set_ylabel('OBV', fontsize=7, color='#26a69a')
+    ax_obv.tick_params(axis='both', labelsize=5, colors='#888888')
+    ax_obv.grid(False)
+    ax_obv.tick_params(axis='x', labelbottom=False)
+
+    # --- Panel 2: RSI 6, 12, 24 (blue tones) ---
+    ax_rsi = axlist[4]
+    ax_rsi.plot(x, rsi6, color='#2196F3', linewidth=1.0, label='RSI 6')
+    ax_rsi.plot(x, rsi12, color='#1565C0', linewidth=0.8, label='RSI 12')
+    ax_rsi.plot(x, rsi24, color='#0D47A1', linewidth=0.8, label='RSI 24')
+    ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
+    ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
+    ax_rsi.set_ylim(0, 100)
+    ax_rsi.set_xlim(-0.5, view_limit - 0.5)
+    ax_rsi.set_ylabel('RSI', fontsize=7, color='#2196F3')
+    ax_rsi.tick_params(axis='both', labelsize=5, colors='#888888')
+    ax_rsi.grid(False)
+    ax_rsi.tick_params(axis='x', labelbottom=False)
+
+    # --- Panel 3: MACD (yellow/gold) ---
+    ax_macd = axlist[6]
+    colors_hist = ['#26a69a' if v >= 0 else '#ef5350' for v in macd_hist.values]
+    ax_macd.bar(x, macd_hist.values, color=colors_hist, width=0.8, alpha=0.6)
+    ax_macd.plot(x, macd_line.values, color='#F0B90B', linewidth=1.0, label='MACD')
+    ax_macd.plot(x, macd_signal.values, color='#E040FB', linewidth=0.8, label='Signal')
+    ax_macd.axhline(y=0, color='#888888', linewidth=0.3)
+    ax_macd.set_xlim(-0.5, view_limit - 0.5)
+    ax_macd.set_ylabel('MACD', fontsize=7, color='#F0B90B')
+    ax_macd.tick_params(axis='both', labelsize=5, colors='#888888')
+    ax_macd.grid(False)
+    ax_macd.tick_params(axis='x', labelbottom=False)
+
+
 def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
     """
     Draw Smart Money Concepts overlay on chart — matching LuxAlgo TradingView visuals.
@@ -554,23 +823,19 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
 
         if t_high is not None:
             x_start_h = max(t_high_idx, -0.5)
-            h_color = '#F23645'  # swingBearishColor (highs always red in LuxAlgo)
+            h_color = '#F23645'
             ax.hlines(y=t_high, xmin=x_start_h, xmax=view_limit + 2,
                       colors=h_color, linestyles='-', linewidths=1.0,
                       zorder=3, alpha=0.7)
-            ax.text(view_limit + 1, t_high, high_label,
-                    color=h_color, fontsize=8, fontweight='bold',
-                    ha='left', va='bottom', zorder=4)
+            # Text label moved to _draw_right_margin_smc
 
         if t_low is not None:
             x_start_l = max(t_low_idx, -0.5)
-            l_color = '#089981'  # swingBullishColor (lows always green in LuxAlgo)
+            l_color = '#089981'
             ax.hlines(y=t_low, xmin=x_start_l, xmax=view_limit + 2,
                       colors=l_color, linestyles='-', linewidths=1.0,
                       zorder=3, alpha=0.7)
-            ax.text(view_limit + 1, t_low, low_label,
-                    color=l_color, fontsize=8, fontweight='bold',
-                    ha='left', va='top', zorder=4)
+            # Text label moved to _draw_right_margin_smc
 
 
 async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, smc_overlay: dict = None) -> str | None:
@@ -653,12 +918,20 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
     fig = None
 
     try:
+        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
+        _dummy_panels = [
+            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
+        ]
+
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
-            addplot=addplots, yscale='log',
+            addplot=addplots + _dummy_panels, yscale='log',
             title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
-            figsize=(14, 8), returnfig=True, tight_layout=True
+            figsize=(14, 13), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1, 1)
         )
 
         ax = axlist[0]
@@ -682,6 +955,20 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
                 _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, offset)
             except Exception as e:
                 logging.error(f"❌ SMC overlay error: {repr(e)}")
+
+        # Custom grid + date labels + right margin SMC
+        _apply_custom_grid(ax, plot_df, view_limit)
+        if smc_overlay:
+            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+
+        # Indicator panels (OBV, RSI, MACD)
+        try:
+            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+        except Exception as e:
+            logging.error(f"❌ Indicator panels error (scan): {repr(e)}")
+
+        # Date labels on bottom panel
+        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -715,11 +1002,19 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
     fig = None
 
     try:
+        # Create figure with 4 panels: main chart (6) + OBV (1) + RSI (1) + MACD (1)
+        _dummy_panels = [
+            mpf.make_addplot([float('nan')] * view_limit, panel=1, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=2, color='gray'),
+            mpf.make_addplot([float('nan')] * view_limit, panel=3, color='gray'),
+        ]
+
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
-            yscale='log',
+            addplot=_dummy_panels, yscale='log',
             title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
-            figsize=(14, 8), returnfig=True, tight_layout=True
+            figsize=(14, 13), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1, 1)
         )
 
         ax = axlist[0]
@@ -738,6 +1033,20 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
                 _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, 0)
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (simple): {repr(e)}")
+
+        # Custom grid + date labels + right margin SMC
+        _apply_custom_grid(ax, plot_df, view_limit)
+        if smc_overlay:
+            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+
+        # Indicator panels (OBV, RSI, MACD)
+        try:
+            _add_indicator_panels(fig, axlist, plot_df, view_limit)
+        except Exception as e:
+            logging.error(f"❌ Indicator panels error (simple): {repr(e)}")
+
+        # Date labels on bottom panel
+        _apply_date_labels_bottom(axlist[6], plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 

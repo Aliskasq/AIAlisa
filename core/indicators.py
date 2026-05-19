@@ -65,6 +65,20 @@ def calculate_binance_indicators(df: pd.DataFrame, tf_key: str):
     df['rsi6'] = 100 - (100 / (1 + rs6))
     df['rsi6'] = df['rsi6'].fillna(50)
 
+    # RSI(12) — medium RSI for chart panel
+    avg_g12 = rma(gain, 12)
+    avg_l12 = rma(loss, 12)
+    rs12 = avg_g12 / avg_l12.replace(0, np.nan)
+    df['rsi12'] = 100 - (100 / (1 + rs12))
+    df['rsi12'] = df['rsi12'].fillna(50)
+
+    # RSI(24) — slow RSI for chart panel
+    avg_g24 = rma(gain, 24)
+    avg_l24 = rma(loss, 24)
+    rs24 = avg_g24 / avg_l24.replace(0, np.nan)
+    df['rsi24'] = 100 - (100 / (1 + rs24))
+    df['rsi24'] = df['rsi24'].fillna(50)
+
     # 3. MACD
     ema12 = df['close'].ewm(span=12, adjust=False).mean()
     ema26 = df['close'].ewm(span=26, adjust=False).mean()
