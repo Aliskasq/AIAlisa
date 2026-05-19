@@ -953,7 +953,8 @@ async def main():
                             is_sent, _ = await send_breakout_notification(
                                 sym, full_df, line_data, tf, alert_type, session,
                                 dynamic_trigger, ai_verdict or "",
-                                smc_overlay=smc_data.get(tf)
+                                smc_overlay=smc_data.get(tf),
+                                from_vol_wait=True
                             )
                             logging.info(f"🟢 VOL PASS: {sym} {_ai_dir} (conf {_confidence:.0f}%)")
 

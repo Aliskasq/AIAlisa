@@ -187,7 +187,7 @@ SIGNAL_ADX_TRENDING = 20         # ADX below this = flat market
 SIGNAL_LEVERAGE = 1              # ALWAYS 1x, no leverage
 SIGNAL_DEPOSIT_PCT = 2           # ALWAYS 2% of bank per trade
 SIGNAL_MIN_VOLUME_12H = 2_000_000   # $2M — 12h volume pass threshold
-SIGNAL_MIN_VOLUME_1H = 170_000     # $170K — 1h candle volume + green = pass
+SIGNAL_MIN_VOLUME_1H = 120_000     # $120K — 1h candle volume + green = pass
 SIGNAL_SL_ATR_MULT = 2.0          # SL = 2 × ATR from entry
 SIGNAL_TP_ATR_MULT = 3.0          # TP = 3 × ATR (R:R = 1:1.5)
 SIGNAL_SL_MIN_PCT = 5.0           # SL floor — never less than 5% from entry

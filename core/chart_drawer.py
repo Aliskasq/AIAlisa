@@ -13,7 +13,7 @@ from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID
 
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
-async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None, smc_overlay=None):
+async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None, smc_overlay=None, from_vol_wait=False):
     # FIX: Sync view limit perfectly with scanner (199)
     view_limit = min(len(df), 199)
     custom_style = 'charles'
@@ -172,7 +172,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     
     # Build header for photo caption
     header = (
-        f"${short_symbol} 🎯 TREND BREAKOUT\n"
+        f"${short_symbol} {'📈VOL UP. TREND BREAKOUT' if from_vol_wait else '🎯 TREND BREAKOUT'}\n"
         f"⏳ TF: {tf} | 💰 Price: {current_price:.6f}\n"
         f"💡 Above trendline by {diff_pct:.2f}%\n\n"
         f"🤖 AI-Alisa-CopilotClow:\n"
