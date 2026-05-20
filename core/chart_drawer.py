@@ -112,10 +112,10 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (breakout): {repr(e)}")
 
-        # Custom grid + right margin SMC
+        # Custom grid + SMC annotations
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
-            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+            _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df)
 
         # Style indicator panels (RSI levels, MACD zero, grid off)
         try:
@@ -123,8 +123,8 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         except Exception as e:
             logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
-        # Date labels on bottom-most axis
-        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
+        # Date labels under main chart (between chart and indicators)
+        _apply_date_labels_main(ax, plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -445,32 +445,26 @@ async def delete_telegram_message(session, message_id):
 def _apply_custom_grid(ax, plot_df, view_limit):
     """
     Custom grid: vertical lines every 20 candles, horizontal every 10% price.
-    Date labels horizontal in 2 lines (Apr 16 / 12:00) under each vertical line.
-    Removes default matplotlib grid and x/y tick labels.
+    Removes default matplotlib grid, x/y tick labels, and "Price" ylabel.
     """
     import matplotlib.ticker as mticker
-    from matplotlib.dates import num2date
 
-    # Remove default grid and tick labels
+    # Remove default grid, tick labels, and "Price" ylabel
     ax.grid(False)
     ax.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
     ax.tick_params(axis='y', which='both', labelright=False, labelleft=False, right=False, left=False)
+    ax.set_ylabel('')  # Remove "Price" label
 
     # --- Vertical lines every 20 candles ---
     for i in range(0, view_limit, 20):
         ax.axvline(x=i, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
 
-    # Date labels are drawn by _apply_date_labels_bottom on the lowest panel
-
     # --- Horizontal lines every 10% price ---
     y_low, y_high = ax.get_ylim()
     if y_low > 0 and y_high > 0:
         import math
-        # Log scale: find nice 10% steps
         log_low = math.log10(y_low)
         log_high = math.log10(y_high)
-        # Step through prices: start from a round base, go up in 10% steps
-        # Find starting price (round down to nearest power of 10)
         base = 10 ** math.floor(log_low)
         price = base
         while price < y_low:
@@ -480,58 +474,98 @@ def _apply_custom_grid(ax, plot_df, view_limit):
             price *= 1.1
 
 
-def _apply_date_labels_bottom(ax_bottom, plot_df, view_limit):
+def _apply_date_labels_main(ax_main, plot_df, view_limit):
     """
-    Add date labels at the bottom of the figure (below all panels).
-    Called on the lowest axis. Labels at every 20-candle mark.
+    Draw date labels below the main chart panel (between chart and indicators).
+    Bold black font, 2-line format (date + time), every 20 candles.
     """
-    ax_bottom.tick_params(axis='x', which='both', labelbottom=False, bottom=False)
     import matplotlib.transforms as mtransforms
-    trans = mtransforms.blended_transform_factory(ax_bottom.transData, ax_bottom.transAxes)
+    trans = mtransforms.blended_transform_factory(ax_main.transData, ax_main.transAxes)
     for i in range(0, view_limit, 20):
         if i < len(plot_df):
             dt = plot_df.index[i]
             line1 = dt.strftime('%b %d')
             line2 = dt.strftime('%H:%M')
             label = f"{line1}\n{line2}"
-            ax_bottom.text(i, -0.3, label,
-                    color='#888888', fontsize=6, ha='center', va='top',
-                    transform=trans, clip_on=False,
-                    zorder=5)
+            ax_main.text(i, -0.03, label,
+                    color='black', fontsize=7, fontweight='bold',
+                    ha='center', va='top',
+                    transform=trans, clip_on=False, zorder=5)
 
 
-def _draw_right_margin_smc(ax, smc_data, view_limit, plot_df):
+def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df):
     """
-    Draw SMC annotations on right margin:
-    - Strong High / Weak Low with price
-    - Visible OB prices (top & bottom of each block)
-    - Arrows for off-screen OBs (max 2 up, max 2 down)
-    Replaces the standard Y-axis scale.
+    Draw SMC annotations on the chart:
+    - Strong High label ABOVE the high line, Strong Low BELOW the low line
+    - If high/low is too far away, clamp Y-axis and show "+XX%" at top/bottom
+    - Visible OB prices at their block price levels (right edge of chart)
+    - Off-screen OBs: ↑ arrows in top strip, ↓ arrows in bottom strip (below chart)
     """
+    import math as _math
+    import matplotlib.transforms as mtransforms
+
     if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
         return
 
-    y_low, y_high = ax.get_ylim()
     trailing = smc_data.get("trailing", {})
-    right_x = view_limit + 1  # X position for right margin text
-
-    # --- Strong High / Weak Low ---
     t_high = trailing.get("trailing_high")
     t_low = trailing.get("trailing_low")
     high_label = trailing.get("high_label", "High")
     low_label = trailing.get("low_label", "Low")
 
-    if t_high is not None:
-        price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
-        ax.text(right_x, t_high, f"{high_label}\n{price_str}",
-                color='#F23645', fontsize=7, fontweight='bold',
-                ha='left', va='center', zorder=5)
+    chart_high = float(plot_df['high'].max())
+    chart_low = float(plot_df['low'].min())
+    current_price = float(plot_df['close'].iloc[-1])
 
+    # --- Clamp Y-axis if high/low is too far (>50% beyond visible candles) ---
+    high_clamped = False
+    low_clamped = False
+
+    if t_high is not None and chart_high > 0 and t_high / chart_high > 1.5:
+        high_clamped = True
+    if t_low is not None and chart_low > 0 and chart_low / t_low > 1.5:
+        low_clamped = True
+
+    if high_clamped or low_clamped:
+        cur_ylow, cur_yhigh = ax.get_ylim()
+        new_top = chart_high * 1.10 if high_clamped else cur_yhigh
+        new_bot = chart_low * 0.90 if low_clamped else cur_ylow
+        ax.set_ylim(new_bot, new_top)
+
+    y_low, y_high = ax.get_ylim()
+    trans_ax = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+
+    # --- Strong High / Weak High label ---
+    if t_high is not None:
+        if high_clamped:
+            pct = ((t_high / current_price) - 1) * 100
+            price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
+            ax.text(view_limit * 0.5, 1.02, f"{high_label}  {price_str}  (+{pct:.0f}%)",
+                    color='black', fontsize=8, fontweight='bold',
+                    ha='center', va='bottom',
+                    transform=trans_ax, clip_on=False, zorder=6)
+        else:
+            price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
+            # Label ABOVE the high line
+            ax.text(view_limit - 3, t_high, f"{high_label}  {price_str}",
+                    color='#F23645', fontsize=8, fontweight='bold',
+                    ha='right', va='bottom', zorder=6)
+
+    # --- Strong Low / Weak Low label ---
     if t_low is not None:
-        price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
-        ax.text(right_x, t_low, f"{low_label}\n{price_str}",
-                color='#089981', fontsize=7, fontweight='bold',
-                ha='left', va='center', zorder=5)
+        if low_clamped:
+            pct = ((current_price / t_low) - 1) * 100
+            price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
+            ax.text(view_limit * 0.5, -0.06, f"{low_label}  {price_str}  (-{pct:.0f}%)",
+                    color='black', fontsize=8, fontweight='bold',
+                    ha='center', va='top',
+                    transform=trans_ax, clip_on=False, zorder=6)
+        else:
+            price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
+            # Label BELOW the low line
+            ax.text(view_limit - 3, t_low, f"{low_label}  {price_str}",
+                    color='#089981', fontsize=8, fontweight='bold',
+                    ha='right', va='top', zorder=6)
 
     # --- Collect all OBs ---
     all_obs = []
@@ -546,7 +580,6 @@ def _draw_right_margin_smc(ax, smc_data, view_limit, plot_df):
     below_obs = []
 
     for ob in all_obs:
-        ob_mid = (ob["high"] + ob["low"]) / 2
         if ob["low"] > y_high:
             above_obs.append(ob)
         elif ob["high"] < y_low:
@@ -554,44 +587,41 @@ def _draw_right_margin_smc(ax, smc_data, view_limit, plot_df):
         else:
             visible_obs.append(ob)
 
-    # Sort by price for clean layout
     above_obs.sort(key=lambda o: o["low"])
     below_obs.sort(key=lambda o: -o["high"])
 
-    # --- Visible OB prices on right margin ---
+    # --- Visible OB prices at their block price levels (right edge) ---
+    right_x = view_limit + 0.5
     for ob in visible_obs:
         hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
         lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
         color = '#F23645' if ob["bias"] == -1 else '#089981'
-        # Top price of block
         ax.text(right_x, ob["high"], hi_str,
-                color=color, fontsize=6, ha='left', va='bottom', zorder=5)
-        # Bottom price of block
+                color=color, fontsize=6, ha='left', va='bottom', zorder=5, clip_on=False)
         ax.text(right_x, ob["low"], lo_str,
-                color=color, fontsize=6, ha='left', va='top', zorder=5)
+                color=color, fontsize=6, ha='left', va='top', zorder=5, clip_on=False)
 
-    # --- Arrows for off-screen OBs (max 2 each direction) ---
-    arrow_x = right_x + 0.5
-
-    # Above (↑ arrows near top)
+    # --- Off-screen OBs: ↑ arrows in TOP strip (above chart) ---
     for i, ob in enumerate(above_obs[:2]):
         hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
         lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
-        y_pos = y_high * (0.97 - i * 0.06)  # stack from top
         color = '#F23645' if ob["bias"] == -1 else '#089981'
-        ax.text(arrow_x, y_pos, f"↑ {lo_str}-{hi_str}",
+        x_frac = 0.75 + i * 0.12  # spread horizontally in top strip
+        ax.text(x_frac, 1.01 + i * 0.025, f"↑ {lo_str}-{hi_str}",
                 color=color, fontsize=6, fontweight='bold',
-                ha='left', va='top', zorder=5)
+                ha='center', va='bottom',
+                transform=ax.transAxes, clip_on=False, zorder=5)
 
-    # Below (↓ arrows near bottom)
+    # --- Off-screen OBs: ↓ arrows in BOTTOM strip (below chart, near dates) ---
     for i, ob in enumerate(below_obs[:2]):
         hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
         lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
-        y_pos = y_low * (1.03 + i * 0.06)  # stack from bottom
         color = '#F23645' if ob["bias"] == -1 else '#089981'
-        ax.text(arrow_x, y_pos, f"↓ {lo_str}-{hi_str}",
+        x_frac = 0.75 + i * 0.12
+        ax.text(x_frac, -0.03 - i * 0.025, f"↓ {lo_str}-{hi_str}",
                 color=color, fontsize=6, fontweight='bold',
-                ha='left', va='bottom', zorder=5)
+                ha='center', va='top',
+                transform=ax.transAxes, clip_on=False, zorder=5)
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
@@ -822,30 +852,27 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0):
                     color=color, fontsize=fontsize, fontweight='bold',
                     ha='center', va=label_va, zorder=4, alpha=0.9)
 
-    # ─── 3. STRONG/WEAK HIGH/LOW ───────────────────────────────────────
+    # ─── 3. STRONG/WEAK HIGH/LOW LINES ─────────────────────────────────
+    # Lines extend from the pivot candle all the way to the right margin edge.
+    # Colors: red (#F23645) for high, teal/sea-green (#089981) for low.
+    # Labels are drawn by _draw_smc_annotations (not here).
     if trailing:
         t_high = trailing.get("trailing_high")
         t_low = trailing.get("trailing_low")
-        high_label = trailing.get("high_label", "High")
-        low_label = trailing.get("low_label", "Low")
         t_high_idx = trailing.get("trailing_high_index", 0) - idx_offset
         t_low_idx = trailing.get("trailing_low_index", 0) - idx_offset
 
         if t_high is not None:
             x_start_h = max(t_high_idx, -0.5)
-            h_color = '#F23645'
-            ax.hlines(y=t_high, xmin=x_start_h, xmax=view_limit + 2,
-                      colors=h_color, linestyles='-', linewidths=1.0,
-                      zorder=3, alpha=0.7)
-            # Text label moved to _draw_right_margin_smc
+            ax.hlines(y=t_high, xmin=x_start_h, xmax=view_limit + 8,
+                      colors='#F23645', linestyles='-', linewidths=1.2,
+                      zorder=3, alpha=0.8, clip_on=False)
 
         if t_low is not None:
             x_start_l = max(t_low_idx, -0.5)
-            l_color = '#089981'
-            ax.hlines(y=t_low, xmin=x_start_l, xmax=view_limit + 2,
-                      colors=l_color, linestyles='-', linewidths=1.0,
-                      zorder=3, alpha=0.7)
-            # Text label moved to _draw_right_margin_smc
+            ax.hlines(y=t_low, xmin=x_start_l, xmax=view_limit + 8,
+                      colors='#089981', linestyles='-', linewidths=1.2,
+                      zorder=3, alpha=0.8, clip_on=False)
 
 
 async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, smc_overlay: dict = None) -> str | None:
@@ -962,10 +989,10 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             except Exception as e:
                 logging.error(f"❌ SMC overlay error: {repr(e)}")
 
-        # Custom grid + right margin SMC
+        # Custom grid + SMC annotations
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
-            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+            _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df)
 
         # Style indicator panels
         try:
@@ -973,8 +1000,8 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
-        # Date labels on bottom-most axis
-        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
+        # Date labels under main chart
+        _apply_date_labels_main(ax, plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
@@ -1036,10 +1063,10 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             except Exception as e:
                 logging.error(f"❌ SMC overlay error (simple): {repr(e)}")
 
-        # Custom grid + right margin SMC
+        # Custom grid + SMC annotations
         _apply_custom_grid(ax, plot_df, view_limit)
         if smc_overlay:
-            _draw_right_margin_smc(ax, smc_overlay, view_limit, plot_df)
+            _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df)
 
         # Style indicator panels
         try:
@@ -1047,8 +1074,8 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 
-        # Date labels on bottom-most axis
-        _apply_date_labels_bottom(axlist[-1], plot_df, view_limit)
+        # Date labels under main chart
+        _apply_date_labels_main(ax, plot_df, view_limit)
 
         fig.savefig(file_path, dpi=120, bbox_inches='tight')
 
