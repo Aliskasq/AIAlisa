@@ -108,6 +108,7 @@ def _detect_pivots_from_legs(highs: np.ndarray, lows: np.ndarray,
 
 def detect_structure(df: pd.DataFrame, size: int,
                      internal: bool = False,
+                     confluence_filter: bool = False,
                      swing_high_level: float = None,
                      swing_low_level: float = None,
                      swing_high_per_bar: np.ndarray = None,
@@ -171,13 +172,25 @@ def detect_structure(df: pd.DataFrame, size: int,
                     last_high["index"] = p["index"]
                     last_high["crossed"] = False
 
+        # Candle shape filter (Pine: bullishBar / bearishBar)
+        # Only active when confluence_filter=True AND internal=True
+        # Pine: bullishBar := (high - max(close,open)) > (min(close,open) - low)
+        if confluence_filter and internal:
+            upper_wick = highs[i] - max(closes[i], opens[i])
+            lower_wick = min(closes[i], opens[i]) - lows[i]
+            bullish_bar = upper_wick > lower_wick
+            bearish_bar = upper_wick < lower_wick
+        else:
+            bullish_bar = True
+            bearish_bar = True
+
         # Check bullish break: close crosses above last high
         if last_high["price"] is not None and not last_high["crossed"]:
             # Crossover: previous close <= level AND current close > level
             prev_close = closes[i - 1] if i > 0 else 0
             if prev_close <= last_high["price"] and closes[i] > last_high["price"]:
                 # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
-                # Pine: extraCondition = internalHigh.currentLevel != swingHigh.currentLevel
+                # Pine: extraCondition = internalHigh.currentLevel != swingHigh.currentLevel and bullishBar
                 skip = False
                 if internal:
                     if swing_high_per_bar is not None and i < len(swing_high_per_bar):
@@ -186,6 +199,9 @@ def detect_structure(df: pd.DataFrame, size: int,
                     elif swing_high_level is not None:
                         if last_high["price"] == swing_high_level:
                             skip = True
+                    # Candle shape filter (when confluence_filter enabled)
+                    if not skip and not bullish_bar:
+                        skip = True
 
                 if not skip:
                     tag = "CHoCH" if trend == BEARISH else "BOS"
@@ -204,6 +220,7 @@ def detect_structure(df: pd.DataFrame, size: int,
             prev_close = closes[i - 1] if i > 0 else float('inf')
             if prev_close >= last_low["price"] and closes[i] < last_low["price"]:
                 # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
+                # Pine: extraCondition = internalLow.currentLevel != swingLow.currentLevel and bearishBar
                 skip = False
                 if internal:
                     if swing_low_per_bar is not None and i < len(swing_low_per_bar):
@@ -212,6 +229,9 @@ def detect_structure(df: pd.DataFrame, size: int,
                     elif swing_low_level is not None:
                         if last_low["price"] == swing_low_level:
                             skip = True
+                    # Candle shape filter (when confluence_filter enabled)
+                    if not skip and not bearish_bar:
+                        skip = True
 
                 if not skip:
                     tag = "CHoCH" if trend == BULLISH else "BOS"
@@ -344,37 +364,11 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
         order_blocks.append(ob)
 
     # Return unmitigated, most recent blocks (capped)
+    # Exact Pine logic: no dedup, just keep the N most recent unmitigated OBs
+    # Pine uses unshift (prepend) + slice(0, N) = most recent N
+    # Python: order_blocks are in chronological order, so [-N:] = most recent N
     active = [ob for ob in order_blocks if not ob["mitigated"]]
     mitigated_count = len(order_blocks) - len(active)
-
-    # Deduplicate overlapping OBs of the same bias (keep the more recent one)
-    def _dedup_overlapping(obs: List[Dict]) -> List[Dict]:
-        if len(obs) <= 1:
-            return obs
-        result = []
-        for ob in obs:
-            merged = False
-            for j in range(len(result) - 1, -1, -1):
-                existing = result[j]
-                if ob["bias"] != existing["bias"]:
-                    continue
-                # Check price overlap
-                overlap_lo = max(ob["low"], existing["low"])
-                overlap_hi = min(ob["high"], existing["high"])
-                if overlap_hi <= overlap_lo:
-                    continue
-                smaller_range = min(ob["high"] - ob["low"], existing["high"] - existing["low"])
-                if smaller_range > 0 and (overlap_hi - overlap_lo) / smaller_range > 0.5:
-                    # >50% overlap — keep the more recent one
-                    if ob["index"] > existing["index"]:
-                        result[j] = ob
-                    merged = True
-                    break
-            if not merged:
-                result.append(ob)
-        return result
-
-    active = _dedup_overlapping(active)
 
     sym_tag = f" [{symbol}]" if symbol else ""
     logging.info(f"📦 OB summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
@@ -473,14 +467,20 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200) — Pine ta.rma(tr, 200): alpha = 1/200, ewm(com=199)
+    # ATR(200) — exact Pine ta.rma(tr, 200): na for first 199 bars, SMA seed, then EWM
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).ewm(com=199, min_periods=1, adjust=False).mean().values
+    atr_length = 200
+    atr200 = np.full(n, np.nan)
+    if n >= atr_length:
+        atr200[atr_length - 1] = np.mean(tr[:atr_length])  # SMA seed
+        alpha = 1.0 / atr_length
+        for i in range(atr_length, n):
+            atr200[i] = alpha * tr[i] + (1 - alpha) * atr200[i - 1]
 
     equals = []
 
@@ -493,7 +493,7 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
         prev = pivot_highs[j - 1]
         curr = pivot_highs[j]
         idx = curr["index"]
-        if idx < n and atr200[idx] > 0:
+        if idx < n and not np.isnan(atr200[idx]) and atr200[idx] > 0:
             if abs(curr["price"] - prev["price"]) < threshold * atr200[idx]:
                 equals.append({
                     "type": "EQH",
@@ -507,7 +507,7 @@ def find_equal_highs_lows(df: pd.DataFrame, pivots: List[Dict],
         prev = pivot_lows[j - 1]
         curr = pivot_lows[j]
         idx = curr["index"]
-        if idx < n and atr200[idx] > 0:
+        if idx < n and not np.isnan(atr200[idx]) and atr200[idx] > 0:
             if abs(curr["price"] - prev["price"]) < threshold * atr200[idx]:
                 equals.append({
                     "type": "EQL",
@@ -561,26 +561,26 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
     trailing_low_idx = 0
 
     # Walk through every bar (exact Pine Script execution order)
+    # Pine: updateTrailingExtremes() runs BEFORE getCurrentStructure()
+    # So trailing update happens first, then pivot reset OVERWRITES it.
     for i in range(n):
-        # 1. getCurrentStructure resets trailing on new pivots
-        if i in pivot_events:
-            for p in pivot_events[i]:
-                if p["type"] == "high":
-                    # New swing high pivot → reset trailing.top
-                    trailing_high = p["price"]
-                    trailing_high_idx = i
-                elif p["type"] == "low":
-                    # New swing low pivot → reset trailing.bottom
-                    trailing_low = p["price"]
-                    trailing_low_idx = i
-
-        # 2. updateTrailingExtremes runs every bar AFTER pivot update
+        # 1. updateTrailingExtremes runs FIRST (exact Pine execution order)
         if highs[i] >= trailing_high:
             trailing_high = float(highs[i])
             trailing_high_idx = i
         if lows[i] <= trailing_low:
             trailing_low = float(lows[i])
             trailing_low_idx = i
+
+        # 2. getCurrentStructure resets trailing AFTER update (overwrites)
+        if i in pivot_events:
+            for p in pivot_events[i]:
+                if p["type"] == "high":
+                    trailing_high = p["price"]
+                    trailing_high_idx = i
+                elif p["type"] == "low":
+                    trailing_low = p["price"]
+                    trailing_low_idx = i
 
     # Strong/Weak labels (exact LuxAlgo ternary logic)
     # Pine: swingTrend.bias == BEARISH ? 'Strong High' : 'Weak High'
@@ -650,20 +650,25 @@ def get_premium_discount(trailing: Dict, current_price: float) -> Dict:
 def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
                 internal_size: int = 5, swing_size: int = 50,
                 ob_mitigation: str = "highlow",
+                show_internal_obs: bool = True,
+                show_swing_obs: bool = False,
+                confluence_filter: bool = False,
                 symbol: str = "") -> Dict:
     """
     Full SMC analysis — exact LuxAlgo port.
 
-    Pipeline (matches LuxAlgo execution order):
-    1. getCurrentStructure(swingsLengthInput)     → swing pivots
-    2. getCurrentStructure(5, internal=True)       → internal pivots
-    3. getCurrentStructure(eqhlLength, eqhl=True)  → equal highs/lows pivots
-    4. displayStructure(internal=True)             → internal BOS/CHoCH + internal OBs
-    5. displayStructure()                          → swing BOS/CHoCH + swing OBs
-    6. deleteOrderBlocks (mitigation check)
-    7. updateTrailingExtremes + Strong/Weak High/Low
+    Pipeline (exact LuxAlgo execution order):
+    1. updateTrailingExtremes()                    → trailing max/min BEFORE pivots
+    2. getCurrentStructure(swingsLengthInput)       → swing pivots (resets trailing)
+    3. getCurrentStructure(5, internal=True)        → internal pivots
+    4. getCurrentStructure(eqhlLength, eqhl=True)  → equal highs/lows pivots
+    5. displayStructure(internal=True)             → internal BOS/CHoCH + internal OBs
+    6. displayStructure()                          → swing BOS/CHoCH + swing OBs
+    7. deleteOrderBlocks (mitigation check)
     8. Premium/Discount zones
     9. Fair Value Gaps
+
+    LuxAlgo defaults: show_internal_obs=True, show_swing_obs=False.
 
     Returns dict with all SMC data + formatted text summary.
     """
@@ -734,6 +739,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
         internal_structures, internal_pivots, internal_trend = detect_structure(
             df, internal_size, internal=True,
+            confluence_filter=confluence_filter,
             swing_high_per_bar=swing_high_per_bar,
             swing_low_per_bar=swing_low_per_bar,
         )
@@ -748,13 +754,18 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         equal_hl = find_equal_highs_lows(df, eqhl_pivots, threshold=0.1)
 
         # ── 4-5. ORDER BLOCKS ──
-        # LuxAlgo defaults: internal OBs ON (max 5), swing OBs OFF (max 5)
-        internal_obs = find_order_blocks(
-            df, internal_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
-        )
-        swing_obs = find_order_blocks(
-            df, swing_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
-        )
+        # Exact LuxAlgo defaults: internal OBs ON (max 5), swing OBs OFF
+        # Pine: OBs are only created when their display toggle is ON
+        internal_obs = []
+        if show_internal_obs:
+            internal_obs = find_order_blocks(
+                df, internal_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
+            )
+        swing_obs = []
+        if show_swing_obs:
+            swing_obs = find_order_blocks(
+                df, swing_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
+            )
 
         # ── 6. FAIR VALUE GAPS ──
         all_fvgs = find_fair_value_gaps(df)
@@ -814,13 +825,16 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
                 lines.append(f"  {s['_source']} {s['type']} {bias_str} @ {s['price']:.6f} ({bars} bars ago)")
 
         # Active Order Blocks (sorted by distance)
+        # Only include OBs that are enabled (matching LuxAlgo display toggles)
         all_obs = []
-        for ob in swing_obs:
-            ob["_source"] = "Swing"
-            all_obs.append(ob)
-        for ob in internal_obs:
-            ob["_source"] = "Int"
-            all_obs.append(ob)
+        if show_swing_obs:
+            for ob in swing_obs:
+                ob["_source"] = "Swing"
+                all_obs.append(ob)
+        if show_internal_obs:
+            for ob in internal_obs:
+                ob["_source"] = "Int"
+                all_obs.append(ob)
 
         if all_obs:
             for ob in all_obs:
