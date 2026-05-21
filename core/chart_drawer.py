@@ -592,9 +592,9 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
                     color='#089981', fontsize=8, fontweight='bold',
                     ha='right', va='top', zorder=6)
 
-    # --- Collect OBs for annotation ---
-    # LuxAlgo default: only internal OBs displayed (swing OBs OFF)
-    all_obs = list(smc_data.get("internal_order_blocks", []))
+    # --- Collect all OBs for annotation (both internal and swing) ---
+    all_obs = list(smc_data.get("swing_order_blocks", []))
+    all_obs += list(smc_data.get("internal_order_blocks", []))
 
     # Classify: visible vs above vs below chart area
     visible_obs = []
@@ -815,9 +815,11 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
         if not merged:
             deduped_internal.append(iob)
 
-    # LuxAlgo default: swing OBs OFF, only internal OBs displayed
-    # To enable swing OBs, add (swing_obs_list, False) back to this list
+    # Both internal and swing OBs displayed.
+    # Swing OBs: thin black border to distinguish from internal.
+    # Internal OBs: no border (LuxAlgo default style).
     for ob_list, is_internal in [
+        (swing_obs_list, False),
         (deduped_internal, True),
     ]:
         for ob in ob_list:
@@ -837,10 +839,11 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
                 fc = (0.97, 0.49, 0.50, 0.20) if is_internal else (0.70, 0.16, 0.20, 0.20)
 
             width = ob_x_end - ob_x_start + 0.5
+            # Swing OBs: thin black border; Internal OBs: no border
             rect = Rectangle(
                 (ob_x_start, ob_low), width, ob_high - ob_low,
-                linewidth=0 if is_internal else 0.5,
-                edgecolor=fc[:3] + (0.5,) if not is_internal else None,
+                linewidth=0.8 if not is_internal else 0,
+                edgecolor='black' if not is_internal else None,
                 facecolor=fc, zorder=1
             )
             ax.add_patch(rect)

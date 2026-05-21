@@ -250,22 +250,30 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     closes = df["close"].values
     n = len(df)
 
-    # ATR(200) for volatility filter — Pine ta.atr(200) uses ta.rma(tr, 200)
-    # ta.rma: alpha = 1/length, equivalent to ewm(com=length-1) in pandas
-    # First value initialized with SMA, then EWM (Pine RMA behavior)
+    # ATR(200) for volatility filter — exact Pine ta.atr(200) = ta.rma(tr, 200)
+    # Pine ta.rma: returns na for first (length-1) bars, SMA at bar length-1,
+    # then alpha=1/length exponential from bar length onward.
+    atr_length = 200
     tr = np.zeros(n)
     tr[0] = highs[0] - lows[0]
     for i in range(1, n):
         tr[i] = max(highs[i] - lows[i],
                      abs(highs[i] - closes[i - 1]),
                      abs(lows[i] - closes[i - 1]))
-    atr200 = pd.Series(tr).ewm(com=199, min_periods=1, adjust=False).mean().values
+    # Pine RMA: na for bars 0..length-2, SMA at bar length-1, then EWM
+    atr200 = np.full(n, np.nan)
+    if n >= atr_length:
+        atr200[atr_length - 1] = np.mean(tr[:atr_length])  # SMA seed
+        alpha = 1.0 / atr_length
+        for i in range(atr_length, n):
+            atr200[i] = alpha * tr[i] + (1 - alpha) * atr200[i - 1]
 
     # Build parsed highs/lows arrays (exact LuxAlgo high-volatility bar logic)
+    # When ATR is nan (first 199 bars), comparison is False → no swap (matches Pine)
     parsed_highs = np.copy(highs)
     parsed_lows = np.copy(lows)
     for i in range(n):
-        if (highs[i] - lows[i]) >= 2 * atr200[i] and atr200[i] > 0:
+        if not np.isnan(atr200[i]) and (highs[i] - lows[i]) >= 2 * atr200[i]:
             # High volatility bar: swap
             parsed_highs[i] = lows[i]
             parsed_lows[i] = highs[i]
@@ -307,8 +315,8 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
             "mitigated_index": None,
         }
 
-        # Check mitigation after the break
-        for k in range(break_idx + 1, n):
+        # Check mitigation from the break bar (Pine: deleteOrderBlocks runs every bar including break bar)
+        for k in range(break_idx, n):
             if mitigation == "close":
                 mit_bear_src = closes[k]
                 mit_bull_src = closes[k]
