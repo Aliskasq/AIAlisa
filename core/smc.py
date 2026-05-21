@@ -740,11 +740,12 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         equal_hl = find_equal_highs_lows(df, eqhl_pivots, threshold=0.1)
 
         # ── 4-5. ORDER BLOCKS ──
+        # LuxAlgo defaults: internal OBs ON (max 5), swing OBs OFF (max 5)
         internal_obs = find_order_blocks(
-            df, internal_structures, max_blocks=10, mitigation=ob_mitigation, symbol=symbol
+            df, internal_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
         )
         swing_obs = find_order_blocks(
-            df, swing_structures, max_blocks=10, mitigation=ob_mitigation, symbol=symbol
+            df, swing_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
         )
 
         # ── 6. FAIR VALUE GAPS ──

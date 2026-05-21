@@ -592,9 +592,9 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
                     color='#089981', fontsize=8, fontweight='bold',
                     ha='right', va='top', zorder=6)
 
-    # --- Collect all OBs ---
-    all_obs = list(smc_data.get("swing_order_blocks", []))
-    all_obs += list(smc_data.get("internal_order_blocks", []))
+    # --- Collect OBs for annotation ---
+    # LuxAlgo default: only internal OBs displayed (swing OBs OFF)
+    all_obs = list(smc_data.get("internal_order_blocks", []))
 
     # Classify: visible vs above vs below chart area
     visible_obs = []
@@ -815,8 +815,9 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
         if not merged:
             deduped_internal.append(iob)
 
+    # LuxAlgo default: swing OBs OFF, only internal OBs displayed
+    # To enable swing OBs, add (swing_obs_list, False) back to this list
     for ob_list, is_internal in [
-        (swing_obs_list, False),
         (deduped_internal, True),
     ]:
         for ob in ob_list:
