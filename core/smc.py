@@ -574,16 +574,18 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
             trailing_low = float(lows[i])
             trailing_low_idx = i
 
-    # Strong/Weak labels (exact LuxAlgo logic)
+    # Strong/Weak labels (exact LuxAlgo ternary logic)
+    # Pine: swingTrend.bias == BEARISH ? 'Strong High' : 'Weak High'
+    # Pine: swingTrend.bias == BULLISH ? 'Strong Low'  : 'Weak Low'
+    # When bias is 0 (undefined), Pine ternary falls to the else branch:
+    #   → 'Weak High' and 'Weak Low' (NOT bare "High"/"Low")
     if swing_trend == BEARISH:
         high_label = "Strong High"
         low_label = "Weak Low"
-    elif swing_trend == BULLISH:
-        high_label = "Weak High"
-        low_label = "Strong Low"
     else:
-        high_label = "High"
-        low_label = "Low"
+        # BULLISH or undefined (0) — both produce "Weak High"
+        high_label = "Weak High"
+        low_label = "Strong Low" if swing_trend == BULLISH else "Weak Low"
 
     return {
         "trailing_high": float(trailing_high),
