@@ -83,16 +83,16 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     fig = None
 
     try:
-        # Compute indicator addplots for panels 1, 2, 3
-        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
+        # Compute indicator addplots for panels (RSI only, no MACD)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style=custom_style,
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {line_type} (LOG-MODE)",
-            figsize=(14, 13), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 1, 1, 1)
+            figsize=(14, 11), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 2)
         )
 
         ax = axlist[0]
@@ -122,9 +122,9 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         if smc_overlay:
             _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df, clamp_info)
 
-        # Style indicator panels (RSI levels, MACD zero, grid off)
+        # Style indicator panels (RSI levels + value labels)
         try:
-            _style_indicator_panels(axlist)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
@@ -691,52 +691,44 @@ def _compute_indicator_addplots(plot_df, view_limit):
     macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
-    # Build addplots using mplfinance panels
+    # Build addplots using mplfinance panels (no MACD — removed by request)
+    # RSI colors match Binance: RSI(6) yellow, RSI(12) pink, RSI(24) dark purple
     addplots = [
-        # Panel 1: OBV
-        mpf.make_addplot(obv, panel=1, color='#26a69a', width=1.0, ylabel='OBV'),
-        mpf.make_addplot(obv_sma20, panel=1, color='#ef5350', width=0.8, linestyle='--'),
-        # Panel 2: RSI 6, 12, 24
-        mpf.make_addplot(rsi6, panel=2, color='#2196F3', width=1.0, ylabel='RSI'),
-        mpf.make_addplot(rsi12, panel=2, color='#1565C0', width=0.8),
-        mpf.make_addplot(rsi24, panel=2, color='#0D47A1', width=0.8),
-        # Panel 3: MACD line + signal
-        mpf.make_addplot(macd_line, panel=3, color='#F0B90B', width=1.0, ylabel='MACD'),
-        mpf.make_addplot(macd_signal, panel=3, color='#E040FB', width=0.8),
-        # Panel 3: MACD histogram as bar
-        mpf.make_addplot(macd_hist, panel=3, type='bar',
-                         color=['#26a69a' if v >= 0 else '#ef5350' for v in macd_hist],
-                         width=0.8, alpha=0.6),
+        # Panel 1: RSI 6, 12, 24 (Binance-style colors)
+        mpf.make_addplot(rsi6, panel=1, color='#F0B90B', width=1.2, ylabel='RSI'),
+        mpf.make_addplot(rsi12, panel=1, color='#E040FB', width=1.0),
+        mpf.make_addplot(rsi24, panel=1, color='#7B1FA2', width=1.0),
     ]
 
-    return addplots
+    # Store RSI values for labels (used by _style_indicator_panels)
+    _last_rsi = {
+        'rsi6': float(rsi6.iloc[-1]) if len(rsi6) > 0 else 0,
+        'rsi12': float(rsi12.iloc[-1]) if len(rsi12) > 0 else 0,
+        'rsi24': float(rsi24.iloc[-1]) if len(rsi24) > 0 else 0,
+    }
+
+    return addplots, _last_rsi
 
 
-def _style_indicator_panels(axlist):
+def _style_indicator_panels(axlist, rsi_values=None):
     """
     Style the indicator panels after rendering:
     - Remove grids, set tick sizes
-    - Add RSI 70/30 lines
-    - Add MACD zero line
-    axlist from mplfinance with 4 panels: indices depend on volume presence.
-    We find panels by checking axis count.
+    - Add RSI 70/30 lines + Binance-style RSI value labels
+    - No MACD panel (removed)
     """
-    # Collect all unique panels (mplfinance may return varying # of axes)
-    # Panels 1,2,3 are the indicator panels; find them dynamically
+    # Collect all unique panels
     panels = {}
     for ax in axlist:
-        # mplfinance tags axes with _panel_num attribute (unofficial but reliable)
         pnum = getattr(ax, '_panel_num', None)
         if pnum is not None and pnum not in panels:
             panels[pnum] = ax
 
-    # Fallback: if _panel_num not available, use index-based (skip first 2 = panel 0)
-    if len(panels) < 4 and len(axlist) >= 8:
-        panels = {0: axlist[0], 1: axlist[2], 2: axlist[4], 3: axlist[6]}
-    elif len(panels) < 4 and len(axlist) >= 4:
+    # Fallback
+    if len(panels) < 2 and len(axlist) >= 4:
         panels = {i: axlist[i] for i in range(min(4, len(axlist)))}
 
-    for pnum in [1, 2, 3]:
+    for pnum in [1]:
         ax = panels.get(pnum)
         if not ax:
             continue
@@ -744,17 +736,27 @@ def _style_indicator_panels(axlist):
         ax.tick_params(axis='both', labelsize=5, colors='#888888')
         ax.tick_params(axis='x', labelbottom=False)
 
-    # RSI panel: add 70/30 levels
-    ax_rsi = panels.get(2)
+    # RSI panel: add 70/30 levels + Binance-style value labels
+    ax_rsi = panels.get(1)
     if ax_rsi:
         ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.set_ylim(0, 100)
 
-    # MACD panel: add zero line
-    ax_macd = panels.get(3)
-    if ax_macd:
-        ax_macd.axhline(y=0, color='#888888', linewidth=0.3)
+        # Binance-style RSI labels at top of panel
+        if rsi_values:
+            r6 = rsi_values.get('rsi6', 0)
+            r12 = rsi_values.get('rsi12', 0)
+            r24 = rsi_values.get('rsi24', 0)
+            ax_rsi.text(0.01, 0.95, f"RSI(6): {r6:.2f}", color='#F0B90B',
+                       fontsize=5.5, fontweight='bold', transform=ax_rsi.transAxes,
+                       va='top', ha='left')
+            ax_rsi.text(0.18, 0.95, f"RSI(12): {r12:.2f}", color='#E040FB',
+                       fontsize=5.5, fontweight='bold', transform=ax_rsi.transAxes,
+                       va='top', ha='left')
+            ax_rsi.text(0.38, 0.95, f"RSI(24): {r24:.2f}", color='#7B1FA2',
+                       fontsize=5.5, fontweight='bold', transform=ax_rsi.transAxes,
+                       va='top', ha='left')
 
 
 def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_info=None):
@@ -987,16 +989,16 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
     fig = None
 
     try:
-        # Compute indicator addplots for panels 1, 2, 3
-        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
+        # Compute indicator addplots (RSI only)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
-            figsize=(14, 13), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 1, 1, 1)
+            figsize=(14, 11), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 2)
         )
 
         ax = axlist[0]
@@ -1031,9 +1033,9 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         if smc_overlay:
             _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df, clamp_info)
 
-        # Style indicator panels
+        # Style indicator panels (RSI + value labels)
         try:
-            _style_indicator_panels(axlist)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
@@ -1072,15 +1074,15 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
     fig = None
 
     try:
-        # Compute indicator addplots for panels 1, 2, 3
-        _ind_addplots = _compute_indicator_addplots(plot_df, view_limit)
+        # Compute indicator addplots (RSI only)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
             addplot=_ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
-            figsize=(14, 13), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 1, 1, 1)
+            figsize=(14, 11), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 2)
         )
 
         ax = axlist[0]
@@ -1110,9 +1112,9 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         if smc_overlay:
             _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df, clamp_info)
 
-        # Style indicator panels
+        # Style indicator panels (RSI + value labels)
         try:
-            _style_indicator_panels(axlist)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 

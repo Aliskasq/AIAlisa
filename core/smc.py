@@ -679,8 +679,10 @@ def get_premium_discount(trailing: Dict, current_price: float) -> Dict:
 def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
                 internal_size: int = 5, swing_size: int = 50,
                 ob_mitigation: str = "highlow",
-                show_internal_obs: bool = True,
-                show_swing_obs: bool = False,
+                show_internal_obs: bool = None,
+                show_swing_obs: bool = None,
+                max_internal_obs: int = None,
+                max_swing_obs: int = None,
                 confluence_filter: bool = False,
                 symbol: str = "",
                 strict_luxalgo: bool = True) -> Dict:
@@ -702,6 +704,18 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
 
     Returns dict with all SMC data + formatted text summary.
     """
+    # Apply saved settings for OB display when not explicitly passed
+    if show_internal_obs is None or show_swing_obs is None or max_internal_obs is None or max_swing_obs is None:
+        _smc_cfg = get_smc_settings()
+        if show_internal_obs is None:
+            show_internal_obs = _smc_cfg.get("internal_obs", 5) > 0
+        if show_swing_obs is None:
+            show_swing_obs = _smc_cfg.get("swing_obs", 0) > 0
+        if max_internal_obs is None:
+            max_internal_obs = _smc_cfg.get("internal_obs", 5) or 5
+        if max_swing_obs is None:
+            max_swing_obs = _smc_cfg.get("swing_obs", 0) or 5
+
     if df is None or len(df) < 30:
         return {"summary": f"[{tf_label}] Insufficient data for SMC analysis."}
 
@@ -786,16 +800,16 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
 
         # ── 4-5. ORDER BLOCKS ──
         # Exact LuxAlgo defaults: internal OBs ON (max 5), swing OBs OFF
-        # Pine: OBs are only created when their display toggle is ON
+        # OBs: use configured max blocks count
         internal_obs = []
         if show_internal_obs:
             internal_obs = find_order_blocks(
-                df, internal_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
+                df, internal_structures, max_blocks=max_internal_obs, mitigation=ob_mitigation, symbol=symbol
             )
         swing_obs = []
         if show_swing_obs:
             swing_obs = find_order_blocks(
-                df, swing_structures, max_blocks=5, mitigation=ob_mitigation, symbol=symbol
+                df, swing_structures, max_blocks=max_swing_obs, mitigation=ob_mitigation, symbol=symbol
             )
 
         # ── 6. FAIR VALUE GAPS ──
@@ -951,6 +965,15 @@ def get_smc_mode() -> bool:
         return load_smc_mode()
     except Exception:
         return True  # default: TradingView mode
+
+
+def get_smc_settings() -> dict:
+    """Load full SMC settings (strict_luxalgo, internal_obs, swing_obs)."""
+    try:
+        from config import load_smc_settings
+        return load_smc_settings()
+    except Exception:
+        return {"strict_luxalgo": True, "internal_obs": 5, "swing_obs": 0}
 
 
 def score_smc(smc_data: dict, current_price: float) -> dict:

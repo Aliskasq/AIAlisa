@@ -590,25 +590,43 @@ def clear_ml_breakout_log():
 # --- SMC MODE ---
 SMC_SETTINGS_FILE = "data/smc_settings.json"
 
-def load_smc_mode() -> bool:
-    """Load strict_luxalgo mode. True = TradingView (default), False = AIAlisa (early internal)."""
+_DEFAULT_SMC_SETTINGS = {
+    "strict_luxalgo": True,
+    "internal_obs": 5,    # 0=off, 3, 5, 10
+    "swing_obs": 0,       # 0=off, 3, 5, 10
+}
+
+def load_smc_settings() -> dict:
+    """Load full SMC settings dict."""
+    import copy
+    defaults = copy.deepcopy(_DEFAULT_SMC_SETTINGS)
     try:
         if os.path.exists(SMC_SETTINGS_FILE):
             with open(SMC_SETTINGS_FILE, "r") as f:
                 data = json.load(f)
-                return data.get("strict_luxalgo", True)
+                defaults.update(data)
     except Exception as e:
         logging.error(f"Error reading SMC settings: {e}")
-    return True
+    return defaults
 
-def save_smc_mode(strict_luxalgo: bool):
-    """Save SMC mode to disk."""
+def save_smc_settings(settings: dict):
+    """Save full SMC settings to disk."""
     try:
         os.makedirs("data", exist_ok=True)
         with open(SMC_SETTINGS_FILE, "w") as f:
-            json.dump({"strict_luxalgo": strict_luxalgo}, f)
+            json.dump(settings, f, indent=2)
     except Exception as e:
         logging.error(f"Error writing SMC settings: {e}")
+
+def load_smc_mode() -> bool:
+    """Load strict_luxalgo mode. True = TradingView (default), False = AIAlisa (early internal)."""
+    return load_smc_settings().get("strict_luxalgo", True)
+
+def save_smc_mode(strict_luxalgo: bool):
+    """Save SMC mode to disk (backward compat)."""
+    s = load_smc_settings()
+    s["strict_luxalgo"] = strict_luxalgo
+    save_smc_settings(s)
 
 
 # --- PRICE ALERTS ---

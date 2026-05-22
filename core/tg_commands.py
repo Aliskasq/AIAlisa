@@ -906,25 +906,45 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
             return
 
-        from config import load_smc_mode
-        strict = load_smc_mode()
+        from config import load_smc_settings
+        s = load_smc_settings()
+        strict = s.get("strict_luxalgo", True)
+        iob = s.get("internal_obs", 5)
+        sob = s.get("swing_obs", 0)
 
-        mode_name = "TradingView (LuxAlgo)" if strict else "AIAlisa (ранний internal)"
+        mode_name = "📺 TradingView (LuxAlgo)" if strict else "🤖 AIAlisa (ранний internal)"
+        def _ob_label(val):
+            return "OFF" if val == 0 else str(val)
+        def _ck_v(current, val, label):
+            return f"✅ {label}" if current == val else label
+
         msg_text = (
-            f"📐 *Режим SMC анализа*\n\n"
-            f"Текущий: *{mode_name}*\n\n"
-            f"• *TView* — точная копия LuxAlgo Pine Script\n"
-            f"  _(internal structure блокируется первые ~50 баров)_\n\n"
-            f"• *AIAlisa* — internal structure с первых баров\n"
-            f"  _(больше OB и BOS/CHoCH, реальные зоны спроса)_"
+            f"📐 *Настройки SMC*\n\n"
+            f"*Режим:* {mode_name}\n"
+            f"*Internal OB:* {_ob_label(iob)}\n"
+            f"*Swing OB:* {_ob_label(sob)}\n\n"
+            f"_TView = точная копия LuxAlgo_\n"
+            f"_AIAlisa = ранний internal structure_"
         )
-        tview_label = "✅ TView" if strict else "TView"
-        alisa_label = "✅ AIAlisa" if not strict else "AIAlisa"
         kb = {"inline_keyboard": [
             [
-                {"text": f"📺 {tview_label}", "callback_data": "smc_tview"},
-                {"text": f"🤖 {alisa_label}", "callback_data": "smc_alisa"},
-            ]
+                {"text": _ck_v(strict, True, "📺 TView"), "callback_data": "smc_tview"},
+                {"text": _ck_v(strict, False, "🤖 AIAlisa"), "callback_data": "smc_alisa"},
+            ],
+            [{"text": "── Internal блоки ──", "callback_data": "smc_noop"}],
+            [
+                {"text": _ck_v(iob, 0, "OFF"), "callback_data": "smc_iob_0"},
+                {"text": _ck_v(iob, 3, "3"), "callback_data": "smc_iob_3"},
+                {"text": _ck_v(iob, 5, "5"), "callback_data": "smc_iob_5"},
+                {"text": _ck_v(iob, 10, "10"), "callback_data": "smc_iob_10"},
+            ],
+            [{"text": "── Swing блоки ──", "callback_data": "smc_noop"}],
+            [
+                {"text": _ck_v(sob, 0, "OFF"), "callback_data": "smc_sob_0"},
+                {"text": _ck_v(sob, 3, "3"), "callback_data": "smc_sob_3"},
+                {"text": _ck_v(sob, 5, "5"), "callback_data": "smc_sob_5"},
+                {"text": _ck_v(sob, 10, "10"), "callback_data": "smc_sob_10"},
+            ],
         ]}
         await send_response(app_session, chat_id, msg_text, msg_id,
                            reply_markup=kb, parse_mode="Markdown")

@@ -456,7 +456,7 @@ async def handle_callback_query(app_session, update):
         return
 
     # ------------------------------------------------------------------ #
-    # 0b. SMC Mode Toggle (smc_ prefix)
+    # 0b. SMC Settings (smc_ prefix)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("smc_"):
         user_id = cq.get("from", {}).get("id", 0)
@@ -467,37 +467,79 @@ async def handle_callback_query(app_session, update):
             )
             return
 
-        from config import load_smc_mode, save_smc_mode
+        from config import load_smc_settings, save_smc_settings
+        s = load_smc_settings()
         msg_id_cb = cq.get("message", {}).get("message_id")
+        toast = ""
 
+        # --- Apply action ---
         if cb_data == "smc_tview":
-            save_smc_mode(True)
-            new_strict = True
-            toast = "📺 TradingView mode"
+            s["strict_luxalgo"] = True
+            save_smc_settings(s)
+            toast = "📺 TradingView"
         elif cb_data == "smc_alisa":
-            save_smc_mode(False)
-            new_strict = False
-            toast = "🤖 AIAlisa mode"
-        else:
-            new_strict = load_smc_mode()
-            toast = ""
+            s["strict_luxalgo"] = False
+            save_smc_settings(s)
+            toast = "🤖 AIAlisa"
+        # Internal OB count
+        elif cb_data.startswith("smc_iob_"):
+            val = int(cb_data.split("_")[-1])
+            s["internal_obs"] = val
+            save_smc_settings(s)
+            toast = f"Internal OB: {'OFF' if val == 0 else val}"
+        # Swing OB count
+        elif cb_data.startswith("smc_sob_"):
+            val = int(cb_data.split("_")[-1])
+            s["swing_obs"] = val
+            save_smc_settings(s)
+            toast = f"Swing OB: {'OFF' if val == 0 else val}"
 
-        mode_name = "TradingView (LuxAlgo)" if new_strict else "AIAlisa (ранний internal)"
+        # --- Render menu ---
+        strict = s.get("strict_luxalgo", True)
+        iob = s.get("internal_obs", 5)
+        sob = s.get("swing_obs", 0)
+
+        mode_name = "📺 TradingView (LuxAlgo)" if strict else "🤖 AIAlisa (ранний internal)"
+
+        def _ob_label(val):
+            return "OFF" if val == 0 else str(val)
+
         msg_text = (
-            f"📐 *Режим SMC анализа*\n\n"
-            f"Текущий: *{mode_name}*\n\n"
-            f"• *TView* — точная копия LuxAlgo Pine Script\n"
-            f"  _(internal structure блокируется первые ~50 баров)_\n\n"
-            f"• *AIAlisa* — internal structure с первых баров\n"
-            f"  _(больше OB и BOS/CHoCH, реальные зоны спроса)_"
+            f"📐 *Настройки SMC*\n\n"
+            f"*Режим:* {mode_name}\n"
+            f"*Internal OB:* {_ob_label(iob)}\n"
+            f"*Swing OB:* {_ob_label(sob)}\n\n"
+            f"_TView = точная копия LuxAlgo_\n"
+            f"_AIAlisa = ранний internal structure_"
         )
-        tview_label = "✅ TView" if new_strict else "TView"
-        alisa_label = "✅ AIAlisa" if not new_strict else "AIAlisa"
+
+        def _ck_v(current, val, label):
+            return f"✅ {label}" if current == val else label
+
         kb = {"inline_keyboard": [
+            # Row 1: Mode
             [
-                {"text": f"📺 {tview_label}", "callback_data": "smc_tview"},
-                {"text": f"🤖 {alisa_label}", "callback_data": "smc_alisa"},
-            ]
+                {"text": _ck_v(strict, True, "📺 TView"), "callback_data": "smc_tview"},
+                {"text": _ck_v(strict, False, "🤖 AIAlisa"), "callback_data": "smc_alisa"},
+            ],
+            # Row 2: Internal OB label
+            [{"text": "── Internal блоки ──", "callback_data": "smc_noop"}],
+            # Row 3: Internal OB options
+            [
+                {"text": _ck_v(iob, 0, "OFF"), "callback_data": "smc_iob_0"},
+                {"text": _ck_v(iob, 3, "3"), "callback_data": "smc_iob_3"},
+                {"text": _ck_v(iob, 5, "5"), "callback_data": "smc_iob_5"},
+                {"text": _ck_v(iob, 10, "10"), "callback_data": "smc_iob_10"},
+            ],
+            # Row 4: Swing OB label
+            [{"text": "── Swing блоки ──", "callback_data": "smc_noop"}],
+            # Row 5: Swing OB options
+            [
+                {"text": _ck_v(sob, 0, "OFF"), "callback_data": "smc_sob_0"},
+                {"text": _ck_v(sob, 3, "3"), "callback_data": "smc_sob_3"},
+                {"text": _ck_v(sob, 5, "5"), "callback_data": "smc_sob_5"},
+                {"text": _ck_v(sob, 10, "10"), "callback_data": "smc_sob_10"},
+            ],
         ]}
         await _slm_edit(app_session, chat_id, msg_id_cb, msg_text, kb, cq_id, toast)
         return
