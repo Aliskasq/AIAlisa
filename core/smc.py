@@ -112,7 +112,8 @@ def detect_structure(df: pd.DataFrame, size: int,
                      swing_high_level: float = None,
                      swing_low_level: float = None,
                      swing_high_per_bar: np.ndarray = None,
-                     swing_low_per_bar: np.ndarray = None) -> Tuple[List[Dict], List[Dict], int]:
+                     swing_low_per_bar: np.ndarray = None,
+                     strict_luxalgo: bool = True) -> Tuple[List[Dict], List[Dict], int]:
     """
     Detect BOS and CHoCH from structure breaks.
 
@@ -198,15 +199,22 @@ def detect_structure(df: pd.DataFrame, size: int,
                 if internal:
                     if swing_high_per_bar is not None and i < len(swing_high_per_bar):
                         swing_level = swing_high_per_bar[i]
-                        # Pine na semantics: if swing level is nan, block the break
-                        if np.isnan(swing_level) or last_high["price"] == swing_level:
-                            skip = True
+                        if strict_luxalgo:
+                            # Pine na semantics: if swing level is nan, block the break
+                            if np.isnan(swing_level) or last_high["price"] == swing_level:
+                                skip = True
+                        else:
+                            # Relaxed: only skip confluence (same level), allow early internal
+                            if not np.isnan(swing_level) and last_high["price"] == swing_level:
+                                skip = True
                     elif swing_high_level is not None:
                         if last_high["price"] == swing_high_level:
                             skip = True
                     else:
-                        # No swing reference → block (matches Pine na behavior)
-                        skip = True
+                        if strict_luxalgo:
+                            # No swing reference → block (matches Pine na behavior)
+                            skip = True
+                        # else: allow (no swing reference = no confluence to filter)
                     # Candle shape filter (when confluence_filter enabled)
                     if not skip and not bullish_bar:
                         skip = True
@@ -234,15 +242,22 @@ def detect_structure(df: pd.DataFrame, size: int,
                 if internal:
                     if swing_low_per_bar is not None and i < len(swing_low_per_bar):
                         swing_level = swing_low_per_bar[i]
-                        # Pine na semantics: if swing level is nan, block the break
-                        if np.isnan(swing_level) or last_low["price"] == swing_level:
-                            skip = True
+                        if strict_luxalgo:
+                            # Pine na semantics: if swing level is nan, block the break
+                            if np.isnan(swing_level) or last_low["price"] == swing_level:
+                                skip = True
+                        else:
+                            # Relaxed: only skip confluence (same level), allow early internal
+                            if not np.isnan(swing_level) and last_low["price"] == swing_level:
+                                skip = True
                     elif swing_low_level is not None:
                         if last_low["price"] == swing_low_level:
                             skip = True
                     else:
-                        # No swing reference → block (matches Pine na behavior)
-                        skip = True
+                        if strict_luxalgo:
+                            # No swing reference → block (matches Pine na behavior)
+                            skip = True
+                        # else: allow (no swing reference = no confluence to filter)
                     # Candle shape filter (when confluence_filter enabled)
                     if not skip and not bearish_bar:
                         skip = True
@@ -667,7 +682,8 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
                 show_internal_obs: bool = True,
                 show_swing_obs: bool = False,
                 confluence_filter: bool = False,
-                symbol: str = "") -> Dict:
+                symbol: str = "",
+                strict_luxalgo: bool = True) -> Dict:
     """
     Full SMC analysis — exact LuxAlgo port.
 
@@ -756,6 +772,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             confluence_filter=confluence_filter,
             swing_high_per_bar=swing_high_per_bar,
             swing_low_per_bar=swing_low_per_bar,
+            strict_luxalgo=strict_luxalgo,
         )
 
         logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
@@ -925,6 +942,15 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         import traceback
         logging.error(traceback.format_exc())
         return {"summary": f"[{tf_label}] SMC error: {str(e)[:100]}"}
+
+
+def get_smc_mode() -> bool:
+    """Load the current SMC mode from config. Returns strict_luxalgo flag."""
+    try:
+        from config import load_smc_mode
+        return load_smc_mode()
+    except Exception:
+        return True  # default: TradingView mode
 
 
 def score_smc(smc_data: dict, current_price: float) -> dict:

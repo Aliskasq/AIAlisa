@@ -456,6 +456,53 @@ async def handle_callback_query(app_session, update):
         return
 
     # ------------------------------------------------------------------ #
+    # 0b. SMC Mode Toggle (smc_ prefix)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("smc_"):
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True},
+            )
+            return
+
+        from config import load_smc_mode, save_smc_mode
+        msg_id_cb = cq.get("message", {}).get("message_id")
+
+        if cb_data == "smc_tview":
+            save_smc_mode(True)
+            new_strict = True
+            toast = "📺 TradingView mode"
+        elif cb_data == "smc_alisa":
+            save_smc_mode(False)
+            new_strict = False
+            toast = "🤖 AIAlisa mode"
+        else:
+            new_strict = load_smc_mode()
+            toast = ""
+
+        mode_name = "TradingView (LuxAlgo)" if new_strict else "AIAlisa (ранний internal)"
+        msg_text = (
+            f"📐 *Режим SMC анализа*\n\n"
+            f"Текущий: *{mode_name}*\n\n"
+            f"• *TView* — точная копия LuxAlgo Pine Script\n"
+            f"  _(internal structure блокируется первые ~50 баров)_\n\n"
+            f"• *AIAlisa* — internal structure с первых баров\n"
+            f"  _(больше OB и BOS/CHoCH, реальные зоны спроса)_"
+        )
+        tview_label = "✅ TView" if new_strict else "TView"
+        alisa_label = "✅ AIAlisa" if not new_strict else "AIAlisa"
+        kb = {"inline_keyboard": [
+            [
+                {"text": f"📺 {tview_label}", "callback_data": "smc_tview"},
+                {"text": f"🤖 {alisa_label}", "callback_data": "smc_alisa"},
+            ]
+        ]}
+        await _slm_edit(app_session, chat_id, msg_id_cb, msg_text, kb, cq_id, toast)
+        return
+
+    # ------------------------------------------------------------------ #
     # 1. Square Integration (Admin check)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("sq_"):

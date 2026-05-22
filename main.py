@@ -380,25 +380,26 @@ async def main():
 
                             smc_data = {}
                             try:
-                                from core.smc import analyze_smc
+                                from core.smc import analyze_smc, get_smc_mode
+                                _smc_strict = get_smc_mode()
                                 # Primary TF gets 1500 candles, others get 999
                                 # (999 = same Binance weight as 500, but 2x more data)
                                 raw_smc_main = await fetch_klines(http_session, sym, interval_fetch, 1500)
                                 if raw_smc_main:
-                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf, symbol=sym)
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf, symbol=sym, strict_luxalgo=_smc_strict)
                                 else:
-                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf, symbol=sym)
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf, symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_4h and tf == "1D":
                                     raw_smc_4h = await fetch_klines(http_session, sym, "4h", 999)
-                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h if raw_smc_4h else raw_4h), "4H", symbol=sym)
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h if raw_smc_4h else raw_4h), "4H", symbol=sym, strict_luxalgo=_smc_strict)
                                 elif raw_4h:
-                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=sym)
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_1h:
                                     raw_smc_1h = await fetch_klines(http_session, sym, "1h", 999)
-                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h if raw_smc_1h else raw_1h), "1H", symbol=sym)
+                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h if raw_smc_1h else raw_1h), "1H", symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_15m:
                                     raw_smc_15m = await fetch_klines(http_session, sym, "15m", 999)
-                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m if raw_smc_15m else raw_15m), "15m", symbol=sym)
+                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m if raw_smc_15m else raw_15m), "15m", symbol=sym, strict_luxalgo=_smc_strict)
                             except Exception as e:
                                 logging.error(f"❌ SMC error for {sym}: {e}")
 
@@ -793,23 +794,24 @@ async def main():
                             # SMC analysis — primary TF 1500, others 999
                             smc_data = {}
                             try:
-                                from core.smc import analyze_smc
+                                from core.smc import analyze_smc, get_smc_mode
+                                _smc_strict = get_smc_mode()
                                 raw_smc_main = await fetch_klines(session, sym, interval_fetch, 1500)
                                 if raw_smc_main:
-                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf, symbol=sym)
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(raw_smc_main), tf, symbol=sym, strict_luxalgo=_smc_strict)
                                 else:
-                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf, symbol=sym)
+                                    smc_data[tf] = analyze_smc(pd.DataFrame(full_raw), tf, symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_4h and tf == "1D":
                                     raw_smc_4h = await fetch_klines(session, sym, "4h", 999)
-                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h if raw_smc_4h else raw_4h), "4H", symbol=sym)
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h if raw_smc_4h else raw_4h), "4H", symbol=sym, strict_luxalgo=_smc_strict)
                                 elif raw_4h:
-                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=sym)
+                                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_1h:
                                     raw_smc_1h = await fetch_klines(session, sym, "1h", 999)
-                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h if raw_smc_1h else raw_1h), "1H", symbol=sym)
+                                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h if raw_smc_1h else raw_1h), "1H", symbol=sym, strict_luxalgo=_smc_strict)
                                 if raw_15m:
                                     raw_smc_15m = await fetch_klines(session, sym, "15m", 999)
-                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m if raw_smc_15m else raw_15m), "15m", symbol=sym)
+                                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m if raw_smc_15m else raw_15m), "15m", symbol=sym, strict_luxalgo=_smc_strict)
                             except Exception as e:
                                 logging.error(f"❌ VOL PASS SMC error for {sym}: {e}")
 

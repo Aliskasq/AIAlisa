@@ -587,6 +587,30 @@ def clear_ml_breakout_log():
     save_ml_breakout_log([])
 
 
+# --- SMC MODE ---
+SMC_SETTINGS_FILE = "data/smc_settings.json"
+
+def load_smc_mode() -> bool:
+    """Load strict_luxalgo mode. True = TradingView (default), False = AIAlisa (early internal)."""
+    try:
+        if os.path.exists(SMC_SETTINGS_FILE):
+            with open(SMC_SETTINGS_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("strict_luxalgo", True)
+    except Exception as e:
+        logging.error(f"Error reading SMC settings: {e}")
+    return True
+
+def save_smc_mode(strict_luxalgo: bool):
+    """Save SMC mode to disk."""
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(SMC_SETTINGS_FILE, "w") as f:
+            json.dump({"strict_luxalgo": strict_luxalgo}, f)
+    except Exception as e:
+        logging.error(f"Error writing SMC settings: {e}")
+
+
 # --- PRICE ALERTS ---
 def load_price_alerts():
     if os.path.exists(PRICE_ALERTS_FILE):

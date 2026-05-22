@@ -164,20 +164,21 @@ async def auto_square_poster(session: aiohttp.ClientSession):
                 # SMC Indicator — primary 4H gets 1500, others 999
                 smc_data = {}
                 try:
-                    from core.smc import analyze_smc
+                    from core.smc import analyze_smc, get_smc_mode
+                    _smc_strict = get_smc_mode()
                     raw_smc_4h = await fetch_klines(session, symbol, "4h", 1500)
                     raw_smc_1h = await fetch_klines(session, symbol, "1h", 999) if raw_1h else None
                     raw_smc_15m = await fetch_klines(session, symbol, "15m", 999) if raw_15m else None
                     if raw_smc_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol, strict_luxalgo=_smc_strict)
                     else:
                         smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=symbol)
                     if raw_smc_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol)
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol, strict_luxalgo=_smc_strict)
                     elif raw_1h:
                         smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=symbol)
                     if raw_smc_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol)
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol, strict_luxalgo=_smc_strict)
                     elif raw_15m:
                         smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=symbol)
                 except Exception as e:

@@ -899,6 +899,38 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
+    # SMC MODE (/smc)
+    # ==========================================
+    if text.startswith("/smc"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+            return
+
+        from config import load_smc_mode
+        strict = load_smc_mode()
+
+        mode_name = "TradingView (LuxAlgo)" if strict else "AIAlisa (ранний internal)"
+        msg_text = (
+            f"📐 *Режим SMC анализа*\n\n"
+            f"Текущий: *{mode_name}*\n\n"
+            f"• *TView* — точная копия LuxAlgo Pine Script\n"
+            f"  _(internal structure блокируется первые ~50 баров)_\n\n"
+            f"• *AIAlisa* — internal structure с первых баров\n"
+            f"  _(больше OB и BOS/CHoCH, реальные зоны спроса)_"
+        )
+        tview_label = "✅ TView" if strict else "TView"
+        alisa_label = "✅ AIAlisa" if not strict else "AIAlisa"
+        kb = {"inline_keyboard": [
+            [
+                {"text": f"📺 {tview_label}", "callback_data": "smc_tview"},
+                {"text": f"🤖 {alisa_label}", "callback_data": "smc_alisa"},
+            ]
+        ]}
+        await send_response(app_session, chat_id, msg_text, msg_id,
+                           reply_markup=kb, parse_mode="Markdown")
+        return
+
+    # ==========================================
     # SIGNALS (/signals)
     # ==========================================
     if text.startswith("/signal"):
@@ -1857,7 +1889,8 @@ async def handle_message(app_session, update):
             if raw_df_15m:
                 mtf_data["15m"] = calculate_binance_indicators(pd.DataFrame(raw_df_15m), "15m")[0]
 
-            from core.smc import analyze_smc
+            from core.smc import analyze_smc, get_smc_mode
+            _smc_strict = get_smc_mode()
             smc_data = {}
             try:
                 # Primary TF (scan_tf) gets 1500 candles, others get 999
@@ -1871,21 +1904,21 @@ async def handle_message(app_session, update):
                 raw_smc_15m = await fetch_klines(app_session, symbol, "15m", smc_candles["15m"]) if raw_df_15m else None
 
                 if raw_smc_1d:
-                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol)
+                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol, strict_luxalgo=_smc_strict)
                 elif raw_df_1d:
-                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D", symbol=symbol)
+                    smc_data["1D"] = analyze_smc(pd.DataFrame(raw_df_1d), "1D", symbol=symbol, strict_luxalgo=_smc_strict)
                 if raw_smc_4h:
-                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol)
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=symbol, strict_luxalgo=_smc_strict)
                 elif raw_df_4h:
-                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H", symbol=symbol)
+                    smc_data["4H"] = analyze_smc(pd.DataFrame(raw_df_4h), "4H", symbol=symbol, strict_luxalgo=_smc_strict)
                 if raw_smc_1h:
-                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol)
+                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=symbol, strict_luxalgo=_smc_strict)
                 elif raw_df_1h:
-                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H", symbol=symbol)
+                    smc_data["1H"] = analyze_smc(pd.DataFrame(raw_df_1h), "1H", symbol=symbol, strict_luxalgo=_smc_strict)
                 if raw_smc_15m:
-                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol)
+                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=symbol, strict_luxalgo=_smc_strict)
                 elif raw_df_15m:
-                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_df_15m), "15m", symbol=symbol)
+                    smc_data["15m"] = analyze_smc(pd.DataFrame(raw_df_15m), "15m", symbol=symbol, strict_luxalgo=_smc_strict)
             except Exception as e:
                 logging.error(f"❌ SMC scan error: {e}")
 
@@ -2099,7 +2132,8 @@ async def handle_message(app_session, update):
 
                 smc_data = {}
                 try:
-                    from core.smc import analyze_smc
+                    from core.smc import analyze_smc, get_smc_mode
+                    _smc_strict = get_smc_mode()
                     # Margin scan: primary TF is 4h → 1500 candles, others → 999
                     raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 999) if raw_1d else None
                     raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 1500) if raw_4h else None
@@ -2107,21 +2141,21 @@ async def handle_message(app_session, update):
                     raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 999) if raw_15m else None
 
                     if raw_smc_1d:
-                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze)
+                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     elif raw_1d:
-                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D", symbol=coin_to_analyze)
+                        smc_data["1D"] = analyze_smc(pd.DataFrame(raw_1d), "1D", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     if raw_smc_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=coin_to_analyze)
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_smc_4h), "4H", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     elif raw_4h:
-                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=coin_to_analyze)
+                        smc_data["4H"] = analyze_smc(pd.DataFrame(raw_4h), "4H", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     if raw_smc_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=coin_to_analyze)
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_smc_1h), "1H", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     elif raw_1h:
-                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=coin_to_analyze)
+                        smc_data["1H"] = analyze_smc(pd.DataFrame(raw_1h), "1H", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     if raw_smc_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=coin_to_analyze)
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_smc_15m), "15m", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                     elif raw_15m:
-                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=coin_to_analyze)
+                        smc_data["15m"] = analyze_smc(pd.DataFrame(raw_15m), "15m", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
                 except Exception as e:
                     logging.error(f"❌ SMC look error: {e}")
 
