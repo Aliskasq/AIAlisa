@@ -602,14 +602,15 @@ def compute_trailing_extremes(df: pd.DataFrame, swing_pivots: List[Dict],
             trailing_low_idx = i
 
         # 2. getCurrentStructure resets trailing AFTER update (overwrites)
+        # Use p["index"] (actual pivot bar) for visual line start, not detection bar i
         if i in pivot_events:
             for p in pivot_events[i]:
                 if p["type"] == "high":
                     trailing_high = p["price"]
-                    trailing_high_idx = i
+                    trailing_high_idx = p["index"]  # actual candle, not detection bar
                 elif p["type"] == "low":
                     trailing_low = p["price"]
-                    trailing_low_idx = i
+                    trailing_low_idx = p["index"]  # actual candle, not detection bar
 
     # Strong/Weak labels (exact LuxAlgo ternary logic)
     # Pine: swingTrend.bias == BEARISH ? 'Strong High' : 'Weak High'
