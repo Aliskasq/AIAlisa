@@ -189,16 +189,24 @@ def detect_structure(df: pd.DataFrame, size: int,
             # Crossover: previous close <= level AND current close > level
             prev_close = closes[i - 1] if i > 0 else 0
             if prev_close <= last_high["price"] and closes[i] > last_high["price"]:
-                # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
+                # Internal confluence filter (exact Pine na semantics):
                 # Pine: extraCondition = internalHigh.currentLevel != swingHigh.currentLevel and bullishBar
+                # CRITICAL: In Pine, when swingHigh.currentLevel is na (before first swing pivot),
+                # the comparison returns na (falsy) → extraCondition is false → break is BLOCKED.
+                # This prevents ANY internal structure detection until swing pivots are established (~bar 50+).
                 skip = False
                 if internal:
                     if swing_high_per_bar is not None and i < len(swing_high_per_bar):
-                        if last_high["price"] == swing_high_per_bar[i]:
+                        swing_level = swing_high_per_bar[i]
+                        # Pine na semantics: if swing level is nan, block the break
+                        if np.isnan(swing_level) or last_high["price"] == swing_level:
                             skip = True
                     elif swing_high_level is not None:
                         if last_high["price"] == swing_high_level:
                             skip = True
+                    else:
+                        # No swing reference → block (matches Pine na behavior)
+                        skip = True
                     # Candle shape filter (when confluence_filter enabled)
                     if not skip and not bullish_bar:
                         skip = True
@@ -219,16 +227,22 @@ def detect_structure(df: pd.DataFrame, size: int,
         if last_low["price"] is not None and not last_low["crossed"]:
             prev_close = closes[i - 1] if i > 0 else float('inf')
             if prev_close >= last_low["price"] and closes[i] < last_low["price"]:
-                # Internal confluence filter: skip if internal pivot == swing pivot at THIS bar
+                # Internal confluence filter (exact Pine na semantics):
                 # Pine: extraCondition = internalLow.currentLevel != swingLow.currentLevel and bearishBar
+                # CRITICAL: same na logic as bullish — block until swing pivots exist
                 skip = False
                 if internal:
                     if swing_low_per_bar is not None and i < len(swing_low_per_bar):
-                        if last_low["price"] == swing_low_per_bar[i]:
+                        swing_level = swing_low_per_bar[i]
+                        # Pine na semantics: if swing level is nan, block the break
+                        if np.isnan(swing_level) or last_low["price"] == swing_level:
                             skip = True
                     elif swing_low_level is not None:
                         if last_low["price"] == swing_low_level:
                             skip = True
+                    else:
+                        # No swing reference → block (matches Pine na behavior)
+                        skip = True
                     # Candle shape filter (when confluence_filter enabled)
                     if not skip and not bearish_bar:
                         skip = True
