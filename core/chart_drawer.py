@@ -91,8 +91,8 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {line_type} (LOG-MODE)",
-            figsize=(14, 11), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 2)
+            figsize=(14, 12), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1)
         )
 
         ax = axlist[0]
@@ -691,13 +691,16 @@ def _compute_indicator_addplots(plot_df, view_limit):
     macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
-    # Build addplots using mplfinance panels (no MACD — removed by request)
+    # Build addplots: OBV (panel 1) + RSI (panel 2), no MACD
     # RSI colors match Binance: RSI(6) yellow, RSI(12) pink, RSI(24) dark purple
     addplots = [
-        # Panel 1: RSI 6, 12, 24 (Binance-style colors)
-        mpf.make_addplot(rsi6, panel=1, color='#F0B90B', width=1.2, ylabel='RSI'),
-        mpf.make_addplot(rsi12, panel=1, color='#E040FB', width=1.0),
-        mpf.make_addplot(rsi24, panel=1, color='#7B1FA2', width=1.0),
+        # Panel 1: OBV
+        mpf.make_addplot(obv, panel=1, color='#26a69a', width=1.0, ylabel='OBV'),
+        mpf.make_addplot(obv_sma20, panel=1, color='#ef5350', width=0.8, linestyle='--'),
+        # Panel 2: RSI 6, 12, 24 (Binance-style colors)
+        mpf.make_addplot(rsi6, panel=2, color='#F0B90B', width=1.2, ylabel='RSI'),
+        mpf.make_addplot(rsi12, panel=2, color='#E040FB', width=1.0),
+        mpf.make_addplot(rsi24, panel=2, color='#7B1FA2', width=1.0),
     ]
 
     # Store RSI values for labels (used by _style_indicator_panels)
@@ -713,10 +716,11 @@ def _compute_indicator_addplots(plot_df, view_limit):
 def _style_indicator_panels(axlist, rsi_values=None):
     """
     Style the indicator panels after rendering:
-    - Remove grids, set tick sizes
-    - Add RSI 70/30 lines + Binance-style RSI value labels
-    - No MACD panel (removed)
+    - OBV panel 1: disable scientific notation on Y axis
+    - RSI panel 2: 70/30 lines + Binance-style value labels
     """
+    from matplotlib.ticker import FuncFormatter
+
     # Collect all unique panels
     panels = {}
     for ax in axlist:
@@ -725,10 +729,12 @@ def _style_indicator_panels(axlist, rsi_values=None):
             panels[pnum] = ax
 
     # Fallback
-    if len(panels) < 2 and len(axlist) >= 4:
+    if len(panels) < 3 and len(axlist) >= 6:
+        panels = {0: axlist[0], 1: axlist[2], 2: axlist[4]}
+    elif len(panels) < 3 and len(axlist) >= 4:
         panels = {i: axlist[i] for i in range(min(4, len(axlist)))}
 
-    for pnum in [1]:
+    for pnum in [1, 2]:
         ax = panels.get(pnum)
         if not ax:
             continue
@@ -736,8 +742,22 @@ def _style_indicator_panels(axlist, rsi_values=None):
         ax.tick_params(axis='both', labelsize=5, colors='#888888')
         ax.tick_params(axis='x', labelbottom=False)
 
+    # OBV panel: disable scientific notation (the "1e9" yellow circle)
+    ax_obv = panels.get(1)
+    if ax_obv:
+        def _fmt_obv(x, pos):
+            if abs(x) >= 1e9:
+                return f"{x/1e9:.1f}B"
+            elif abs(x) >= 1e6:
+                return f"{x/1e6:.1f}M"
+            elif abs(x) >= 1e3:
+                return f"{x/1e3:.0f}K"
+            return f"{x:.0f}"
+        ax_obv.yaxis.set_major_formatter(FuncFormatter(_fmt_obv))
+        ax_obv.ticklabel_format(useOffset=False, style='plain', axis='y')
+
     # RSI panel: add 70/30 levels + Binance-style value labels
-    ax_rsi = panels.get(1)
+    ax_rsi = panels.get(2)
     if ax_rsi:
         ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
@@ -997,8 +1017,8 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
-            figsize=(14, 11), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 2)
+            figsize=(14, 12), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1)
         )
 
         ax = axlist[0]
@@ -1081,8 +1101,8 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             plot_df, type='candle', style='charles',
             addplot=_ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
-            figsize=(14, 11), returnfig=True, tight_layout=True,
-            panel_ratios=(6, 2)
+            figsize=(14, 12), returnfig=True, tight_layout=True,
+            panel_ratios=(6, 1, 1)
         )
 
         ax = axlist[0]
