@@ -788,16 +788,22 @@ def _style_indicator_panels(axlist, rsi_values=None):
                 _obv_grid_count += 1
             logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
 
-    # Separator line between OBV and RSI panels
-    if ax_obv:
-        # Draw a black line at the bottom edge of OBV panel
-        ax_obv.axhline(y=ax_obv.get_ylim()[0], color='black', linewidth=1.5, zorder=10, clip_on=False)
+    # Separator line between OBV and RSI panels (full figure width)
+    ax_rsi = panels.get(2)
+    if ax_obv and ax_rsi:
+        from matplotlib.lines import Line2D
+        # Get the top of RSI panel in figure coordinates (= bottom of gap between panels)
+        bbox_obv = ax_obv.get_position()
+        # Use the bottom edge of OBV axes as the separator y
+        sep_y = bbox_obv.y0
+        sep_line = Line2D([0, 1], [sep_y, sep_y], transform=fig.transFigure,
+                          color='black', linewidth=1.0, zorder=10, clip_on=False)
+        fig.add_artist(sep_line)
 
     # RSI panel: add 70/30 levels + Binance-style value labels
-    ax_rsi = panels.get(2)
+    if not ax_rsi:
+        ax_rsi = panels.get(2)
     if ax_rsi:
-        # Top border of RSI panel (separator from OBV)
-        ax_rsi.axhline(y=ax_rsi.get_ylim()[1], color='black', linewidth=1.5, zorder=10, clip_on=False)
         ax_rsi.set_ylim(0, 100)
         # Grid lines at 20, 40, 60, 80, 100 (same style as main chart grid)
         for level in [20, 40, 60, 80, 100]:
