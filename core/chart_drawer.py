@@ -567,9 +567,14 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
         if high_clamped:
             pct = ((t_high / current_price) - 1) * 100
-            ax.text(0.5, 1.02, f"{high_label}  {price_str}  (+{pct:.0f}%)",
-                    color='black', fontsize=12, fontweight='bold',
-                    ha='center', va='bottom',
+            # Label in bright red, price+pct in black — same size as chart title
+            ax.text(0.49, 1.02, f"{high_label} ",
+                    color='#FF0000', fontsize=14, fontweight='bold',
+                    ha='right', va='bottom',
+                    transform=ax.transAxes, clip_on=False, zorder=6)
+            ax.text(0.51, 1.02, f"{price_str}  (+{pct:.0f}%)",
+                    color='black', fontsize=14, fontweight='bold',
+                    ha='left', va='bottom',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label ABOVE the high line
@@ -582,9 +587,14 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
         if low_clamped:
             pct = ((current_price / t_low) - 1) * 100
-            ax.text(0.5, -0.06, f"{low_label}  {price_str}  (-{pct:.0f}%)",
-                    color='black', fontsize=12, fontweight='bold',
-                    ha='center', va='top',
+            # Label in green, price+pct in black — same size as chart title
+            ax.text(0.49, -0.06, f"{low_label} ",
+                    color='#089981', fontsize=14, fontweight='bold',
+                    ha='right', va='top',
+                    transform=ax.transAxes, clip_on=False, zorder=6)
+            ax.text(0.51, -0.06, f"{price_str}  (-{pct:.0f}%)",
+                    color='black', fontsize=14, fontweight='bold',
+                    ha='left', va='top',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label BELOW the low line
