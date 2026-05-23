@@ -739,7 +739,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
         if not ax:
             continue
         ax.grid(False)
-        ax.tick_params(axis='both', labelsize=5, colors='#888888')
+        ax.tick_params(axis='both', labelsize=5, colors='black')
         ax.tick_params(axis='x', labelbottom=False)
 
     # OBV panel: disable scientific notation (the "1e9" yellow circle)
@@ -755,6 +755,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
             return f"{x:.0f}"
         ax_obv.yaxis.set_major_formatter(FuncFormatter(_fmt_obv))
         ax_obv.ticklabel_format(useOffset=False, style='plain', axis='y')
+        ax_obv.yaxis.get_offset_text().set_visible(False)
 
     # RSI panel: add 70/30 levels + Binance-style value labels
     ax_rsi = panels.get(2)
