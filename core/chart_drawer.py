@@ -124,7 +124,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
         # Style indicator panels (RSI levels + value labels)
         try:
-            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals, fig=fig)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
@@ -723,7 +723,7 @@ def _compute_indicator_addplots(plot_df, view_limit):
     return addplots, _last_rsi
 
 
-def _style_indicator_panels(axlist, rsi_values=None):
+def _style_indicator_panels(axlist, rsi_values=None, fig=None):
     """
     Style the indicator panels after rendering:
     - OBV panel 1: disable scientific notation on Y axis
@@ -790,11 +790,10 @@ def _style_indicator_panels(axlist, rsi_values=None):
 
     # Separator line between OBV and RSI panels (full figure width)
     ax_rsi = panels.get(2)
-    if ax_obv and ax_rsi:
+    if ax_obv and ax_rsi and fig is not None:
         from matplotlib.lines import Line2D
-        # Get the top of RSI panel in figure coordinates (= bottom of gap between panels)
+        # Get the bottom edge of OBV panel in figure coordinates
         bbox_obv = ax_obv.get_position()
-        # Use the bottom edge of OBV axes as the separator y
         sep_y = bbox_obv.y0
         sep_line = Line2D([0, 1], [sep_y, sep_y], transform=fig.transFigure,
                           color='black', linewidth=1.0, zorder=10, clip_on=False)
@@ -1115,7 +1114,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
 
         # Style indicator panels (RSI + value labels)
         try:
-            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals, fig=fig)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
@@ -1194,7 +1193,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
 
         # Style indicator panels (RSI + value labels)
         try:
-            _style_indicator_panels(axlist, rsi_values=_rsi_vals)
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals, fig=fig)
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 
