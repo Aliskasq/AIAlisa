@@ -307,6 +307,23 @@ async def main():
                             _above_pct = ((current_price / dynamic_line_price) - 1) * 100 if dynamic_line_price > 0 else 0
                             logging.info(f"🎯 SIGNAL ALERT! {symbol} {tf_key} broke dynamic trigger (Price: {current_price}, Line: {dynamic_line_price:.6f}, Trigger: {dynamic_trigger:.6f}, Above: {_above_pct:.1f}%, Slope: {slope:.8f})")
                             line_data = stored_lines.get(tf_key, {}).get(symbol)
+                            
+                            # If line not in cache, build it on-the-fly
+                            if not line_data:
+                                logging.info(f"🔄 {symbol} {tf_key}: line not in cache, building on-the-fly...")
+                                try:
+                                    _interval = '1d' if tf_key == "1D" else '4h'
+                                    _raw = await fetch_klines(session, symbol, _interval, 199)
+                                    if _raw:
+                                        _df = pd.DataFrame(_raw)
+                                        _line, _ = await find_trend_line(_df, tf_key, symbol)
+                                        if _line:
+                                            line_data = _line
+                                            stored_lines.setdefault(tf_key, {})[symbol] = _line
+                                            logging.info(f"✅ {symbol} {tf_key}: line built on-the-fly, type={_line.get('type','?')}")
+                                except Exception as _e:
+                                    logging.error(f"❌ {symbol} {tf_key}: on-the-fly line build failed: {repr(_e)}")
+
                             if line_data:
                                 breakout_queue.append({
                                     "symbol": symbol,
@@ -318,8 +335,7 @@ async def main():
                                     "current_price": current_price,
                                 })
                             else:
-                                # Line not in memory cache — skip this cycle but keep alert
-                                logging.warning(f"⚠️ {symbol} {tf_key} triggered but no line_data in stored_lines (keys: {list(stored_lines.get(tf_key, {}).keys())[:5]}...)")
+                                logging.warning(f"⚠️ {symbol} {tf_key} triggered but no line_data (even after on-the-fly build)")
 
                     await wait_for_weight(session, 2350)
                     await asyncio.sleep(3.0)
