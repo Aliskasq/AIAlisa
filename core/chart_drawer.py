@@ -486,7 +486,7 @@ def _apply_date_labels_main(ax_main, fig, plot_df, view_limit):
     Bold black font, 2-line format (date + time), every 20 candles.
     """
     # Add inter-panel spacing and recalculate layout
-    fig.subplots_adjust(hspace=0.35)
+    fig.subplots_adjust(hspace=0.55)
     fig.canvas.draw()
 
     bbox = ax_main.get_position()  # main chart position in figure coords
@@ -757,9 +757,16 @@ def _style_indicator_panels(axlist, rsi_values=None):
         ax_obv.ticklabel_format(useOffset=False, style='plain', axis='y')
         ax_obv.yaxis.get_offset_text().set_visible(False)
 
+    # Separator line between OBV and RSI panels
+    if ax_obv:
+        # Draw a black line at the bottom edge of OBV panel
+        ax_obv.axhline(y=ax_obv.get_ylim()[0], color='black', linewidth=1.5, zorder=10, clip_on=False)
+
     # RSI panel: add 70/30 levels + Binance-style value labels
     ax_rsi = panels.get(2)
     if ax_rsi:
+        # Top border of RSI panel (separator from OBV)
+        ax_rsi.axhline(y=ax_rsi.get_ylim()[1], color='black', linewidth=1.5, zorder=10, clip_on=False)
         ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.set_ylim(0, 100)
