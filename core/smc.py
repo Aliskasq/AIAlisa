@@ -385,11 +385,11 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
         mit_idx = ob.get("mitigated_index", "")
         mit_info = f" @bar {mit_idx}" if ob["mitigated"] else ""
         sym_tag = f" [{symbol}]" if symbol else ""
-        logging.info(
-            f"📦 OB {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
-            f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
-            f"mitigated={ob['mitigated']}{mit_info}"
-        )
+        # logging.info(
+        #     f"📦 OB {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
+        #     f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
+        #     f"mitigated={ob['mitigated']}{mit_info}"
+        # )
         order_blocks.append(ob)
 
     # Return unmitigated, most recent blocks (capped)
@@ -400,7 +400,7 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     mitigated_count = len(order_blocks) - len(active)
 
     sym_tag = f" [{symbol}]" if symbol else ""
-    logging.info(f"📦 OB summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
+    # logging.info(f"📦 OB summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
     if len(active) > max_blocks:
         active = active[-max_blocks:]
     return active
@@ -777,7 +777,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
 
         # Debug: log swing structures
         sym_tag = f" [{symbol}]" if symbol else ""
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
+        # logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
         for s in swing_structures[-10:]:
             logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
 
@@ -790,7 +790,7 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             strict_luxalgo=strict_luxalgo,
         )
 
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
+        # logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
 
         # ── 3. EQUAL HIGHS / LOWS (using size=3 pivots, like LuxAlgo default) ──
         eqhl_legs = _compute_legs(df["high"].values, df["low"].values, 3)

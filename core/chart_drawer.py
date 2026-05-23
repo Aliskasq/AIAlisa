@@ -745,7 +745,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
         elif len(axlist) >= 3:
             panels = {0: axlist[0], 1: axlist[1], 2: axlist[2]}
     
-    # logging.info(f"📊 Panel detection: {len(panels)} panels from {len(axlist)} axes")
+    logging.info(f"📊 Panel detection: {len(panels)} panels from {len(axlist)} axes")
 
     for pnum in [1, 2]:
         ax = panels.get(pnum)
@@ -773,7 +773,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
         # Horizontal grid lines for OBV (same style as main chart grid)
         obv_low, obv_high = ax_obv.get_ylim()
         obv_range = obv_high - obv_low
-        # logging.info(f"📊 OBV ylim: {obv_low:.0f} — {obv_high:.0f}, range={obv_range:.0f}")
+        logging.info(f"📊 OBV ylim: {obv_low:.0f} — {obv_high:.0f}, range={obv_range:.0f}")
         if obv_range > 0:
             # Pick a nice step: ~4-6 lines across the panel
             import math
@@ -787,7 +787,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
                 ax_obv.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
                 level += step
                 _obv_grid_count += 1
-            # logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
+            logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
 
     # Separator line between OBV and RSI panels
     if ax_obv:
@@ -803,7 +803,7 @@ def _style_indicator_panels(axlist, rsi_values=None):
         # Grid lines at 20, 40, 60, 80, 100 (same style as main chart grid)
         for level in [20, 40, 60, 80, 100]:
             ax_rsi.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
-        # logging.info(f"📊 RSI grid: 5 lines drawn (20-100), ylim={ax_rsi.get_ylim()}")
+        logging.info(f"📊 RSI grid: 5 lines drawn (20-100), ylim={ax_rsi.get_ylim()}")
         # Overbought/oversold dashed lines on top of grid
         ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
         ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
