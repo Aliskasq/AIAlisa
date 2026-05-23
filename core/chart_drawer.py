@@ -131,7 +131,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         # Date labels between main chart and indicators (fig-level text)
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        fig.savefig(file_path, dpi=120, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
     except Exception as e:
         logging.error(f"❌ Error generating chart {symbol}: {repr(e)}")
@@ -1072,7 +1072,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        fig.savefig(file_path, dpi=120, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
     except Exception as e:
         logging.error(f"❌ Error generating scan chart {symbol}: {repr(e)}")
@@ -1151,7 +1151,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        fig.savefig(file_path, dpi=120, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
     except Exception as e:
         logging.error(f"❌ Error generating simple chart {symbol}: {repr(e)}")
