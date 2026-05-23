@@ -788,32 +788,39 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
                 _obv_grid_count += 1
             logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
 
-    # Separator line between OBV and RSI panels
+    # Physically separate OBV and RSI panels + draw separator line
     ax_rsi = panels.get(2)
     if ax_obv and ax_rsi and fig is not None:
         from matplotlib.lines import Line2D
+        from matplotlib.transforms import Bbox
+
+        # Shrink OBV from bottom and RSI from top to create a gap
+        gap = 0.025  # ~2.5% of figure height between panels
         bbox_obv = ax_obv.get_position()
         bbox_rsi = ax_rsi.get_position()
-        # Y: midpoint of the gap between OBV bottom and RSI top
+        # Move OBV bottom up
+        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 + gap],
+                                   [bbox_obv.x1, bbox_obv.y1]]))
+        # Move RSI top down
+        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0],
+                                   [bbox_rsi.x1, bbox_rsi.y1 - gap]]))
+
+        # Recalculate positions after adjustment
+        bbox_obv = ax_obv.get_position()
+        bbox_rsi = ax_rsi.get_position()
+        # Separator line in the middle of the gap
         sep_y = (bbox_obv.y0 + bbox_rsi.y1) / 2
-        # X: from left edge of plot area to right edge + small overshoot into label area
         x_left = bbox_obv.x0
-        x_right = bbox_obv.x1 + 0.02  # slight extension into right labels
+        x_right = bbox_obv.x1 + 0.02
         sep_line = Line2D([x_left, x_right], [sep_y, sep_y], transform=fig.transFigure,
                           color='black', linewidth=1.0, zorder=10, clip_on=False)
         fig.add_artist(sep_line)
-
-    # Add vertical padding so separator doesn't overlap tick labels
-    if ax_obv:
-        obv_lo, obv_hi = ax_obv.get_ylim()
-        obv_pad = (obv_hi - obv_lo) * 0.04
-        ax_obv.set_ylim(obv_lo - obv_pad, obv_hi)
 
     # RSI panel: add 70/30 levels + Binance-style value labels
     if not ax_rsi:
         ax_rsi = panels.get(2)
     if ax_rsi:
-        ax_rsi.set_ylim(-5, 100)  # small bottom padding so 0 doesn't collide
+        ax_rsi.set_ylim(0, 100)
         # Grid lines at 20, 40, 60, 80, 100 (same style as main chart grid)
         for level in [20, 40, 60, 80, 100]:
             ax_rsi.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
