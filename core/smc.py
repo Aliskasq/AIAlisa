@@ -778,8 +778,8 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         # Debug: log swing structures
         sym_tag = f" [{symbol}]" if symbol else ""
         # logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
-        for s in swing_structures[-10:]:
-            logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
+        # for s in swing_structures[-10:]:
+        #     logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
 
         # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
         internal_structures, internal_pivots, internal_trend = detect_structure(
