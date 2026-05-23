@@ -568,13 +568,13 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         if high_clamped:
             pct = ((t_high / current_price) - 1) * 100
             ax.text(0.5, 1.02, f"{high_label}  {price_str}  (+{pct:.0f}%)",
-                    color='black', fontsize=8, fontweight='bold',
+                    color='black', fontsize=12, fontweight='bold',
                     ha='center', va='bottom',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label ABOVE the high line
             ax.text(view_limit - 3, t_high, f"{high_label}  {price_str}",
-                    color='#F23645', fontsize=8, fontweight='bold',
+                    color='#FF0000', fontsize=12, fontweight='bold',
                     ha='right', va='bottom', zorder=6)
 
     # --- Strong Low / Weak Low label ---
@@ -583,13 +583,13 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         if low_clamped:
             pct = ((current_price / t_low) - 1) * 100
             ax.text(0.5, -0.06, f"{low_label}  {price_str}  (-{pct:.0f}%)",
-                    color='black', fontsize=8, fontweight='bold',
+                    color='black', fontsize=12, fontweight='bold',
                     ha='center', va='top',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label BELOW the low line
             ax.text(view_limit - 3, t_low, f"{low_label}  {price_str}",
-                    color='#089981', fontsize=8, fontweight='bold',
+                    color='#089981', fontsize=12, fontweight='bold',
                     ha='right', va='top', zorder=6)
 
     # --- Collect all OBs for annotation (both internal and swing) ---
@@ -921,23 +921,23 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
             x_start_h = max(t_high_idx, -0.5)
             # Line from high candle to right edge + beyond margin
             ax.plot([x_start_h, view_limit + 10], [t_high, t_high],
-                    color='#F23645', linewidth=1.2, alpha=0.8,
+                    color='#FF0000', linewidth=2.4, alpha=1.0,
                     zorder=3, clip_on=False, solid_capstyle='butt')
             # Small diamond marker on the actual high candle
             if 0 <= t_high_idx < view_limit:
-                ax.plot(t_high_idx, t_high, marker='D', color='#F23645',
-                        markersize=4, zorder=4)
+                ax.plot(t_high_idx, t_high, marker='D', color='#FF0000',
+                        markersize=5, zorder=4)
 
         if t_low is not None and not clamp_info.get("low_clamped", False):
             x_start_l = max(t_low_idx, -0.5)
             # Line from low candle to right edge + beyond margin
             ax.plot([x_start_l, view_limit + 10], [t_low, t_low],
-                    color='#089981', linewidth=1.2, alpha=0.8,
+                    color='#089981', linewidth=2.4, alpha=1.0,
                     zorder=3, clip_on=False, solid_capstyle='butt')
             # Small diamond marker on the actual low candle
             if 0 <= t_low_idx < view_limit:
                 ax.plot(t_low_idx, t_low, marker='D', color='#089981',
-                        markersize=4, zorder=4)
+                        markersize=5, zorder=4)
 
 
 async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, smc_overlay: dict = None) -> str | None:
