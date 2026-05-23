@@ -757,6 +757,21 @@ def _style_indicator_panels(axlist, rsi_values=None):
         ax_obv.ticklabel_format(useOffset=False, style='plain', axis='y')
         ax_obv.yaxis.get_offset_text().set_visible(False)
 
+        # Horizontal grid lines for OBV (same style as main chart grid)
+        obv_low, obv_high = ax_obv.get_ylim()
+        obv_range = obv_high - obv_low
+        if obv_range > 0:
+            # Pick a nice step: ~4-6 lines across the panel
+            import math
+            raw_step = obv_range / 5
+            magnitude = 10 ** math.floor(math.log10(abs(raw_step))) if raw_step != 0 else 1
+            nice_steps = [1, 2, 2.5, 5, 10]
+            step = magnitude * min(nice_steps, key=lambda s: abs(s * magnitude - raw_step))
+            level = math.ceil(obv_low / step) * step
+            while level <= obv_high:
+                ax_obv.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+                level += step
+
     # Separator line between OBV and RSI panels
     if ax_obv:
         # Draw a black line at the bottom edge of OBV panel
@@ -767,9 +782,13 @@ def _style_indicator_panels(axlist, rsi_values=None):
     if ax_rsi:
         # Top border of RSI panel (separator from OBV)
         ax_rsi.axhline(y=ax_rsi.get_ylim()[1], color='black', linewidth=1.5, zorder=10, clip_on=False)
-        ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5)
-        ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5)
         ax_rsi.set_ylim(0, 100)
+        # Grid lines at 20, 40, 60, 80, 100 (same style as main chart grid)
+        for level in [20, 40, 60, 80, 100]:
+            ax_rsi.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+        # Overbought/oversold dashed lines on top of grid
+        ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
+        ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
 
         # Binance-style RSI labels at top of panel
         if rsi_values:
