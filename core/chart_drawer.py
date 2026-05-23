@@ -767,7 +767,6 @@ def _style_indicator_panels(axlist, rsi_values=None):
                 return f"{x/1e3:.0f}K"
             return f"{x:.0f}"
         ax_obv.yaxis.set_major_formatter(FuncFormatter(_fmt_obv))
-        ax_obv.ticklabel_format(useOffset=False, style='plain', axis='y')
         ax_obv.yaxis.get_offset_text().set_visible(False)
 
         # Horizontal grid lines for OBV (same style as main chart grid)
