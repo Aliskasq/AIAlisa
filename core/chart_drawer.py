@@ -129,7 +129,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
         # Date labels between main chart and indicators (fig-level text)
-        _apply_date_labels_main(ax, fig, plot_df, view_limit)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text: set offset=False on ScalarFormatter axes,
         # and blank the text on all axes so bbox_inches='tight' can't bring it back
@@ -490,7 +490,7 @@ def _apply_custom_grid(ax, plot_df, view_limit):
             price *= 1.1
 
 
-def _apply_date_labels_main(ax_main, fig, plot_df, view_limit):
+def _apply_date_labels_main(ax_main, fig, plot_df, view_limit, axlist=None):
     """
     Draw date labels between main chart and indicators using fig.text().
     Uses figure-level coordinates so text is never hidden behind indicator panels.
@@ -500,19 +500,36 @@ def _apply_date_labels_main(ax_main, fig, plot_df, view_limit):
     """
     fig.canvas.draw()
 
-    bbox = ax_main.get_position()  # main chart position in figure coords
-    y_fig = bbox.y0 - 0.012  # just below the main chart
+    bbox_main = ax_main.get_position()
+    main_bottom = bbox_main.y0
+
+    # Find OBV panel top to place labels in the middle of the gap
+    obv_top = main_bottom - 0.05  # fallback
+    if axlist is not None:
+        panels = {}
+        for ax in axlist:
+            pnum = getattr(ax, '_panel_num', None)
+            if pnum is not None and pnum not in panels:
+                panels[pnum] = ax
+        if not panels.get(1) and len(axlist) >= 6:
+            panels[1] = axlist[2]
+        elif not panels.get(1) and len(axlist) >= 3:
+            panels[1] = axlist[1]
+        if panels.get(1):
+            obv_top = panels[1].get_position().y1
+
+    # Place date labels in the middle of the gap between main chart and OBV
+    y_fig = (main_bottom + obv_top) / 2
 
     for i in range(0, view_limit, 20):
         if i < len(plot_df):
             dt = plot_df.index[i]
             label = f"{dt.strftime('%b %d')}\n{dt.strftime('%H:%M')}"
-            # Convert data x-coordinate to figure x-coordinate
             disp = ax_main.transData.transform((i, 0))
             fig_x = fig.transFigure.inverted().transform(disp)[0]
             fig.text(fig_x, y_fig, label,
                      color='black', fontsize=7, fontweight='bold',
-                     ha='center', va='top')
+                     ha='center', va='center')
 
 
 def _prepare_chart_ylim(ax, smc_data, plot_df):
@@ -746,6 +763,11 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
     """
     from matplotlib.ticker import FuncFormatter
 
+    # Disable tight_layout so manual set_position() calls below
+    # are not overridden by fig.canvas.draw() / savefig
+    if fig is not None:
+        fig.set_tight_layout(False)
+
     # Collect all unique panels via _panel_num attribute
     panels = {}
     for ax in axlist:
@@ -811,7 +833,7 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
         from matplotlib.transforms import Bbox
 
         # First: push BOTH indicator panels down to free space for date labels
-        date_gap = 0.045  # ~4.5% of figure height for date labels between chart and OBV
+        date_gap = 0.07  # ~7% of figure height for date labels between chart and OBV
         bbox_obv = ax_obv.get_position()
         bbox_rsi = ax_rsi.get_position()
         ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 - date_gap],
@@ -1158,7 +1180,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
         # Date labels between main chart and indicators
-        _apply_date_labels_main(ax, fig, plot_df, view_limit)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
@@ -1247,7 +1269,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 
         # Date labels between main chart and indicators
-        _apply_date_labels_main(ax, fig, plot_df, view_limit)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
