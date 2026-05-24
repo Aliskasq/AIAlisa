@@ -91,7 +91,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {line_type} (LOG-MODE)",
-            figsize=(14, 12), returnfig=True, tight_layout=True,
+            figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
 
@@ -142,7 +142,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             ot.set_visible(False)
             ot.set_text("")
 
-        fig.savefig(file_path, dpi=200, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200)
 
     except Exception as e:
         logging.error(f"❌ Error generating chart {symbol}: {repr(e)}")
@@ -825,38 +825,55 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
                 _obv_grid_count += 1
             logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
 
-    # Physically separate panels: push OBV+RSI down (room for date labels)
-    # and add gap between OBV and RSI with separator line
+    # === FULL MANUAL LAYOUT: main chart + date gap + OBV + sep + RSI ===
+    # This replaces mplfinance's default positioning entirely.
+    ax_main = panels.get(0)
     ax_rsi = panels.get(2)
-    if ax_obv and ax_rsi and fig is not None:
+    if ax_main and ax_obv and ax_rsi and fig is not None:
         from matplotlib.lines import Line2D
         from matplotlib.transforms import Bbox
 
-        # First: push BOTH indicator panels down to free space for date labels
-        date_gap = 0.07  # ~7% of figure height for date labels between chart and OBV
-        bbox_obv = ax_obv.get_position()
-        bbox_rsi = ax_rsi.get_position()
-        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 - date_gap],
-                                   [bbox_obv.x1, bbox_obv.y1 - date_gap]]))
-        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0 - date_gap],
-                                   [bbox_rsi.x1, bbox_rsi.y1 - date_gap]]))
+        # Get the x-extent from the main chart (left/right margins stay the same)
+        bbox0 = ax_main.get_position()
+        x0, x1 = bbox0.x0, bbox0.x1
 
-        # Second: create gap between OBV and RSI (shrink OBV bottom, RSI top)
-        obv_rsi_gap = 0.025  # ~2.5% of figure height between OBV and RSI
-        bbox_obv = ax_obv.get_position()
-        bbox_rsi = ax_rsi.get_position()
-        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 + obv_rsi_gap],
-                                   [bbox_obv.x1, bbox_obv.y1]]))
-        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0],
-                                   [bbox_rsi.x1, bbox_rsi.y1 - obv_rsi_gap]]))
+        # Layout parameters (fraction of figure height)
+        top_margin = 0.06     # space above main chart (for title)
+        bottom_margin = 0.04  # space below RSI
+        date_gap = 0.05       # gap between main chart and OBV (for date labels)
+        obv_rsi_gap = 0.025   # gap between OBV and RSI (separator line)
+
+        # Panel height ratios: main=6, obv=1, rsi=1 → total 8 parts
+        usable = 1.0 - top_margin - bottom_margin - date_gap - obv_rsi_gap
+        main_h = usable * (6.0 / 8.0)
+        obv_h = usable * (1.0 / 8.0)
+        rsi_h = usable * (1.0 / 8.0)
+
+        # Position from top to bottom
+        main_top = 1.0 - top_margin
+        main_bot = main_top - main_h
+        obv_top = main_bot - date_gap
+        obv_bot = obv_top - obv_h
+        rsi_top = obv_bot - obv_rsi_gap
+        rsi_bot = rsi_top - rsi_h
+
+        ax_main.set_position(Bbox([[x0, main_bot], [x1, main_top]]))
+        ax_obv.set_position(Bbox([[x0, obv_bot], [x1, obv_top]]))
+        ax_rsi.set_position(Bbox([[x0, rsi_bot], [x1, rsi_top]]))
+
+        # Also reposition twin axes (mplfinance creates ax+twin per panel)
+        for _ax in axlist:
+            pnum = getattr(_ax, '_panel_num', None)
+            if pnum == 0 and _ax is not ax_main:
+                _ax.set_position(Bbox([[x0, main_bot], [x1, main_top]]))
+            elif pnum == 1 and _ax is not ax_obv:
+                _ax.set_position(Bbox([[x0, obv_bot], [x1, obv_top]]))
+            elif pnum == 2 and _ax is not ax_rsi:
+                _ax.set_position(Bbox([[x0, rsi_bot], [x1, rsi_top]]))
 
         # Separator line between OBV and RSI
-        bbox_obv = ax_obv.get_position()
-        bbox_rsi = ax_rsi.get_position()
-        sep_y = (bbox_obv.y0 + bbox_rsi.y1) / 2
-        x_left = bbox_obv.x0
-        x_right = bbox_obv.x1 + 0.02
-        sep_line = Line2D([x_left, x_right], [sep_y, sep_y], transform=fig.transFigure,
+        sep_y = (obv_bot + rsi_top) / 2
+        sep_line = Line2D([x0, x1 + 0.02], [sep_y, sep_y], transform=fig.transFigure,
                           color='black', linewidth=1.0, zorder=10, clip_on=False)
         fig.add_artist(sep_line)
 
@@ -1137,7 +1154,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
-            figsize=(14, 12), returnfig=True, tight_layout=True,
+            figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
 
@@ -1192,7 +1209,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             _ot.set_visible(False)
             _ot.set_text("")
 
-        fig.savefig(file_path, dpi=200, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200)
 
     except Exception as e:
         logging.error(f"❌ Error generating scan chart {symbol}: {repr(e)}")
@@ -1231,7 +1248,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             plot_df, type='candle', style='charles',
             addplot=_ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
-            figsize=(14, 12), returnfig=True, tight_layout=True,
+            figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
 
@@ -1281,7 +1298,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             _ot.set_visible(False)
             _ot.set_text("")
 
-        fig.savefig(file_path, dpi=200, bbox_inches='tight')
+        fig.savefig(file_path, dpi=200)
 
     except Exception as e:
         logging.error(f"❌ Error generating simple chart {symbol}: {repr(e)}")
