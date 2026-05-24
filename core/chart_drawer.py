@@ -131,6 +131,12 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         # Date labels between main chart and indicators (fig-level text)
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
+        # Hide OBV "1e7" offset text right before save (canvas.draw may re-show it)
+        for _ax in axlist:
+            if getattr(_ax, '_panel_num', None) == 1:
+                _ax.yaxis.get_offset_text().set_visible(False)
+                break
+
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
     except Exception as e:
@@ -577,8 +583,10 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
                     ha='left', va='bottom',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
-            # Label ABOVE the high line
-            ax.text(view_limit - 3, t_high, f"{high_label}  {price_str}",
+            # Label ABOVE the high line (offset up by ~1 line width so it doesn't sit on the line)
+            y_lo, y_hi = ax.get_ylim()
+            h_offset = (y_hi - y_lo) * 0.012
+            ax.text(view_limit - 3, t_high + h_offset, f"{high_label}  {price_str}",
                     color='#FF0000', fontsize=12, fontweight='bold',
                     ha='right', va='bottom', zorder=6)
 
@@ -597,8 +605,10 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
                     ha='left', va='top',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
-            # Label BELOW the low line
-            ax.text(view_limit - 3, t_low, f"{low_label}  {price_str}",
+            # Label BELOW the low line (offset down by ~1 line width)
+            y_lo, y_hi = ax.get_ylim()
+            l_offset = (y_hi - y_lo) * 0.012
+            ax.text(view_limit - 3, t_low - l_offset, f"{low_label}  {price_str}",
                     color='#089981', fontsize=12, fontweight='bold',
                     ha='right', va='top', zorder=6)
 
@@ -1138,6 +1148,12 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
+        # Hide OBV "1e7" offset text right before save
+        for _ax in axlist:
+            if getattr(_ax, '_panel_num', None) == 1:
+                _ax.yaxis.get_offset_text().set_visible(False)
+                break
+
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
     except Exception as e:
@@ -1216,6 +1232,12 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
 
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
+
+        # Hide OBV "1e7" offset text right before save
+        for _ax in axlist:
+            if getattr(_ax, '_panel_num', None) == 1:
+                _ax.yaxis.get_offset_text().set_visible(False)
+                break
 
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
