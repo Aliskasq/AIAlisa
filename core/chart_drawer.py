@@ -495,9 +495,9 @@ def _apply_date_labels_main(ax_main, fig, plot_df, view_limit):
     Draw date labels between main chart and indicators using fig.text().
     Uses figure-level coordinates so text is never hidden behind indicator panels.
     Bold black font, 2-line format (date + time), every 20 candles.
+    NOTE: panel spacing is handled by _style_indicator_panels — do NOT call
+    subplots_adjust here as it overrides manual panel positioning.
     """
-    # Add inter-panel spacing and recalculate layout
-    fig.subplots_adjust(hspace=0.55)
     fig.canvas.draw()
 
     bbox = ax_main.get_position()  # main chart position in figure coords
@@ -803,27 +803,34 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
                 _obv_grid_count += 1
             logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
 
-    # Physically separate OBV and RSI panels + draw separator line
+    # Physically separate panels: push OBV+RSI down (room for date labels)
+    # and add gap between OBV and RSI with separator line
     ax_rsi = panels.get(2)
     if ax_obv and ax_rsi and fig is not None:
         from matplotlib.lines import Line2D
         from matplotlib.transforms import Bbox
 
-        # Shrink OBV from bottom and RSI from top to create a gap
-        gap = 0.025  # ~2.5% of figure height between panels
+        # First: push BOTH indicator panels down to free space for date labels
+        date_gap = 0.045  # ~4.5% of figure height for date labels between chart and OBV
         bbox_obv = ax_obv.get_position()
         bbox_rsi = ax_rsi.get_position()
-        # Move OBV bottom up
-        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 + gap],
-                                   [bbox_obv.x1, bbox_obv.y1]]))
-        # Move RSI top down
-        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0],
-                                   [bbox_rsi.x1, bbox_rsi.y1 - gap]]))
+        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 - date_gap],
+                                   [bbox_obv.x1, bbox_obv.y1 - date_gap]]))
+        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0 - date_gap],
+                                   [bbox_rsi.x1, bbox_rsi.y1 - date_gap]]))
 
-        # Recalculate positions after adjustment
+        # Second: create gap between OBV and RSI (shrink OBV bottom, RSI top)
+        obv_rsi_gap = 0.025  # ~2.5% of figure height between OBV and RSI
         bbox_obv = ax_obv.get_position()
         bbox_rsi = ax_rsi.get_position()
-        # Separator line in the middle of the gap
+        ax_obv.set_position(Bbox([[bbox_obv.x0, bbox_obv.y0 + obv_rsi_gap],
+                                   [bbox_obv.x1, bbox_obv.y1]]))
+        ax_rsi.set_position(Bbox([[bbox_rsi.x0, bbox_rsi.y0],
+                                   [bbox_rsi.x1, bbox_rsi.y1 - obv_rsi_gap]]))
+
+        # Separator line between OBV and RSI
+        bbox_obv = ax_obv.get_position()
+        bbox_rsi = ax_rsi.get_position()
         sep_y = (bbox_obv.y0 + bbox_rsi.y1) / 2
         x_left = bbox_obv.x0
         x_right = bbox_obv.x1 + 0.02
