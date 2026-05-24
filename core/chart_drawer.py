@@ -142,7 +142,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             ot.set_visible(False)
             ot.set_text("")
 
-        fig.savefig(file_path, dpi=200)
+        fig.savefig(file_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
 
     except Exception as e:
         logging.error(f"❌ Error generating chart {symbol}: {repr(e)}")
@@ -1209,7 +1209,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             _ot.set_visible(False)
             _ot.set_text("")
 
-        fig.savefig(file_path, dpi=200)
+        fig.savefig(file_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
 
     except Exception as e:
         logging.error(f"❌ Error generating scan chart {symbol}: {repr(e)}")
@@ -1298,7 +1298,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             _ot.set_visible(False)
             _ot.set_text("")
 
-        fig.savefig(file_path, dpi=200)
+        fig.savefig(file_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
 
     except Exception as e:
         logging.error(f"❌ Error generating simple chart {symbol}: {repr(e)}")
