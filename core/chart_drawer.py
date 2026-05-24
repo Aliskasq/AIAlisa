@@ -131,11 +131,16 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         # Date labels between main chart and indicators (fig-level text)
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        # Hide OBV "1e7" offset text right before save (canvas.draw may re-show it)
+        # Nuke "1e7" offset text: set offset=False on ScalarFormatter axes,
+        # and blank the text on all axes so bbox_inches='tight' can't bring it back
+        from matplotlib.ticker import ScalarFormatter
         for _ax in axlist:
-            if getattr(_ax, '_panel_num', None) == 1:
-                _ax.yaxis.get_offset_text().set_visible(False)
-                break
+            fmt = _ax.yaxis.get_major_formatter()
+            if isinstance(fmt, ScalarFormatter):
+                fmt.set_useOffset(False)
+            ot = _ax.yaxis.get_offset_text()
+            ot.set_visible(False)
+            ot.set_text("")
 
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
@@ -1148,11 +1153,15 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        # Hide OBV "1e7" offset text right before save
+        # Nuke "1e7" offset text on all axes before save
+        from matplotlib.ticker import ScalarFormatter as _SF
         for _ax in axlist:
-            if getattr(_ax, '_panel_num', None) == 1:
-                _ax.yaxis.get_offset_text().set_visible(False)
-                break
+            _fmt = _ax.yaxis.get_major_formatter()
+            if isinstance(_fmt, _SF):
+                _fmt.set_useOffset(False)
+            _ot = _ax.yaxis.get_offset_text()
+            _ot.set_visible(False)
+            _ot.set_text("")
 
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
@@ -1233,11 +1242,15 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit)
 
-        # Hide OBV "1e7" offset text right before save
+        # Nuke "1e7" offset text on all axes before save
+        from matplotlib.ticker import ScalarFormatter as _SF
         for _ax in axlist:
-            if getattr(_ax, '_panel_num', None) == 1:
-                _ax.yaxis.get_offset_text().set_visible(False)
-                break
+            _fmt = _ax.yaxis.get_major_formatter()
+            if isinstance(_fmt, _SF):
+                _fmt.set_useOffset(False)
+            _ot = _ax.yaxis.get_offset_text()
+            _ot.set_visible(False)
+            _ot.set_text("")
 
         fig.savefig(file_path, dpi=200, bbox_inches='tight')
 
