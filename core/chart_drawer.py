@@ -98,6 +98,16 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         ax = axlist[0]
         ax.set_xlim(-0.5, view_limit - 0.5)
 
+        # Tight Y-axis: candle range ± 5% padding (log-safe)
+        import math as _math
+        _candle_low = float(plot_df['low'].min())
+        _candle_high = float(plot_df['high'].max())
+        if _candle_low > 0 and _candle_high > _candle_low:
+            _log_lo = _math.log(_candle_low)
+            _log_hi = _math.log(_candle_high)
+            _log_pad = (_log_hi - _log_lo) * 0.05
+            ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
+
         if idx_a_view != -1:
             ax.text(idx_a_view, line['price_A'], f"{line['price_A']:.4f}", color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
         if idx_b_view != -1:
@@ -1161,6 +1171,16 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         ax = axlist[0]
         ax.set_xlim(-0.5, view_limit - 0.5)
 
+        # Tight Y-axis: candle range ± 5% padding (log-safe)
+        import math as _math
+        _candle_low = float(plot_df['low'].min())
+        _candle_high = float(plot_df['high'].max())
+        if _candle_low > 0 and _candle_high > _candle_low:
+            _log_lo = _math.log(_candle_low)
+            _log_hi = _math.log(_candle_high)
+            _log_pad = (_log_hi - _log_lo) * 0.05
+            ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
+
         if idx_a_view != -1:
             ax.text(idx_a_view, line['price_A'], f"{line['price_A']:.4f}", color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
         if idx_b_view != -1:
@@ -1254,6 +1274,16 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
 
         ax = axlist[0]
         ax.set_xlim(-0.5, view_limit - 0.5)
+
+        # Tight Y-axis: candle range ± 5% padding (log-safe)
+        import math as _math
+        _candle_low = float(plot_df['low'].min())
+        _candle_high = float(plot_df['high'].max())
+        if _candle_low > 0 and _candle_high > _candle_low:
+            _log_lo = _math.log(_candle_low)
+            _log_hi = _math.log(_candle_high)
+            _log_pad = (_log_hi - _log_lo) * 0.05
+            ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
 
         # Watermark
         ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
