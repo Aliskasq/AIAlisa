@@ -163,7 +163,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         gc.collect()
 
     if not os.path.exists(file_path):
-        return False
+        return False, None
 
     # FIX: Negative percentage protection
     current_price = plot_df['close'].iloc[-1]
