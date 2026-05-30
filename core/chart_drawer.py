@@ -90,7 +90,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             plot_df, type='candle', style=custom_style,
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
-            title=f"\n{symbol} {line_type} (LOG-MODE)",
+            title=f"\n{symbol} {line_type}",
             figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
@@ -113,7 +113,9 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         if idx_b_view != -1:
             ax.text(idx_b_view, line['price_B'], f"{line['price_B']:.4f}", color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
 
-        ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
+        # Watermark: end at second-to-last candle, right-aligned
+        _wm_x = (view_limit - 2) / max(view_limit - 1, 1)  # normalized 0-1
+        ax.text(_wm_x, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='right', va='bottom', alpha=0.9)
 
         # Clamp Y-axis BEFORE drawing overlay (so lines for far-away values are skipped)
         clamp_info = {}
@@ -600,19 +602,19 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
 
     y_low, y_high = ax.get_ylim()
 
+    # Normalized X for second-to-last candle (right-aligned anchor)
+    _wm_x = (view_limit - 2) / max(view_limit - 1, 1)
+
     # --- Strong High / Weak High label ---
     if t_high is not None:
         price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
         if high_clamped:
             pct = ((t_high / current_price) - 1) * 100
-            # Label in bright red, price+pct in black — same size as chart title
-            ax.text(0.49, 1.02, f"{high_label} ",
+            # Clamped high: show on the TITLE line (top of chart, right side)
+            high_text = f"  {high_label}  {price_str}  (+{pct:.0f}%)"
+            ax.text(0.99, 1.02, high_text,
                     color='#FF0000', fontsize=14, fontweight='bold',
                     ha='right', va='bottom',
-                    transform=ax.transAxes, clip_on=False, zorder=6)
-            ax.text(0.51, 1.02, f"{price_str}  (+{pct:.0f}%)",
-                    color='black', fontsize=14, fontweight='bold',
-                    ha='left', va='bottom',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label ABOVE the high line (offset up by ~1 line width so it doesn't sit on the line)
@@ -627,14 +629,12 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
         if low_clamped:
             pct = ((current_price - t_low) / current_price) * 100
-            # Label in green, price+pct in black — same size as chart title
-            ax.text(0.49, -0.06, f"{low_label} ",
+            # Clamped low: show on the WATERMARK line (Alisa row, after the watermark text)
+            low_text = f"  {low_label}  {price_str}  (-{pct:.0f}%)"
+            # Position just to the left of watermark end (watermark is right-aligned at _wm_x)
+            ax.text(_wm_x, 0.06, low_text,
                     color='#089981', fontsize=14, fontweight='bold',
-                    ha='right', va='top',
-                    transform=ax.transAxes, clip_on=False, zorder=6)
-            ax.text(0.51, -0.06, f"{price_str}  (-{pct:.0f}%)",
-                    color='black', fontsize=14, fontweight='bold',
-                    ha='left', va='top',
+                    ha='right', va='bottom',
                     transform=ax.transAxes, clip_on=False, zorder=6)
         else:
             # Label BELOW the low line (offset down by ~1 line width)
@@ -1163,7 +1163,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             plot_df, type='candle', style='charles',
             alines=dict(alines=[list(zip(plot_df.index, line_vals))], colors='gold', linewidths=2),
             addplot=addplots + _ind_addplots, yscale='log',
-            title=f"\n{symbol} {tf} | {line_type} (LOG-MODE)",
+            title=f"\n{symbol} {tf} | {line_type}",
             figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
@@ -1186,8 +1186,9 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         if idx_b_view != -1:
             ax.text(idx_b_view, line['price_B'], f"{line['price_B']:.4f}", color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
 
-        # Watermark
-        ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
+        # Watermark: end at second-to-last candle, right-aligned
+        _wm_x = (view_limit - 2) / max(view_limit - 1, 1)
+        ax.text(_wm_x, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='right', va='bottom', alpha=0.9)
 
         # Price vs trendline info
         ax.text(0.5, 0.97, price_label, transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
@@ -1267,7 +1268,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
             addplot=_ind_addplots, yscale='log',
-            title=f"\n{symbol} {tf} | SCAN (LOG-MODE)",
+            title=f"\n{symbol} {tf} | SCAN",
             figsize=(14, 12), returnfig=True, tight_layout=False,
             panel_ratios=(6, 1, 1)
         )
@@ -1286,7 +1287,9 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
 
         # Watermark
-        ax.text(0.5, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='center', va='bottom', alpha=0.9)
+        # Watermark: end at second-to-last candle, right-aligned
+        _wm_x = (view_limit - 2) / max(view_limit - 1, 1)
+        ax.text(_wm_x, 0.02, 'Alisa_10000 / Alisa_Trend', transform=ax.transAxes, color='black', fontsize=28, fontweight='bold', ha='right', va='bottom', alpha=0.9)
 
         # No trendline label
         ax.text(0.5, 0.97, "No trendline detected", transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
