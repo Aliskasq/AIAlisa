@@ -575,17 +575,35 @@ def _prepare_chart_ylim(ax, smc_data, plot_df):
 
 def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_info=None):
     """
-    Draw Alisa watermark (bottom-left) and clamped High/Low labels.
-    - Watermark: left-aligned at second candle from left
-    - Clamped Low: appended on the same bottom line (right side)
-    - Clamped High: appended to the chart title (same top line)
+    Рисует две строки надписей на графике:
+
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║  ВЕРХНЯЯ СТРОКА (title_y) — заголовок графика:                     ║
+    ║  Центр: "BTCUSDT PEAK-TO-PEAK"  (название монеты + тип линии)      ║
+    ║  Справа: "Weak High 0.2954 (+14%)" КРАСНЫМ — только если High      ║
+    ║          выше видимой зоны (clamped). Иначе High рисуется у линии.  ║
+    ║                                                                     ║
+    ║  НИЖНЯЯ СТРОКА (y=0.02) — watermark:                               ║
+    ║  Слева: "Alisa_10000 / Alisa_Trend" (всегда)                       ║
+    ║  Справа: "Strong Low 0.0772 (-70%)" ЗЕЛЁНЫМ — только если Low      ║
+    ║          ниже видимой зоны (clamped). Иначе Low рисуется у линии.   ║
+    ╚══════════════════════════════════════════════════════════════════════╝
+
+    ВАЖНО: mplfinance рисует заголовок через fig.suptitle(), а не ax.set_title().
+    Чтобы clamped High был ТОЧНО на той же строке, мы:
+    1. Читаем позицию/шрифт из fig._suptitle
+    2. Прячем оригинальный suptitle (set_visible=False)
+    3. Перерисовываем заголовок + High через fig.text() с одинаковым Y
+    Без этого трюка fig.text() и suptitle ВСЕГДА на разных Y.
+
+    Если High/Low в видимой зоне — их рисует _draw_smc_annotations() у линий.
     """
     if clamp_info is None:
         clamp_info = {}
 
-    # --- Watermark text (bottom line) ---
+    # ── НИЖНЯЯ СТРОКА: watermark слева ──
     wm_text = 'Alisa_10000 / Alisa_Trend'
-    _wm_x = 1 / max(view_limit - 1, 1)  # second candle from left, normalized
+    _wm_x = 1 / max(view_limit - 1, 1)  # вторая свеча слева, нормализовано 0-1
     ax.text(_wm_x, 0.02, wm_text, transform=ax.transAxes,
             color='black', fontsize=28, fontweight='bold',
             ha='left', va='bottom', alpha=0.9)
@@ -596,7 +614,7 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
     trailing = smc_data.get("trailing", {})
     current_price = float(plot_df['close'].iloc[-1])
 
-    # --- Clamped Low: same bottom line, right-aligned ---
+    # ── НИЖНЯЯ СТРОКА: clamped Low справа (зелёный) ──
     if clamp_info.get("low_clamped"):
         t_low = trailing.get("trailing_low")
         low_label = trailing.get("low_label", "Low")
@@ -608,9 +626,8 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
                     color='#089981', fontsize=14, fontweight='bold',
                     ha='right', va='bottom', clip_on=False, zorder=6)
 
-    # --- Clamped High: same line as chart title, red ---
-    # mplfinance uses fig.suptitle — we hide it and redraw manually
-    # so we can place clamped High on the EXACT same line
+    # ── ВЕРХНЯЯ СТРОКА: clamped High справа (красный) ──
+    # Читаем оригинальный заголовок из fig.suptitle (mplfinance)
     fig = ax.get_figure()
     title_text = ""
     title_y = 0.98
@@ -627,7 +644,8 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
             price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
             pct = ((t_high / current_price) - 1) * 100
             high_text = f"{high_label}  {price_str}  (+{pct:.0f}%)"
-            # Hide original suptitle and redraw both on same line
+            # Прячем оригинальный suptitle и рисуем заново:
+            # заголовок по центру + High справа — оба fig.text() с одним Y
             fig._suptitle.set_visible(False)
             fig.text(0.5, title_y, title_text,
                      color='black', fontsize=title_fontsize, fontweight='bold',
