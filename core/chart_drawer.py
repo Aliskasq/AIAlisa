@@ -626,7 +626,7 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     if t_low is not None:
         price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
         if low_clamped:
-            pct = ((current_price / t_low) - 1) * 100
+            pct = ((current_price - t_low) / current_price) * 100
             # Label in green, price+pct in black — same size as chart title
             ax.text(0.49, -0.06, f"{low_label} ",
                     color='#089981', fontsize=14, fontweight='bold',
