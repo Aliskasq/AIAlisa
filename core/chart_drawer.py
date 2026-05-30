@@ -608,7 +608,18 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
                     color='#089981', fontsize=14, fontweight='bold',
                     ha='right', va='bottom', clip_on=False, zorder=6)
 
-    # --- Clamped High: same line as chart title (fig.suptitle), right side, red ---
+    # --- Clamped High: same line as chart title, red ---
+    # mplfinance uses fig.suptitle — we hide it and redraw manually
+    # so we can place clamped High on the EXACT same line
+    fig = ax.get_figure()
+    title_text = ""
+    title_y = 0.98
+    title_fontsize = 14
+    if hasattr(fig, '_suptitle') and fig._suptitle is not None:
+        title_text = fig._suptitle.get_text().strip()
+        title_y = fig._suptitle.get_position()[1]
+        title_fontsize = fig._suptitle.get_fontsize()
+
     if clamp_info.get("high_clamped"):
         t_high = trailing.get("trailing_high")
         high_label = trailing.get("high_label", "High")
@@ -616,14 +627,14 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
             price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
             pct = ((t_high / current_price) - 1) * 100
             high_text = f"{high_label}  {price_str}  (+{pct:.0f}%)"
-            fig = ax.get_figure()
-            # Get suptitle Y position (mplfinance uses fig.suptitle, not ax.set_title)
-            suptitle_y = 0.98  # default fallback
-            if hasattr(fig, '_suptitle') and fig._suptitle is not None:
-                suptitle_y = fig._suptitle.get_position()[1]
-            fig.text(0.95, suptitle_y, high_text,
-                     color='#FF0000', fontsize=14, fontweight='bold',
-                     ha='right', va='center')
+            # Hide original suptitle and redraw both on same line
+            fig._suptitle.set_visible(False)
+            fig.text(0.5, title_y, title_text,
+                     color='black', fontsize=title_fontsize, fontweight='bold',
+                     ha='center', va='top')
+            fig.text(0.95, title_y, high_text,
+                     color='#FF0000', fontsize=title_fontsize, fontweight='bold',
+                     ha='right', va='top')
 
 
 def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=None):
