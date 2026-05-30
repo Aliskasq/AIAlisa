@@ -608,16 +608,20 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
                     color='#089981', fontsize=14, fontweight='bold',
                     ha='right', va='bottom', clip_on=False, zorder=6)
 
-    # --- Clamped High: append to chart title (same top line) ---
+    # --- Clamped High: same line as chart title, right side, red ---
     if clamp_info.get("high_clamped"):
         t_high = trailing.get("trailing_high")
         high_label = trailing.get("high_label", "High")
         if t_high is not None:
             price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
             pct = ((t_high / current_price) - 1) * 100
-            high_suffix = f"     {high_label}  {price_str}  (+{pct:.0f}%)"
-            current_title = ax.get_title()
-            ax.set_title(current_title + high_suffix, color='black', fontweight='bold')
+            high_text = f"{high_label}  {price_str}  (+{pct:.0f}%)"
+            # Match exact Y of the title text
+            title_y = ax.title.get_position()[1]
+            ax.text(0.99, title_y, high_text,
+                    color='#FF0000', fontsize=14, fontweight='bold',
+                    ha='right', va='center',
+                    transform=ax.transAxes, clip_on=False, zorder=6)
 
 
 def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=None):
