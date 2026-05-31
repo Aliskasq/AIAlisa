@@ -803,8 +803,8 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     from matplotlib.transforms import Bbox
     from matplotlib.lines import Line2D
 
-    # Strip height: single line for up to 2 OBs side by side
-    strip_h = 0.03
+    # Strip height: minimal — just enough for one text line + tiny padding
+    strip_h = 0.018
 
     # Shift ALL axes down by strip_h
     for ax in axlist:
@@ -812,8 +812,9 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
         ax.set_position(Bbox([[pos.x0, pos.y0 - strip_h], [pos.x1, pos.y1 - strip_h]]))
 
     # Shift fig-level Line2D artists (separator lines) down
-    for artist in fig.get_children():
-        if isinstance(artist, Line2D) and artist.get_transform() == fig.transFigure:
+    # Use `is` for transform check + fallback: shift ANY Line2D added to fig.artists
+    for artist in list(fig.artists):
+        if isinstance(artist, Line2D):
             ydata = list(artist.get_ydata())
             artist.set_ydata([y - strip_h for y in ydata])
 
@@ -843,14 +844,14 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     if len(parts) == 1:
         # Single OB — one text element
         color = '#FF0000' if parts[0][1] == -1 else '#089981'
-        fig.text(0.95, 0.995, parts[0][0],
+        fig.text(0.95, 0.982, parts[0][0],
                  color=color, fontsize=10, fontweight='bold',
                  ha='right', va='top')
     else:
         # Two OBs — place side by side, close together (~5 candle gap)
         # Draw rightmost first, measure its width, place second next to it
         color_r = '#FF0000' if parts[1][1] == -1 else '#089981'
-        t_right = fig.text(0.95, 0.995, parts[1][0],
+        t_right = fig.text(0.95, 0.982, parts[1][0],
                            color=color_r, fontsize=9, fontweight='bold',
                            ha='right', va='top')
         # Measure right text width in figure coords to place left text nearby
