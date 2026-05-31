@@ -690,11 +690,18 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     y_low, y_high = ax.get_ylim()
 
     # --- Strong High / Weak High label (only when VISIBLE, not clamped) ---
+    # Use LOG-space offset so visual gap is consistent regardless of price range.
+    # Linear offset (y_hi - y_lo) * k breaks on log-scale charts with wide ranges.
+    import math as _math
     if t_high is not None and not high_clamped:
         price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
         y_lo, y_hi = ax.get_ylim()
-        h_offset = (y_hi - y_lo) * 0.012
-        ax.text(view_limit - 3, t_high + h_offset, f"{high_label}  {price_str}",
+        if y_lo > 0 and y_hi > 0:
+            log_range = _math.log(y_hi) - _math.log(y_lo)
+            label_y = t_high * _math.exp(log_range * 0.012)
+        else:
+            label_y = t_high * 1.01
+        ax.text(view_limit - 3, label_y, f"{high_label}  {price_str}",
                 color='#FF0000', fontsize=12, fontweight='bold',
                 ha='right', va='bottom', zorder=6)
 
@@ -702,8 +709,12 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     if t_low is not None and not low_clamped:
         price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
         y_lo, y_hi = ax.get_ylim()
-        l_offset = (y_hi - y_lo) * 0.012
-        ax.text(view_limit - 3, t_low - l_offset, f"{low_label}  {price_str}",
+        if y_lo > 0 and y_hi > 0:
+            log_range = _math.log(y_hi) - _math.log(y_lo)
+            label_y = t_low / _math.exp(log_range * 0.012)
+        else:
+            label_y = t_low * 0.99
+        ax.text(view_limit - 3, label_y, f"{low_label}  {price_str}",
                 color='#089981', fontsize=12, fontweight='bold',
                 ha='right', va='top', zorder=6)
 
