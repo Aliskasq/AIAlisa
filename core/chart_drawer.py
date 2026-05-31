@@ -139,15 +139,15 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         except Exception as e:
             logging.error(f"❌ Indicator panels style error: {repr(e)}")
 
-        # Date labels between main chart and indicators (fig-level text)
-        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
-
-        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        # Above-chart OB strip BEFORE date labels (shifts panels down)
         if smc_overlay:
             try:
                 _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
             except Exception as e:
                 logging.error(f"❌ Above OB strip error: {repr(e)}")
+
+        # Date labels AFTER OB strip (uses final panel positions)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text: set offset=False on ScalarFormatter axes,
         # and blank the text on all axes so bbox_inches='tight' can't bring it back
@@ -803,9 +803,8 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     from matplotlib.transforms import Bbox
     from matplotlib.lines import Line2D
 
-    # Strip height: 2.5% of figure per OB line + small padding
-    line_h = 0.025
-    strip_h = line_h * len(above_obs) + 0.008
+    # Strip height: single line for up to 2 OBs side by side
+    strip_h = 0.03
 
     # Shift ALL axes down by strip_h
     for ax in axlist:
@@ -824,24 +823,38 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
             sx, sy = fig._suptitle.get_position()
             fig._suptitle.set_position((sx, sy - strip_h))
 
-    # Shift all existing fig.text() elements down (title, clamped labels, dates)
+    # Shift all existing fig.text() elements down (title, clamped labels)
+    # NOTE: date labels are drawn AFTER this function, so they use final positions
     existing_texts = list(fig.texts)  # snapshot before adding new ones
     for txt in existing_texts:
         tx, ty = txt.get_position()
         txt.set_position((tx, ty - strip_h))
 
-    # Draw OB info in the freed strip, right-aligned
+    # Build OB labels and draw in a single line, right-aligned
     # Bright colors matching High/Low lines: red for Bear, green for Bull
-    for i, ob in enumerate(above_obs):
+    parts = []
+    # Use the color of the first OB for the whole line if same bias, else mixed
+    for ob in above_obs:
         hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
         lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
-        color = '#FF0000' if ob["bias"] == -1 else '#089981'
         ob_type = "Bear" if ob["bias"] == -1 else "Bull"
+        parts.append((f"↑ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
 
-        y_pos = 0.995 - i * line_h
-        fig.text(0.95, y_pos, f"↑ {ob_type} OB  {lo_str} — {hi_str}",
+    if len(parts) == 1:
+        # Single OB — one text element
+        color = '#FF0000' if parts[0][1] == -1 else '#089981'
+        fig.text(0.95, 0.995, parts[0][0],
                  color=color, fontsize=10, fontweight='bold',
                  ha='right', va='top')
+    else:
+        # Two OBs — place side by side from right edge
+        # Second (rightmost) at x=0.95, first at x=0.55
+        for idx, (text, bias) in enumerate(parts):
+            color = '#FF0000' if bias == -1 else '#089981'
+            x_pos = 0.95 - idx * 0.38  # 0.95 and 0.57
+            fig.text(x_pos, 0.995, text,
+                     color=color, fontsize=9, fontweight='bold',
+                     ha='right', va='top')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
@@ -1366,15 +1379,15 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (scan): {repr(e)}")
 
-        # Date labels between main chart and indicators
-        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
-
-        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        # Above-chart OB strip BEFORE date labels (shifts panels down)
         if smc_overlay:
             try:
                 _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
             except Exception as e:
                 logging.error(f"❌ Above OB strip error (scan): {repr(e)}")
+
+        # Date labels AFTER OB strip (uses final panel positions)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
@@ -1473,15 +1486,15 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
         except Exception as e:
             logging.error(f"❌ Indicator panels style error (simple): {repr(e)}")
 
-        # Date labels between main chart and indicators
-        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
-
-        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        # Above-chart OB strip BEFORE date labels (shifts panels down)
         if smc_overlay:
             try:
                 _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
             except Exception as e:
                 logging.error(f"❌ Above OB strip error (simple): {repr(e)}")
+
+        # Date labels AFTER OB strip (uses final panel positions)
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
