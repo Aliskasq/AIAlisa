@@ -142,6 +142,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
         # Date labels between main chart and indicators (fig-level text)
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
+        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        if smc_overlay:
+            try:
+                _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Above OB strip error: {repr(e)}")
+
         # Nuke "1e7" offset text: set offset=False on ScalarFormatter axes,
         # and blank the text on all axes so bbox_inches='tight' can't bring it back
         from matplotlib.ticker import ScalarFormatter
@@ -723,14 +730,18 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     all_obs += list(smc_data.get("internal_order_blocks", []))
 
     # Classify: visible vs above vs below chart area
+    # Use chart_high/chart_low (actual candle range) instead of y_high/y_low (ylim with padding)
+    # so OBs just above candles are classified as "above" and shown as ↑ arrows
+    chart_high = float(plot_df['high'].max())
+    chart_low = float(plot_df['low'].min())
     visible_obs = []
     above_obs = []
     below_obs = []
 
     for ob in all_obs:
-        if ob["low"] > y_high:
+        if ob["low"] > chart_high:
             above_obs.append(ob)
-        elif ob["high"] < y_low:
+        elif ob["high"] < chart_low:
             below_obs.append(ob)
         else:
             visible_obs.append(ob)
@@ -751,16 +762,8 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
         ax.text(right_x, ob["low"], lo_str,
                 color=color, fontsize=6, ha='left', va='bottom', zorder=5, clip_on=False)
 
-    # --- Off-screen OBs: ↑ arrows in TOP strip (above chart) ---
-    for i, ob in enumerate(above_obs[:2]):
-        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
-        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
-        color = '#F23645' if ob["bias"] == -1 else '#089981'
-        x_frac = 0.75 + i * 0.12
-        ax.text(x_frac, 1.01 + i * 0.025, f"↑ {lo_str}-{hi_str}",
-                color=color, fontsize=6, fontweight='bold',
-                ha='center', va='bottom',
-                transform=ax.transAxes, clip_on=False, zorder=5)
+    # --- Off-screen upper OBs: handled by _draw_above_obs_strip() ---
+    # (dedicated white strip above chart title — no longer drawn here)
 
     # --- Off-screen OBs: ↓ arrows in BOTTOM strip (below chart, near dates) ---
     for i, ob in enumerate(below_obs[:2]):
@@ -772,6 +775,73 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
                 color=color, fontsize=6, fontweight='bold',
                 ha='center', va='top',
                 transform=ax.transAxes, clip_on=False, zorder=5)
+
+
+def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
+    """
+    If OBs exist above visible candle range, add a white strip at the top
+    of the figure and draw OB info with ↑ arrows in bright bold text.
+    Shifts all existing panels/elements down to make room.
+    Max 2 upper OBs shown, right-aligned. Does NOT handle lower OBs.
+    """
+    if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
+        return
+
+    chart_high = float(plot_df['high'].max())
+
+    # Collect all OBs and find those above visible candles
+    all_obs = list(smc_data.get("swing_order_blocks", []))
+    all_obs += list(smc_data.get("internal_order_blocks", []))
+    above_obs = [ob for ob in all_obs if ob["low"] > chart_high]
+
+    if not above_obs:
+        return
+
+    above_obs.sort(key=lambda o: o["low"])  # closest to chart first
+    above_obs = above_obs[:2]
+
+    from matplotlib.transforms import Bbox
+    from matplotlib.lines import Line2D
+
+    # Strip height: 2.5% of figure per OB line + small padding
+    line_h = 0.025
+    strip_h = line_h * len(above_obs) + 0.008
+
+    # Shift ALL axes down by strip_h
+    for ax in axlist:
+        pos = ax.get_position()
+        ax.set_position(Bbox([[pos.x0, pos.y0 - strip_h], [pos.x1, pos.y1 - strip_h]]))
+
+    # Shift fig-level Line2D artists (separator lines) down
+    for artist in fig.get_children():
+        if isinstance(artist, Line2D) and artist.get_transform() == fig.transFigure:
+            ydata = list(artist.get_ydata())
+            artist.set_ydata([y - strip_h for y in ydata])
+
+    # Shift suptitle down if visible
+    if hasattr(fig, '_suptitle') and fig._suptitle is not None:
+        if fig._suptitle.get_visible():
+            sx, sy = fig._suptitle.get_position()
+            fig._suptitle.set_position((sx, sy - strip_h))
+
+    # Shift all existing fig.text() elements down (title, clamped labels, dates)
+    existing_texts = list(fig.texts)  # snapshot before adding new ones
+    for txt in existing_texts:
+        tx, ty = txt.get_position()
+        txt.set_position((tx, ty - strip_h))
+
+    # Draw OB info in the freed strip, right-aligned
+    # Bright colors matching High/Low lines: red for Bear, green for Bull
+    for i, ob in enumerate(above_obs):
+        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
+        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        color = '#FF0000' if ob["bias"] == -1 else '#089981'
+        ob_type = "Bear" if ob["bias"] == -1 else "Bull"
+
+        y_pos = 0.995 - i * line_h
+        fig.text(0.95, y_pos, f"↑ {ob_type} OB  {lo_str} — {hi_str}",
+                 color=color, fontsize=10, fontweight='bold',
+                 ha='right', va='top')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
@@ -1051,6 +1121,9 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
     # Both internal and swing OBs displayed.
     # Swing OBs: thin black border to distinguish from internal.
     # Internal OBs: no border (LuxAlgo default style).
+    # Skip OBs entirely above visible candles — they'd stretch the Y-axis.
+    # Those are shown as ↑ arrows in a dedicated strip above the chart.
+    chart_high = float(plot_df['high'].max())
     for ob_list, is_internal in [
         (swing_obs_list, False),
         (deduped_internal, True),
@@ -1060,6 +1133,9 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
             ob_x_end = view_limit - 1
 
             if ob_x_end < 0 or ob_x_start >= view_limit:
+                continue
+            # Skip OBs entirely above visible candle range
+            if ob["low"] > chart_high:
                 continue
             ob_x_start = max(ob_x_start, -0.5)
 
@@ -1293,6 +1369,13 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
+        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        if smc_overlay:
+            try:
+                _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Above OB strip error (scan): {repr(e)}")
+
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
         for _ax in axlist:
@@ -1392,6 +1475,13 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
 
         # Date labels between main chart and indicators
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
+
+        # Above-chart OB strip (white area with ↑ arrows for off-screen OBs)
+        if smc_overlay:
+            try:
+                _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Above OB strip error (simple): {repr(e)}")
 
         # Nuke "1e7" offset text on all axes before save
         from matplotlib.ticker import ScalarFormatter as _SF
