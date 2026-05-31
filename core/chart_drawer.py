@@ -559,16 +559,23 @@ def _prepare_chart_ylim(ax, smc_data, plot_df):
     chart_high = float(plot_df['high'].max())
     chart_low = float(plot_df['low'].min())
 
-    if t_high is not None and chart_high > 0 and t_high / chart_high > 1.3:
+    # Clamp if trailing value is OUTSIDE visible candle range (even slightly).
+    # Old threshold (1.3 = 30%) left invisible lines at chart edges with clip_on=False.
+    # New logic: clamp whenever trailing is beyond visible candles.
+    if t_high is not None and chart_high > 0 and t_high > chart_high:
         info["high_clamped"] = True
-    if t_low is not None and chart_low > 0 and chart_low / t_low > 1.3:
+    if t_low is not None and chart_low > 0 and t_low < chart_low:
         info["low_clamped"] = True
 
     if info["high_clamped"] or info["low_clamped"]:
         cur_ylow, cur_yhigh = ax.get_ylim()
-        new_top = chart_high * 1.10 if info["high_clamped"] else cur_yhigh
-        new_bot = chart_low * 0.90 if info["low_clamped"] else cur_ylow
-        ax.set_ylim(new_bot, new_top)
+        # Keep existing ylim (already has 5% log padding from candle range).
+        # Only override if the trailing value was WAY outside (old 30%+ case)
+        # to tighten the view. For small overflows, the candle-based ylim is fine.
+        new_top = chart_high * 1.10 if info["high_clamped"] and t_high / chart_high > 1.3 else cur_yhigh
+        new_bot = chart_low * 0.90 if info["low_clamped"] and chart_low / t_low > 1.3 else cur_ylow
+        if new_top != cur_yhigh or new_bot != cur_ylow:
+            ax.set_ylim(new_bot, new_top)
 
     return info
 
