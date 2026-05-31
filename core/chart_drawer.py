@@ -11,6 +11,27 @@ import logging
 import uuid
 from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID
 
+
+def _fmt_price(price: float) -> str:
+    """
+    Smart price formatting: up to 8 decimals, trim trailing zeros keeping 1.
+    Examples:
+      0.00200000 → 0.0020    7.5000 → 7.50
+      0.015000   → 0.0150    0.0000005 → 0.00000050
+      0.12345678 → 0.12345678
+    """
+    s = f"{price:.8f}"
+    int_part, dec_part = s.split('.')
+    stripped = dec_part.rstrip('0')
+    if len(stripped) == 0:
+        # All zeros → keep 2 decimals (e.g., 1.00)
+        return f"{int_part}.00"
+    # Keep one trailing zero after last significant digit
+    keep = min(len(stripped) + 1, 8)
+    keep = max(keep, 2)  # minimum 2 decimals
+    return f"{int_part}.{dec_part[:keep]}"
+
+
 SQUARE_CACHE_FILE = "data/square_cache.json"
 
 async def send_breakout_notification(symbol, df, line, tf, line_type, session, trigger_price=0.0, ai_text="", target_chat_id=None, smc_overlay=None, from_vol_wait=False):
@@ -109,9 +130,9 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
 
         if idx_a_view != -1:
-            ax.text(idx_a_view, line['price_A'], f"{line['price_A']:.4f}", color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
+            ax.text(idx_a_view, line['price_A'], _fmt_price(line['price_A']), color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
         if idx_b_view != -1:
-            ax.text(idx_b_view, line['price_B'], f"{line['price_B']:.4f}", color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
+            ax.text(idx_b_view, line['price_B'], _fmt_price(line['price_B']), color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
 
         # Clamp Y-axis BEFORE drawing overlay (so lines for far-away values are skipped)
         clamp_info = {}
@@ -186,7 +207,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
     # --- PREPARE BINANCE SQUARE PUBLICATION ---
     post_id = str(uuid.uuid4())[:8]
-    square_text = f"🚀 ${symbol} Technical Breakout Alert!\n\nTimeframe: {tf}\nCurrent Price: ${current_price:.4f}\n\n{ai_text}"
+    square_text = f"🚀 ${symbol} Technical Breakout Alert!\n\nTimeframe: {tf}\nCurrent Price: ${_fmt_price(current_price)}\n\n{ai_text}"
     # Save to file-based cache (no circular import needed)
     try:
         cache = {}
@@ -225,7 +246,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     # Build header for photo caption
     header = (
         f"${short_symbol} {'📈VOL UP. TREND BREAKOUT' if from_vol_wait else '🎯 TREND BREAKOUT'}\n"
-        f"⏳ TF: {tf} | 💰 Price: {current_price:.6f}\n"
+        f"⏳ TF: {tf} | 💰 Price: {_fmt_price(current_price)}\n"
         f"💡 Above trendline by {diff_pct:.2f}%\n\n"
         f"🤖 AI-Alisa-CopilotClow:\n"
     )
@@ -633,7 +654,7 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
         t_low = trailing.get("trailing_low")
         low_label = trailing.get("low_label", "Low")
         if t_low is not None:
-            price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
+            price_str = _fmt_price(t_low)
             pct = ((current_price - t_low) / current_price) * 100
             low_text = f"{low_label}  {price_str}  (-{pct:.0f}%)"
             ax.text(0.99, 0.02, low_text, transform=ax.transAxes,
@@ -655,7 +676,7 @@ def _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_data=None, clamp_in
         t_high = trailing.get("trailing_high")
         high_label = trailing.get("high_label", "High")
         if t_high is not None:
-            price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
+            price_str = _fmt_price(t_high)
             pct = ((t_high / current_price) - 1) * 100
             high_text = f"{high_label}  {price_str}  (+{pct:.0f}%)"
             # Прячем оригинальный suptitle и рисуем заново:
@@ -701,7 +722,7 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     # Linear offset (y_hi - y_lo) * k breaks on log-scale charts with wide ranges.
     import math as _math
     if t_high is not None and not high_clamped:
-        price_str = f"{t_high:.4f}" if t_high >= 0.01 else f"{t_high:.6f}"
+        price_str = _fmt_price(t_high)
         y_lo, y_hi = ax.get_ylim()
         if y_lo > 0 and y_hi > 0:
             log_range = _math.log(y_hi) - _math.log(y_lo)
@@ -714,7 +735,7 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
 
     # --- Strong Low / Weak Low label (only when VISIBLE, not clamped) ---
     if t_low is not None and not low_clamped:
-        price_str = f"{t_low:.4f}" if t_low >= 0.01 else f"{t_low:.6f}"
+        price_str = _fmt_price(t_low)
         y_lo, y_hi = ax.get_ylim()
         if y_lo > 0 and y_hi > 0:
             log_range = _math.log(y_hi) - _math.log(y_lo)
@@ -754,8 +775,8 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     # va='bottom' for low price → text rises UP from bottom boundary (stays inside)
     right_x = view_limit + 0.5
     for ob in visible_obs:
-        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
-        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        hi_str = _fmt_price(ob['high'])
+        lo_str = _fmt_price(ob['low'])
         color = '#F23645' if ob["bias"] == -1 else '#089981'
         ax.text(right_x, ob["high"], hi_str,
                 color=color, fontsize=6, ha='left', va='top', zorder=5, clip_on=False)
@@ -767,8 +788,8 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
 
     # --- Off-screen OBs: ↓ arrows in BOTTOM strip (below chart, near dates) ---
     for i, ob in enumerate(below_obs[:2]):
-        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
-        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        hi_str = _fmt_price(ob['high'])
+        lo_str = _fmt_price(ob['low'])
         color = '#F23645' if ob["bias"] == -1 else '#089981'
         x_frac = 0.75 + i * 0.12
         ax.text(x_frac, -0.03 - i * 0.025, f"↓ {lo_str}-{hi_str}",
@@ -838,8 +859,8 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     # ── Build and draw OB labels ──
     parts = []
     for ob in above_obs:
-        hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
-        lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
+        hi_str = _fmt_price(ob['high'])
+        lo_str = _fmt_price(ob['low'])
         ob_type = "Bear" if ob["bias"] == -1 else "Bull"
         parts.append((f"↑ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
 
@@ -1356,9 +1377,9 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
 
         if idx_a_view != -1:
-            ax.text(idx_a_view, line['price_A'], f"{line['price_A']:.4f}", color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
+            ax.text(idx_a_view, line['price_A'], _fmt_price(line['price_A']), color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
         if idx_b_view != -1:
-            ax.text(idx_b_view, line['price_B'], f"{line['price_B']:.4f}", color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
+            ax.text(idx_b_view, line['price_B'], _fmt_price(line['price_B']), color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
 
         # Price vs trendline info
         ax.text(0.5, 0.97, price_label, transform=ax.transAxes, color='white', fontsize=12, fontweight='bold', ha='center', va='top',
