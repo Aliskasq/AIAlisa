@@ -847,14 +847,26 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
                  color=color, fontsize=10, fontweight='bold',
                  ha='right', va='top')
     else:
-        # Two OBs — place side by side from right edge
-        # Second (rightmost) at x=0.95, first at x=0.55
-        for idx, (text, bias) in enumerate(parts):
-            color = '#FF0000' if bias == -1 else '#089981'
-            x_pos = 0.95 - idx * 0.38  # 0.95 and 0.57
-            fig.text(x_pos, 0.995, text,
-                     color=color, fontsize=9, fontweight='bold',
-                     ha='right', va='top')
+        # Two OBs — place side by side, close together (~5 candle gap)
+        # Draw rightmost first, measure its width, place second next to it
+        color_r = '#FF0000' if parts[1][1] == -1 else '#089981'
+        t_right = fig.text(0.95, 0.995, parts[1][0],
+                           color=color_r, fontsize=9, fontweight='bold',
+                           ha='right', va='top')
+        # Measure right text width in figure coords to place left text nearby
+        try:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bbox_r = t_right.get_window_extent(renderer=renderer)
+            fig_bbox_r = fig.transFigure.inverted().transform_bbox(bbox_r)
+            gap = 0.025  # ~5 candle visual gap
+            x_left = fig_bbox_r.x0 - gap
+        except Exception:
+            x_left = 0.55  # safe fallback
+        color_l = '#FF0000' if parts[0][1] == -1 else '#089981'
+        fig.text(x_left, 0.995, parts[0][0],
+                 color=color_l, fontsize=9, fontweight='bold',
+                 ha='right', va='top')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
