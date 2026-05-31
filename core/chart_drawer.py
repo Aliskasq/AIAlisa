@@ -811,12 +811,10 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
         pos = ax.get_position()
         ax.set_position(Bbox([[pos.x0, pos.y0 - strip_h], [pos.x1, pos.y1 - strip_h]]))
 
-    # Shift fig-level Line2D artists (separator lines) down
-    # Use `is` for transform check + fallback: shift ANY Line2D added to fig.artists
+    # Remove old separator Line2D — will be redrawn after panels settle
     for artist in list(fig.artists):
         if isinstance(artist, Line2D):
-            ydata = list(artist.get_ydata())
-            artist.set_ydata([y - strip_h for y in ydata])
+            artist.remove()
 
     # Shift suptitle down if visible
     if hasattr(fig, '_suptitle') and fig._suptitle is not None:
@@ -865,9 +863,33 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
         except Exception:
             x_left = 0.55  # safe fallback
         color_l = '#FF0000' if parts[0][1] == -1 else '#089981'
-        fig.text(x_left, 0.995, parts[0][0],
+        fig.text(x_left, 0.982, parts[0][0],
                  color=color_l, fontsize=9, fontweight='bold',
                  ha='right', va='top')
+
+    # Redraw separator line between OBV and RSI at their new positions
+    panels = {}
+    for _ax in axlist:
+        pnum = getattr(_ax, '_panel_num', None)
+        if pnum is not None and pnum not in panels:
+            panels[pnum] = _ax
+    if not panels.get(1) and len(axlist) >= 6:
+        panels[1] = axlist[2]
+    if not panels.get(2) and len(axlist) >= 6:
+        panels[2] = axlist[4]
+    elif not panels.get(2) and len(axlist) >= 3:
+        panels[2] = axlist[2]
+    ax_obv = panels.get(1)
+    ax_rsi = panels.get(2)
+    if ax_obv and ax_rsi:
+        obv_bot = ax_obv.get_position().y0
+        rsi_top = ax_rsi.get_position().y1
+        sep_y = (obv_bot + rsi_top) / 2
+        bbox0 = axlist[0].get_position()
+        sep_line = Line2D([bbox0.x0, bbox0.x1 + 0.02], [sep_y, sep_y],
+                          transform=fig.transFigure,
+                          color='black', linewidth=1.0, zorder=10, clip_on=False)
+        fig.add_artist(sep_line)
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
