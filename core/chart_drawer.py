@@ -779,10 +779,18 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
 
 def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     """
-    If OBs exist above visible candle range, add a white strip at the top
-    of the figure and draw OB info with ↑ arrows in bright bold text.
-    Shifts all existing panels/elements down to make room.
-    Max 2 upper OBs shown, right-aligned. Does NOT handle lower OBs.
+    If OBs exist above visible candle range, reposition title and OB labels
+    to be compact — right above the chart with minimal gaps.
+    
+    Layout (bottom to top):
+    ─── top of visible candles ───
+    gap (~line thickness)
+    Title: "COINUSDT 4H | PEAK-TO-PEAK"  [+ clamped High right-aligned]
+    gap (~line thickness)
+    OB labels: "↑ Bear OB 0.0007—0.0008   ↑ Bear OB 0.0008—0.0009"
+    
+    No panel shifting — just moves title/OBs closer to chart top.
+    Max 2 upper OBs, right-aligned. Does NOT handle lower OBs.
     """
     if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
         return
@@ -800,39 +808,35 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     above_obs.sort(key=lambda o: o["low"])  # closest to chart first
     above_obs = above_obs[:2]
 
-    from matplotlib.transforms import Bbox
-    from matplotlib.lines import Line2D
+    # Gap = ~1 line thickness in figure coords
+    gap = 0.008
 
-    # Strip height: minimal — just enough for one text line + tiny padding
-    strip_h = 0.018
+    # Get main chart top in figure coordinates
+    main_top = axlist[0].get_position().y1
 
-    # Shift ALL axes down by strip_h
-    for ax in axlist:
-        pos = ax.get_position()
-        ax.set_position(Bbox([[pos.x0, pos.y0 - strip_h], [pos.x1, pos.y1 - strip_h]]))
+    # Title Y: just above chart top (va='bottom' so text sits above this point)
+    title_y = main_top + gap
 
-    # Remove old separator Line2D — will be redrawn after panels settle
-    for artist in list(fig.artists):
-        if isinstance(artist, Line2D):
-            artist.remove()
-
-    # Shift suptitle down if visible
+    # ── Move existing title to compact position ──
+    # Hide mplfinance suptitle
     if hasattr(fig, '_suptitle') and fig._suptitle is not None:
         if fig._suptitle.get_visible():
-            sx, sy = fig._suptitle.get_position()
-            fig._suptitle.set_position((sx, sy - strip_h))
+            fig._suptitle.set_position((0.5, title_y))
+            fig._suptitle.set_va('bottom')
 
-    # Shift all existing fig.text() elements down (title, clamped labels)
-    # NOTE: date labels are drawn AFTER this function, so they use final positions
-    existing_texts = list(fig.texts)  # snapshot before adding new ones
-    for txt in existing_texts:
+    # Move any fig.text() title elements (from _draw_watermark_and_clamped)
+    for txt in fig.texts:
         tx, ty = txt.get_position()
-        txt.set_position((tx, ty - strip_h))
+        if ty > main_top:  # it's a title/header element
+            txt.set_position((tx, title_y))
+            txt.set_va('bottom')
 
-    # Build OB labels and draw in a single line, right-aligned
-    # Bright colors matching High/Low lines: red for Bear, green for Bull
+    # OB labels Y: one gap above the title line
+    # Title text height is ~0.015 in fig coords at fontsize 14
+    ob_y = title_y + 0.015 + gap
+
+    # ── Build and draw OB labels ──
     parts = []
-    # Use the color of the first OB for the whole line if same bias, else mixed
     for ob in above_obs:
         hi_str = f"{ob['high']:.4f}" if ob['high'] >= 0.01 else f"{ob['high']:.6f}"
         lo_str = f"{ob['low']:.4f}" if ob['low'] >= 0.01 else f"{ob['low']:.6f}"
@@ -840,56 +844,28 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
         parts.append((f"↑ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
 
     if len(parts) == 1:
-        # Single OB — one text element
         color = '#FF0000' if parts[0][1] == -1 else '#089981'
-        fig.text(0.95, 0.982, parts[0][0],
+        fig.text(0.95, ob_y, parts[0][0],
                  color=color, fontsize=10, fontweight='bold',
-                 ha='right', va='top')
+                 ha='right', va='bottom')
     else:
-        # Two OBs — place side by side, close together (~5 candle gap)
-        # Draw rightmost first, measure its width, place second next to it
+        # Two OBs side by side — draw right first, measure, place left nearby
         color_r = '#FF0000' if parts[1][1] == -1 else '#089981'
-        t_right = fig.text(0.95, 0.982, parts[1][0],
+        t_right = fig.text(0.95, ob_y, parts[1][0],
                            color=color_r, fontsize=9, fontweight='bold',
-                           ha='right', va='top')
-        # Measure right text width in figure coords to place left text nearby
+                           ha='right', va='bottom')
         try:
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
             bbox_r = t_right.get_window_extent(renderer=renderer)
             fig_bbox_r = fig.transFigure.inverted().transform_bbox(bbox_r)
-            gap = 0.025  # ~5 candle visual gap
-            x_left = fig_bbox_r.x0 - gap
+            x_left = fig_bbox_r.x0 - 0.025  # ~5 candle gap
         except Exception:
-            x_left = 0.55  # safe fallback
+            x_left = 0.55
         color_l = '#FF0000' if parts[0][1] == -1 else '#089981'
-        fig.text(x_left, 0.982, parts[0][0],
+        fig.text(x_left, ob_y, parts[0][0],
                  color=color_l, fontsize=9, fontweight='bold',
-                 ha='right', va='top')
-
-    # Redraw separator line between OBV and RSI at their new positions
-    panels = {}
-    for _ax in axlist:
-        pnum = getattr(_ax, '_panel_num', None)
-        if pnum is not None and pnum not in panels:
-            panels[pnum] = _ax
-    if not panels.get(1) and len(axlist) >= 6:
-        panels[1] = axlist[2]
-    if not panels.get(2) and len(axlist) >= 6:
-        panels[2] = axlist[4]
-    elif not panels.get(2) and len(axlist) >= 3:
-        panels[2] = axlist[2]
-    ax_obv = panels.get(1)
-    ax_rsi = panels.get(2)
-    if ax_obv and ax_rsi:
-        obv_bot = ax_obv.get_position().y0
-        rsi_top = ax_rsi.get_position().y1
-        sep_y = (obv_bot + rsi_top) / 2
-        bbox0 = axlist[0].get_position()
-        sep_line = Line2D([bbox0.x0, bbox0.x1 + 0.02], [sep_y, sep_y],
-                          transform=fig.transFigure,
-                          color='black', linewidth=1.0, zorder=10, clip_on=False)
-        fig.add_artist(sep_line)
+                 ha='right', va='bottom')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
