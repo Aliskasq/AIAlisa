@@ -817,9 +817,12 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
 
     chart_high = float(plot_df['high'].max())
 
-    # Collect all OBs and find those above visible candles
-    all_obs = list(smc_data.get("swing_order_blocks", []))
-    all_obs += list(smc_data.get("internal_order_blocks", []))
+    # Collect all OBs, tagging swing vs internal
+    all_obs = []
+    for ob in smc_data.get("swing_order_blocks", []):
+        all_obs.append({**ob, "_swing": True})
+    for ob in smc_data.get("internal_order_blocks", []):
+        all_obs.append({**ob, "_swing": False})
     above_obs = [ob for ob in all_obs if ob["low"] > chart_high]
 
     if not above_obs:
@@ -855,22 +858,30 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
     # Title text height is ~0.015 in fig coords at fontsize 14
     ob_y = title_y + 0.015 + gap
 
+    # ── Color helper: swing OBs get darker shade ──
+    def _above_color(bias, is_swing):
+        if is_swing:
+            return '#B01818' if bias == -1 else '#056B58'  # darker
+        return '#FF0000' if bias == -1 else '#089981'      # regular
+
     # ── Build and draw OB labels ──
     parts = []
     for ob in above_obs:
         hi_str = _fmt_price(ob['high'])
         lo_str = _fmt_price(ob['low'])
         ob_type = "Bear" if ob["bias"] == -1 else "Bull"
-        parts.append((f"↑ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
+        swing = ob.get("_swing", False)
+        prefix = "Swing " if swing else ""
+        parts.append((f"↑ {prefix}{ob_type} OB {lo_str}—{hi_str}", ob["bias"], swing))
 
     if len(parts) == 1:
-        color = '#FF0000' if parts[0][1] == -1 else '#089981'
+        color = _above_color(parts[0][1], parts[0][2])
         fig.text(0.95, ob_y, parts[0][0],
                  color=color, fontsize=10, fontweight='bold',
                  ha='right', va='bottom')
     else:
         # Two OBs side by side — draw right first, measure, place left nearby
-        color_r = '#FF0000' if parts[1][1] == -1 else '#089981'
+        color_r = _above_color(parts[1][1], parts[1][2])
         t_right = fig.text(0.95, ob_y, parts[1][0],
                            color=color_r, fontsize=9, fontweight='bold',
                            ha='right', va='bottom')
@@ -882,7 +893,7 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
             x_left = fig_bbox_r.x0 - 0.025  # ~5 candle gap
         except Exception:
             x_left = 0.55
-        color_l = '#FF0000' if parts[0][1] == -1 else '#089981'
+        color_l = _above_color(parts[0][1], parts[0][2])
         fig.text(x_left, ob_y, parts[0][0],
                  color=color_l, fontsize=9, fontweight='bold',
                  ha='right', va='bottom')
@@ -908,9 +919,12 @@ def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
 
     chart_low = float(plot_df['low'].min())
 
-    # Collect all OBs and find those below visible candles
-    all_obs = list(smc_data.get("swing_order_blocks", []))
-    all_obs += list(smc_data.get("internal_order_blocks", []))
+    # Collect all OBs, tagging swing vs internal
+    all_obs = []
+    for ob in smc_data.get("swing_order_blocks", []):
+        all_obs.append({**ob, "_swing": True})
+    for ob in smc_data.get("internal_order_blocks", []):
+        all_obs.append({**ob, "_swing": False})
     below_obs = [ob for ob in all_obs if ob["high"] < chart_low]
 
     if not below_obs:
@@ -944,27 +958,31 @@ def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
     date_y = (main_bottom + obv_top) / 2
     ob_y = main_bottom - gap  # just below chart, above dates
 
+    # ── Color helper: swing OBs get even darker shade ──
+    def _below_color(bias, is_swing):
+        if is_swing:
+            return '#A01515' if bias == -1 else '#045545'  # darkest
+        return '#D42020' if bias == -1 else '#067A66'      # regular below
+
     # ── Build and draw OB labels ──
     parts = []
     for ob in below_obs:
         hi_str = _fmt_price(ob['high'])
         lo_str = _fmt_price(ob['low'])
         ob_type = "Bear" if ob["bias"] == -1 else "Bull"
-        parts.append((f"↓ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
-
-    # Darker colors than Strong/Weak Low to avoid blending
-    def _below_color(bias):
-        return '#D42020' if bias == -1 else '#067A66'
+        swing = ob.get("_swing", False)
+        prefix = "Swing " if swing else ""
+        parts.append((f"↓ {prefix}{ob_type} OB {lo_str}—{hi_str}", ob["bias"], swing))
 
     if len(parts) == 1:
         fig.text(0.95, ob_y, parts[0][0],
-                 color=_below_color(parts[0][1]), fontsize=10, fontweight='bold',
-                 ha='right', va='top')
+                 color=_below_color(parts[0][1], parts[0][2]), fontsize=10,
+                 fontweight='bold', ha='right', va='top')
     else:
         # Two OBs side by side — draw right first, measure, place left nearby
         t_right = fig.text(0.95, ob_y, parts[1][0],
-                           color=_below_color(parts[1][1]), fontsize=9,
-                           fontweight='bold', ha='right', va='top')
+                           color=_below_color(parts[1][1], parts[1][2]),
+                           fontsize=9, fontweight='bold', ha='right', va='top')
         try:
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
@@ -974,8 +992,8 @@ def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
         except Exception:
             x_left = 0.55
         fig.text(x_left, ob_y, parts[0][0],
-                 color=_below_color(parts[0][1]), fontsize=9,
-                 fontweight='bold', ha='right', va='top')
+                 color=_below_color(parts[0][1], parts[0][2]),
+                 fontsize=9, fontweight='bold', ha='right', va='top')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
