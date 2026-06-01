@@ -354,7 +354,6 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                 }
                 async with session.post(msg_url, json=payload, timeout=30) as resp:
                     if resp.status == 200:
-                        logging.info(f"✅ Overflow text sent ({tf}): {symbol}")
                         break
                     elif resp.status == 429:
                         retry_after = 5
@@ -370,7 +369,6 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                             payload.pop('parse_mode', None)
                             async with session.post(msg_url, json=payload, timeout=30) as resp2:
                                 if resp2.status == 200:
-                                    logging.info(f"✅ Overflow text sent plain ({tf}): {symbol}")
                                     break
                         await asyncio.sleep(2)
             except Exception as e:
@@ -426,7 +424,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
             if _pass_filter:
                 _reason = "QUARTER (any B)" if _price_in_bottom_quarter else "THIRD + B not recent"
-                logging.info(f"📡 BOTTOM FILTER PASS [{_reason}]: {symbol} ({tf}) — price {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f}, B view idx {_idx_b_view}/{_last_idx}")
+                # logging.info(f"📡 BOTTOM FILTER PASS [{_reason}]: {symbol} ({tf}) — price {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f}, B view idx {_idx_b_view}/{_last_idx}")
                 # Re-send chart to bottom group
                 if os.path.exists(file_path):
                     _bottom_caption = photo_caption
@@ -471,7 +469,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                         except Exception as _e:
                             logging.error(f"❌ Bottom overflow error: {repr(_e)}")
             else:
-                logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — third={_price_in_bottom_third} quarter={_price_in_bottom_quarter} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f})")
+                pass  # logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — third={_price_in_bottom_third} quarter={_price_in_bottom_quarter} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f})")
         except Exception as _e:
             logging.error(f"❌ Bottom filter error for {symbol}: {repr(_e)}")
 
@@ -1025,7 +1023,8 @@ def _compute_indicator_addplots(plot_df, view_limit):
         for i in range(1, len(g)):
             avg_g[i] = alpha * g.iloc[i] + (1 - alpha) * avg_g[i - 1]
             avg_l[i] = alpha * l.iloc[i] + (1 - alpha) * avg_l[i - 1]
-        rs = np.where(avg_l == 0, 100, avg_g / avg_l)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            rs = np.where(avg_l == 0, 100, avg_g / avg_l)
         return pd.Series(100 - (100 / (1 + rs)), index=g.index)
 
     rsi6 = _rsi(gain, loss_s, 6)
@@ -1088,7 +1087,7 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
         elif len(axlist) >= 3:
             panels = {0: axlist[0], 1: axlist[1], 2: axlist[2]}
     
-    logging.info(f"📊 Panel detection: {len(panels)} panels from {len(axlist)} axes")
+
 
     for pnum in [1, 2]:
         ax = panels.get(pnum)
@@ -1115,7 +1114,7 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
         # Horizontal grid lines for OBV (same style as main chart grid)
         obv_low, obv_high = ax_obv.get_ylim()
         obv_range = obv_high - obv_low
-        logging.info(f"📊 OBV ylim: {obv_low:.0f} — {obv_high:.0f}, range={obv_range:.0f}")
+
         if obv_range > 0:
             # Pick a nice step: ~4-6 lines across the panel
             import math
@@ -1129,7 +1128,7 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
                 ax_obv.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
                 level += step
                 _obv_grid_count += 1
-            logging.info(f"📊 OBV grid: {_obv_grid_count} lines, step={step:.0f}")
+
 
     # === FULL MANUAL LAYOUT: main chart + date gap + OBV + sep + RSI ===
     # This replaces mplfinance's default positioning entirely.
@@ -1191,7 +1190,7 @@ def _style_indicator_panels(axlist, rsi_values=None, fig=None):
         # Grid lines at 20, 40, 60, 80, 100 (same style as main chart grid)
         for level in [20, 40, 60, 80, 100]:
             ax_rsi.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
-        logging.info(f"📊 RSI grid: 5 lines drawn (20-100), ylim={ax_rsi.get_ylim()}")
+
         # Overbought/oversold dashed lines on top of grid
         ax_rsi.axhline(y=70, color='#F23645', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
         ax_rsi.axhline(y=30, color='#089981', linewidth=0.5, linestyle='--', alpha=0.5, zorder=1)
