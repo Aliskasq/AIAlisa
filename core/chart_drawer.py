@@ -167,6 +167,13 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             except Exception as e:
                 logging.error(f"❌ Above OB strip error: {repr(e)}")
 
+        # Below-chart OB strip (between lowest panel and dates)
+        if smc_overlay:
+            try:
+                _draw_below_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Below OB strip error: {repr(e)}")
+
         # Date labels AFTER OB strip (uses final panel positions)
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
@@ -786,16 +793,8 @@ def _draw_smc_annotations(ax, fig, smc_data, view_limit, plot_df, clamp_info=Non
     # --- Off-screen upper OBs: handled by _draw_above_obs_strip() ---
     # (dedicated white strip above chart title — no longer drawn here)
 
-    # --- Off-screen OBs: ↓ arrows in BOTTOM strip (below chart, near dates) ---
-    for i, ob in enumerate(below_obs[:2]):
-        hi_str = _fmt_price(ob['high'])
-        lo_str = _fmt_price(ob['low'])
-        color = '#F23645' if ob["bias"] == -1 else '#089981'
-        x_frac = 0.75 + i * 0.12
-        ax.text(x_frac, -0.03 - i * 0.025, f"↓ {lo_str}-{hi_str}",
-                color=color, fontsize=6, fontweight='bold',
-                ha='center', va='top',
-                transform=ax.transAxes, clip_on=False, zorder=5)
+    # --- Off-screen lower OBs: handled by _draw_below_obs_strip() ---
+    # (dedicated strip below chart, above date labels — no longer drawn here)
 
 
 def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
@@ -887,6 +886,81 @@ def _draw_above_obs_strip(fig, smc_data, plot_df, axlist):
         fig.text(x_left, ob_y, parts[0][0],
                  color=color_l, fontsize=9, fontweight='bold',
                  ha='right', va='bottom')
+
+
+def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
+    """
+    If OBs exist below visible candle range, draw ↓ labels between the
+    bottom-most panel and the date axis — mirrors _draw_above_obs_strip().
+
+    Layout:
+    ─── bottom of lowest panel ───
+    gap
+    OB labels: "↓ Bull OB 0.0005—0.0006   ↓ Bear OB 0.0003—0.0004"
+    ─── date axis labels ───
+
+    Same font as upper OB strip. Color slightly darker than Strong/Weak Low
+    labels so they don't blend: bear #D42020, bull #067A66.
+    Max 2 lower OBs, right-aligned.
+    """
+    if not smc_data or "error" in str(smc_data.get("summary", "")).lower():
+        return
+
+    chart_low = float(plot_df['low'].min())
+
+    # Collect all OBs and find those below visible candles
+    all_obs = list(smc_data.get("swing_order_blocks", []))
+    all_obs += list(smc_data.get("internal_order_blocks", []))
+    below_obs = [ob for ob in all_obs if ob["high"] < chart_low]
+
+    if not below_obs:
+        return
+
+    below_obs.sort(key=lambda o: -o["high"])  # closest to chart first
+    below_obs = below_obs[:2]
+
+    # Gap = ~1 line thickness in figure coords
+    gap = 0.008
+
+    # Get bottom of the lowest panel in figure coordinates
+    last_ax = axlist[-1]
+    panel_bottom = last_ax.get_position().y0
+
+    # OB labels Y: just below lowest panel (va='top' so text hangs below this point)
+    ob_y = panel_bottom - gap
+
+    # ── Build and draw OB labels ──
+    parts = []
+    for ob in below_obs:
+        hi_str = _fmt_price(ob['high'])
+        lo_str = _fmt_price(ob['low'])
+        ob_type = "Bear" if ob["bias"] == -1 else "Bull"
+        parts.append((f"↓ {ob_type} OB {lo_str}—{hi_str}", ob["bias"]))
+
+    # Darker colors than Strong/Weak Low to avoid blending
+    def _below_color(bias):
+        return '#D42020' if bias == -1 else '#067A66'
+
+    if len(parts) == 1:
+        fig.text(0.95, ob_y, parts[0][0],
+                 color=_below_color(parts[0][1]), fontsize=10, fontweight='bold',
+                 ha='right', va='top')
+    else:
+        # Two OBs side by side — draw right first, measure, place left nearby
+        t_right = fig.text(0.95, ob_y, parts[1][0],
+                           color=_below_color(parts[1][1]), fontsize=9,
+                           fontweight='bold', ha='right', va='top')
+        try:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            bbox_r = t_right.get_window_extent(renderer=renderer)
+            fig_bbox_r = fig.transFigure.inverted().transform_bbox(bbox_r)
+            x_left = fig_bbox_r.x0 - 0.025  # ~5 candle gap
+        except Exception:
+            x_left = 0.55
+        fig.text(x_left, ob_y, parts[0][0],
+                 color=_below_color(parts[0][1]), fontsize=9,
+                 fontweight='bold', ha='right', va='top')
 
 
 def _compute_indicator_addplots(plot_df, view_limit):
@@ -1418,6 +1492,13 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             except Exception as e:
                 logging.error(f"❌ Above OB strip error (scan): {repr(e)}")
 
+        # Below-chart OB strip (between lowest panel and dates)
+        if smc_overlay:
+            try:
+                _draw_below_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Below OB strip error (scan): {repr(e)}")
+
         # Date labels AFTER OB strip (uses final panel positions)
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
 
@@ -1524,6 +1605,13 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
                 _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
             except Exception as e:
                 logging.error(f"❌ Above OB strip error (simple): {repr(e)}")
+
+        # Below-chart OB strip (between lowest panel and dates)
+        if smc_overlay:
+            try:
+                _draw_below_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Below OB strip error (simple): {repr(e)}")
 
         # Date labels AFTER OB strip (uses final panel positions)
         _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
