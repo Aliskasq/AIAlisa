@@ -31,8 +31,7 @@ from core.tg_state import (                        # noqa: F401
     _save_scan_schedule,
     _load_scan_schedule,
     _fetch_or_free_models,
-    _load_paper,
-    _save_paper,
+
     _load_langs,
     _save_langs,
     square_cache_put,

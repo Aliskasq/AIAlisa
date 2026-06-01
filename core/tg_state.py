@@ -37,26 +37,6 @@ async def _fetch_or_free_models(force=False):
         logging.warning(f"⚠️ Failed to fetch OpenRouter models: {e}")
     return _or_free_models_cache["models"] or []
 
-# --- PAPER TRADING PORTFOLIO (per-user, persistent) ---
-PAPER_FILE = "data/paper_portfolio.json"
-
-def _load_paper():
-    try:
-        if os.path.exists(PAPER_FILE):
-            with open(PAPER_FILE, "r") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
-
-def _save_paper(data):
-    try:
-        os.makedirs("data", exist_ok=True)
-        with open(PAPER_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
-
 # --- LANGUAGE SETTINGS (per-chat, persistent) ---
 LANG_FILE = "data/lang_settings.json"
 
