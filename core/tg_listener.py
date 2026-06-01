@@ -37,7 +37,7 @@ from core.tg_state import (                        # noqa: F401
     square_cache_put,
     square_cache_get,
     square_cache_delete,
-    PAPER_FILE,
+
     LANG_FILE,
     SQUARE_CACHE_FILE,
     SCAN_SCHEDULE_FILE,
