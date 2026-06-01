@@ -298,6 +298,7 @@ async def handle_message(app_session, update):
                 "🔒 `/signals close` — snapshot: close all open now\n"
                 "🔄 `/signals clear` — reset bank to $10k\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
+                "📐 `/smc` — настройки SMC: режим, OB блоки\n"
                 "🧠 `/bankml` — ML bank & trades\n"
                 "🔒 `/bankml close` — close all ML positions now\n"
                 "🔄 `/bankml clear` — reset ML bank to $10k\n"
