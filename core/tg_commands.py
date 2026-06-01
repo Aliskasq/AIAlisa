@@ -69,7 +69,7 @@ async def handle_message(app_session, update):
                 "I'm *AiAlisa CopilotClaw* — AI Trading Assistant 🤖\n\n"
                 "*📋 Commands / Команды:*\n\n"
                 "🔍 `scan BTC` / `посмотри BTC` — _AI analysis / анализ_\n"
-                "📚 `/learn BTC` _(any coin)_ — _education / обучение_\n"
+
                 "🏆 `/signals` — _winrate (admin)_\n"
                 "💰 `margin 100 leverage 10` — _stop-loss calc_\n"
                 "🛠 `/skills` — _Web3 Skills_\n"
@@ -272,8 +272,7 @@ async def handle_message(app_session, update):
             "*📋 Commands / Команды:*\n\n"
             "🔍 `scan BTC` / `посмотри BTC`\n"
             "    _AI analysis + chart / AI анализ + график_\n\n"
-            "📚 `/learn BTC` _(any futures coin / любая фьючерсная монета)_\n"
-            "    _Education: indicators explained / Обучение: объяснение индикаторов_\n\n"
+
             "💰 `margin 100 leverage 10 max 20%`\n"
             "    _Stop-loss calculator / Расчёт стоп-лосса_\n\n"
             "🛠 `/skills`\n"
@@ -737,122 +736,6 @@ async def handle_message(app_session, update):
                 "`/top losers` — Топ 10 падение (24ч)"
             )
             await send_response(app_session, chat_id, top_usage, msg_id, parse_mode="Markdown")
-        return
-
-    # ==========================================
-    # LEARN MODE: /learn BTC
-    # ==========================================
-    if text.startswith("/learn"):
-        parts = original_text.split()
-        if len(parts) >= 2:
-            coin_raw = parts[1].upper().strip()
-            learn_symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
-            short_coin = learn_symbol.replace("USDT", "")
-
-            learn_load = f"📚 Analyzing {learn_symbol} on 4H + 1H + 15m..." if lang_pref == "en" else f"📚 Анализирую {learn_symbol} на 4Ч + 1Ч + 15м..."
-            await send_response(app_session, chat_id, learn_load, msg_id)
-
-            raw_4h = await fetch_klines(app_session, learn_symbol, "4h", 250)
-            raw_1h = await fetch_klines(app_session, learn_symbol, "1h", 250)
-            raw_15m = await fetch_klines(app_session, learn_symbol, "15m", 250)
-
-            if raw_4h:
-                row_4h, _ = calculate_binance_indicators(pd.DataFrame(raw_4h), "4H")
-                row_1h = calculate_binance_indicators(pd.DataFrame(raw_1h), "1H")[0] if raw_1h else None
-                row_15m = calculate_binance_indicators(pd.DataFrame(raw_15m), "15m")[0] if raw_15m else None
-                funding = await fetch_funding_history(app_session, learn_symbol)
-
-                def _fmt_tf_learn(row, tf_label, lang):
-                    price = row.get("close", 0)
-                    rsi = row.get("rsi14", 0)
-                    mfi = row.get("mfi", 0)
-                    adx = row.get("adx", 0)
-                    stoch = row.get("stoch_k", 0)
-                    macd_h = row.get("macd_hist", 0)
-                    obv_val = row.get("obv", 0)
-                    obv_sma = row.get("obv_sma20", 0)
-                    obv = "Accumulation" if obv_val > obv_sma else "Distribution"
-                    ichimoku = row.get("ichimoku_status", "Unknown")
-                    st_dir = row.get("supertrend_dir", 1)
-                    supertrend = "BULLISH" if st_dir == 1 else "BEARISH"
-                    cmf = row.get("cmf", 0)
-
-                    if lang == "ru":
-                        rsi_n = "перекупленность ⚠️" if rsi > 70 else "перепроданность 🟢" if rsi < 30 else "нейтрально"
-                        mfi_n = "перекупленность" if mfi > 80 else "перепроданность" if mfi < 20 else "нейтрально"
-                        adx_n = "сильный тренд 💪" if adx > 25 else "слабый/боковой"
-                        stoch_n = "перекупленность" if stoch > 80 else "перепроданность" if stoch < 20 else "нейтрально"
-                        macd_n = "бычий 📈" if macd_h > 0 else "медвежий 📉"
-                        return (
-                            f"⏱ *{tf_label}* | Цена: `${price:.6f}`\n"
-                            f"• RSI(14): `{rsi:.1f}` → {rsi_n}\n"
-                            f"• MFI: `{mfi:.1f}` → {mfi_n} | ADX: `{adx:.1f}` → {adx_n}\n"
-                            f"• StochRSI: `{stoch:.1f}` → {stoch_n} | MACD: {macd_n}\n"
-                            f"• SuperTrend: {supertrend} | Ichimoku: {ichimoku}\n"
-                            f"• OBV: {obv} | CMF: `{cmf:.4f}`\n"
-                            f"• BB: `{row.get('bb_lower',0):.4f}` / `{row.get('bb_mid',0):.4f}` / `{row.get('bb_upper',0):.4f}`\n"
-                        )
-                    else:
-                        rsi_n = "overbought ⚠️" if rsi > 70 else "oversold 🟢" if rsi < 30 else "neutral"
-                        mfi_n = "overbought" if mfi > 80 else "oversold" if mfi < 20 else "neutral"
-                        adx_n = "strong trend 💪" if adx > 25 else "weak/sideways"
-                        stoch_n = "overbought" if stoch > 80 else "oversold" if stoch < 20 else "neutral"
-                        macd_n = "bullish 📈" if macd_h > 0 else "bearish 📉"
-                        return (
-                            f"⏱ *{tf_label}* | Price: `${price:.6f}`\n"
-                            f"• RSI(14): `{rsi:.1f}` → {rsi_n}\n"
-                            f"• MFI: `{mfi:.1f}` → {mfi_n} | ADX: `{adx:.1f}` → {adx_n}\n"
-                            f"• StochRSI: `{stoch:.1f}` → {stoch_n} | MACD: {macd_n}\n"
-                            f"• SuperTrend: {supertrend} | Ichimoku: {ichimoku}\n"
-                            f"• OBV: {obv} | CMF: `{cmf:.4f}`\n"
-                            f"• BB: `{row.get('bb_lower',0):.4f}` / `{row.get('bb_mid',0):.4f}` / `{row.get('bb_upper',0):.4f}`\n"
-                        )
-
-                header = f"📚 *{'Обучение' if lang_pref == 'ru' else 'Learn'}: {short_coin}*\n"
-                header += f"💰 {'Funding Rate' if lang_pref == 'en' else 'Ставка финансирования'}: `{funding}`\n\n"
-
-                if lang_pref == "ru":
-                    explain = (
-                        "📖 *Что означают индикаторы:*\n"
-                        "• *RSI(14)* — скорость изменения цены (>70 перекуплен, <30 перепродан)\n"
-                        "• *MFI* — RSI с объёмом, давление денег\n"
-                        "• *ADX* — сила тренда (>25 тренд, <20 флэт)\n"
-                        "• *StochRSI* — чувствительный RSI для разворотов\n"
-                        "• *MACD* — импульс тренда (гистограмма >0 = бычий)\n"
-                        "• *SuperTrend* — направление тренда по ATR\n"
-                        "• *Ichimoku* — облако (выше = бычий, ниже = медвежий)\n"
-                        "• *OBV* — баланс объёмов (накопление/распределение)\n"
-                        "• *CMF* — денежный поток (>0 покупатели, <0 продавцы)\n"
-                        "• *BB* — канал волатильности\n"
-                    )
-                else:
-                    explain = (
-                        "📖 *Indicator Guide:*\n"
-                        "• *RSI(14)* — momentum (>70 overbought, <30 oversold)\n"
-                        "• *MFI* — RSI with volume, money pressure\n"
-                        "• *ADX* — trend strength (>25 trending, <20 ranging)\n"
-                        "• *StochRSI* — sensitive RSI for reversals\n"
-                        "• *MACD* — trend momentum (histogram >0 = bullish)\n"
-                        "• *SuperTrend* — trend direction via ATR\n"
-                        "• *Ichimoku* — cloud (above = bullish, below = bearish)\n"
-                        "• *OBV* — volume balance (accumulation/distribution)\n"
-                        "• *CMF* — money flow (>0 buyers, <0 sellers)\n"
-                        "• *BB* — volatility channel\n"
-                    )
-
-                msg1 = header + _fmt_tf_learn(row_4h, "4H", lang_pref) + "\n"
-                if row_1h:
-                    msg1 += _fmt_tf_learn(row_1h, "1H", lang_pref) + "\n"
-                if row_15m:
-                    msg1 += _fmt_tf_learn(row_15m, "15m", lang_pref)
-
-                await send_response(app_session, chat_id, msg1, msg_id, parse_mode="Markdown")
-                await send_response(app_session, chat_id, explain, parse_mode="Markdown")
-            else:
-                await send_response(app_session, chat_id, f"⚠️ Pair `{learn_symbol}` not found on Binance Futures.", msg_id, parse_mode="Markdown")
-        else:
-            hint = "📚 Usage: `/learn BTC` — explains all indicators for any coin" if lang_pref == "en" else "📚 Использование: `/learn BTC` — объяснит все индикаторы"
-            await send_response(app_session, chat_id, hint, msg_id, parse_mode="Markdown")
         return
 
     # ==========================================
