@@ -920,14 +920,29 @@ def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
     below_obs = below_obs[:2]
 
     # Gap = ~1 line thickness in figure coords
-    gap = 0.008
+    gap = 0.004
 
-    # Get bottom of the lowest panel in figure coordinates
-    last_ax = axlist[-1]
-    panel_bottom = last_ax.get_position().y0
+    # Get bottom of main chart panel in figure coordinates
+    main_bottom = axlist[0].get_position().y0
 
-    # OB labels Y: just below lowest panel (va='top' so text hangs below this point)
-    ob_y = panel_bottom - gap
+    # Find OBV panel top (same logic as _apply_date_labels_main)
+    obv_top = main_bottom - 0.05  # fallback
+    panels = {}
+    for ax in axlist:
+        pnum = getattr(ax, '_panel_num', None)
+        if pnum is not None and pnum not in panels:
+            panels[pnum] = ax
+    if not panels.get(1) and len(axlist) >= 6:
+        panels[1] = axlist[2]
+    elif not panels.get(1) and len(axlist) >= 3:
+        panels[1] = axlist[1]
+    if panels.get(1):
+        obv_top = panels[1].get_position().y1
+
+    # Date labels sit at (main_bottom + obv_top) / 2
+    # Place OB labels between main chart bottom and date labels
+    date_y = (main_bottom + obv_top) / 2
+    ob_y = main_bottom - gap  # just below chart, above dates
 
     # ── Build and draw OB labels ──
     parts = []
