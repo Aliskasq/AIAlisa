@@ -283,7 +283,8 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
                       max_blocks: int = 5,
                       mitigation: str = "highlow",
                       symbol: str = "",
-                      label: str = "") -> List[Dict]:
+                      label: str = "",
+                      tf_label: str = "") -> List[Dict]:
     """
     Find and manage Order Blocks at structure breaks.
 
@@ -386,12 +387,13 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
         mit_idx = ob.get("mitigated_index", "")
         mit_info = f" @bar {mit_idx}" if ob["mitigated"] else ""
         sym_tag = f" [{symbol}]" if symbol else ""
-        lbl_tag = f" {label}" if label else ""
-        logging.info(
-            f"📦 OB{lbl_tag} {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
-            f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
-            f"mitigated={ob['mitigated']}{mit_info}"
-        )
+        if tf_label in ("1D", "4H", ""):
+            lbl_tag = f" {label}" if label else ""
+            logging.info(
+                f"📦 OB{lbl_tag} {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
+                f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
+                f"mitigated={ob['mitigated']}{mit_info}"
+            )
         order_blocks.append(ob)
 
     # Return unmitigated, most recent blocks (capped)
@@ -402,8 +404,9 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     mitigated_count = len(order_blocks) - len(active)
 
     sym_tag = f" [{symbol}]" if symbol else ""
-    lbl_tag = f" {label}" if label else ""
-    logging.info(f"📦 OB{lbl_tag} summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
+    if tf_label in ("1D", "4H", ""):
+        lbl_tag = f" {label}" if label else ""
+        logging.info(f"📦 OB{lbl_tag} summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
     if len(active) > max_blocks:
         active = active[-max_blocks:]
     return active
@@ -778,11 +781,13 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             swing_high_per_bar[i] = current_sh
             swing_low_per_bar[i] = current_sl
 
-        # Debug: log swing structures
+        # Debug: log swing structures (only 1D/4H to reduce noise)
+        _smc_debug = tf_label in ("1D", "4H")
         sym_tag = f" [{symbol}]" if symbol else ""
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
-        for s in swing_structures[-10:]:
-            logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
+        if _smc_debug:
+            logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
+            for s in swing_structures[-10:]:
+                logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
 
         # ── 2. INTERNAL STRUCTURE (with confluence filter) ──
         internal_structures, internal_pivots, internal_trend = detect_structure(
@@ -793,7 +798,8 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             strict_luxalgo=strict_luxalgo,
         )
 
-        logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
+        if _smc_debug:
+            logging.info(f"🔍 SMC{sym_tag} {tf_label}: internal_structures={len(internal_structures)}, internal_pivots={len(internal_pivots)}")
 
         # ── 3. EQUAL HIGHS / LOWS (using size=3 pivots, like LuxAlgo default) ──
         eqhl_legs = _compute_legs(df["high"].values, df["low"].values, 3)
@@ -808,12 +814,12 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         internal_obs = []
         if show_internal_obs:
             internal_obs = find_order_blocks(
-                df, internal_structures, max_blocks=max_internal_obs, mitigation=ob_mitigation, symbol=symbol, label="INT"
+                df, internal_structures, max_blocks=max_internal_obs, mitigation=ob_mitigation, symbol=symbol, label="INT", tf_label=tf_label
             )
         swing_obs = []
         if show_swing_obs:
             swing_obs = find_order_blocks(
-                df, swing_structures, max_blocks=max_swing_obs, mitigation=ob_mitigation, symbol=symbol, label="SWING"
+                df, swing_structures, max_blocks=max_swing_obs, mitigation=ob_mitigation, symbol=symbol, label="SWING", tf_label=tf_label
             )
 
         # ── 6. FAIR VALUE GAPS ──
