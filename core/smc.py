@@ -282,7 +282,8 @@ def detect_structure(df: pd.DataFrame, size: int,
 def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
                       max_blocks: int = 5,
                       mitigation: str = "highlow",
-                      symbol: str = "") -> List[Dict]:
+                      symbol: str = "",
+                      label: str = "") -> List[Dict]:
     """
     Find and manage Order Blocks at structure breaks.
 
@@ -385,8 +386,9 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
         mit_idx = ob.get("mitigated_index", "")
         mit_info = f" @bar {mit_idx}" if ob["mitigated"] else ""
         sym_tag = f" [{symbol}]" if symbol else ""
+        lbl_tag = f" {label}" if label else ""
         logging.info(
-            f"📦 OB {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
+            f"📦 OB{lbl_tag} {'BULL' if ob['bias']==BULLISH else 'BEAR'}{sym_tag} idx={ob_idx} "
             f"[{ob['low']:.6f}-{ob['high']:.6f}] break@{break_idx} "
             f"mitigated={ob['mitigated']}{mit_info}"
         )
@@ -400,7 +402,8 @@ def find_order_blocks(df: pd.DataFrame, structures: List[Dict],
     mitigated_count = len(order_blocks) - len(active)
 
     sym_tag = f" [{symbol}]" if symbol else ""
-    logging.info(f"📦 OB summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
+    lbl_tag = f" {label}" if label else ""
+    logging.info(f"📦 OB{lbl_tag} summary{sym_tag}: total={len(order_blocks)} active={len(active)} mitigated={mitigated_count} max={max_blocks}")
     if len(active) > max_blocks:
         active = active[-max_blocks:]
     return active
@@ -805,12 +808,12 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         internal_obs = []
         if show_internal_obs:
             internal_obs = find_order_blocks(
-                df, internal_structures, max_blocks=max_internal_obs, mitigation=ob_mitigation, symbol=symbol
+                df, internal_structures, max_blocks=max_internal_obs, mitigation=ob_mitigation, symbol=symbol, label="INT"
             )
         swing_obs = []
         if show_swing_obs:
             swing_obs = find_order_blocks(
-                df, swing_structures, max_blocks=max_swing_obs, mitigation=ob_mitigation, symbol=symbol
+                df, swing_structures, max_blocks=max_swing_obs, mitigation=ob_mitigation, symbol=symbol, label="SWING"
             )
 
         # ── 6. FAIR VALUE GAPS ──
