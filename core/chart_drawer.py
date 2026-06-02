@@ -1235,49 +1235,13 @@ def _draw_smc_overlay(ax, plot_df, smc_data, view_limit, global_offset=0, clamp_
     swing_obs_list = smc_data.get("swing_order_blocks", [])
     internal_obs_list = smc_data.get("internal_order_blocks", [])
 
-    def _obs_overlap(a, b):
-        """Return overlap ratio (0-1) of two OBs by price range."""
-        overlap_lo = max(a["low"], b["low"])
-        overlap_hi = min(a["high"], b["high"])
-        if overlap_hi <= overlap_lo:
-            return 0.0
-        overlap = overlap_hi - overlap_lo
-        smaller = min(a["high"] - a["low"], b["high"] - b["low"])
-        return overlap / smaller if smaller > 0 else 0.0
-
-    filtered_internal = []
-    for iob in internal_obs_list:
-        dominated = False
-        for sob in swing_obs_list:
-            if iob["bias"] == sob["bias"] and _obs_overlap(iob, sob) > 0.5:
-                dominated = True
-                break
-        if not dominated:
-            filtered_internal.append(iob)
-
-    # Also deduplicate internal-vs-internal (keep more recent on overlap)
-    deduped_internal = []
-    for iob in filtered_internal:
-        merged = False
-        for j in range(len(deduped_internal) - 1, -1, -1):
-            existing = deduped_internal[j]
-            if iob["bias"] == existing["bias"] and _obs_overlap(iob, existing) > 0.5:
-                if iob["index"] > existing["index"]:
-                    deduped_internal[j] = iob
-                merged = True
-                break
-        if not merged:
-            deduped_internal.append(iob)
-
-    # Both internal and swing OBs displayed.
-    # Swing OBs: thin black border to distinguish from internal.
-    # Internal OBs: no border (LuxAlgo default style).
+    # LuxAlgo draws ALL OBs as-is (no deduplication), even if they overlap.
     # Skip OBs entirely above visible candles — they'd stretch the Y-axis.
     # Those are shown as ↑ arrows in a dedicated strip above the chart.
     chart_high = float(plot_df['high'].max())
     for ob_list, is_internal in [
         (swing_obs_list, False),
-        (deduped_internal, True),
+        (internal_obs_list, True),
     ]:
         for ob in ob_list:
             ob_x_start = ob["index"] - idx_offset
