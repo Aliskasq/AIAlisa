@@ -1531,8 +1531,10 @@ async def handle_message(app_session, update):
 
                 raw_smc_1d = await fetch_klines(app_session, symbol, "1d", smc_candles["1d"]) if raw_df_1d else None
                 raw_smc_4h = await fetch_klines(app_session, symbol, "4h", smc_candles["4h"]) if raw_df_4h else None
-                raw_smc_1h = await fetch_klines(app_session, symbol, "1h", smc_candles["1h"]) if raw_df_1h else None
-                raw_smc_15m = await fetch_klines(app_session, symbol, "15m", smc_candles["15m"]) if raw_df_15m else None
+                # raw_smc_1h = await fetch_klines(app_session, symbol, "1h", smc_candles["1h"]) if raw_df_1h else None  # TEMP muted for debug
+                # raw_smc_15m = await fetch_klines(app_session, symbol, "15m", smc_candles["15m"]) if raw_df_15m else None  # TEMP muted for debug
+                raw_smc_1h = None  # TEMP
+                raw_smc_15m = None  # TEMP
 
                 if raw_smc_1d:
                     smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=symbol, strict_luxalgo=_smc_strict)
@@ -1768,8 +1770,10 @@ async def handle_message(app_session, update):
                     # Margin scan: primary TF is 4h → 1500 candles, others → 999
                     raw_smc_1d = await fetch_klines(app_session, coin_to_analyze, "1d", 999) if raw_1d else None
                     raw_smc_4h = await fetch_klines(app_session, coin_to_analyze, "4h", 1500) if raw_4h else None
-                    raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 999) if raw_1h else None
-                    raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 999) if raw_15m else None
+                    # raw_smc_1h = await fetch_klines(app_session, coin_to_analyze, "1h", 999) if raw_1h else None  # TEMP muted for debug
+                    # raw_smc_15m = await fetch_klines(app_session, coin_to_analyze, "15m", 999) if raw_15m else None  # TEMP muted for debug
+                    raw_smc_1h = None  # TEMP
+                    raw_smc_15m = None  # TEMP
 
                     if raw_smc_1d:
                         smc_data["1D"] = analyze_smc(pd.DataFrame(raw_smc_1d), "1D", symbol=coin_to_analyze, strict_luxalgo=_smc_strict)
