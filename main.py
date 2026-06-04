@@ -712,45 +712,80 @@ async def main():
             if vol_waitlist:
                 logging.info(f"📊 Volume waitlist: rechecking {len(vol_waitlist)} coins")
 
-                # Phase 1: Check which coins passed volume
+                # ── Phase 0: Batch fetch ALL prices (1 API call) + 2% filter ──
+                # Load stored_lines for trendline prices
+                _vp_stored_lines = {"1D": {}, "4H": {}}
+                if os.path.exists(TREND_STATE_FILE):
+                    try:
+                        with open(TREND_STATE_FILE, 'r') as f:
+                            _vp_state = json.load(f)
+                            _vp_stored_lines = _vp_state.get("lines", {"1D": {}, "4H": {}})
+                    except Exception as e:
+                        logging.error(f"❌ VOL WAITLIST: can't load stored_lines: {e}")
+
+                # Batch price fetch: 1 API call for ALL futures symbols
+                _all_prices = {}
+                try:
+                    async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                        if resp.status == 200:
+                            for t in await resp.json():
+                                _all_prices[t["symbol"]] = float(t["price"])
+                except Exception as e:
+                    logging.error(f"❌ VOL WAITLIST: batch price fetch failed: {e}")
+
+                # Filter: keep only coins ≥2% above trendline
+                price_passed = []
+                for vw_item in vol_waitlist:
+                    sym = vw_item["symbol"]
+                    tf = vw_item.get("tf", "4H")
+                    cur_price = _all_prices.get(sym, 0)
+                    line_data = _vp_stored_lines.get(tf, {}).get(sym)
+                    line_price = line_data.get("line_price", 0) if line_data else 0
+
+                    if cur_price > 0 and line_price > 0:
+                        above_pct = ((cur_price / line_price) - 1) * 100
+                        if above_pct < 2.0:
+                            logging.info(f"📊⏭️ PRICE FILTER: {sym} {cur_price:.6f} only {above_pct:.1f}% above line {line_price:.6f} — skip volume check")
+                            continue
+                    elif not line_data:
+                        logging.warning(f"⚠️ VOL WAITLIST {sym}: no line_data for {tf}, skipping")
+                        continue
+
+                    vw_item["_current_price"] = cur_price
+                    price_passed.append(vw_item)
+
+                logging.info(f"📊 Price filter: {len(vol_waitlist)} → {len(price_passed)} coins above 2%")
+
+                # ── Phase 1: Check volume only for price-passed coins ──
                 vol_passed = []
-                batch_size = 30
-                for batch_start in range(0, len(vol_waitlist), batch_size):
-                    batch = vol_waitlist[batch_start:batch_start + batch_size]
+                if price_passed:
+                    batch_size = 30
+                    for batch_start in range(0, len(price_passed), batch_size):
+                        batch = price_passed[batch_start:batch_start + batch_size]
 
-                    async def _check_one_vw(vw_item):
-                        try:
-                            vol_result = await check_volume_pass(session, vw_item["symbol"])
-                            if vol_result["pass"]:
-                                remove_from_volume_waitlist(vw_item["key"])
-                                vw_item["_current_price"] = vol_result.get("current_price", 0)
-                                logging.info(f"📊✅ VOL PASS: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
-                                return vw_item
-                            else:
-                                logging.info(f"📊 VOL WAIT: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                        async def _check_one_vw(vw_item):
+                            try:
+                                vol_result = await check_volume_pass(session, vw_item["symbol"])
+                                if vol_result["pass"]:
+                                    remove_from_volume_waitlist(vw_item["key"])
+                                    vw_item["_current_price"] = vol_result.get("current_price", 0) or vw_item.get("_current_price", 0)
+                                    logging.info(f"📊✅ VOL PASS: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
+                                    return vw_item
+                                else:
+                                    logging.info(f"📊 VOL WAIT: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f}, green={vol_result['candle_green']})")
+                                    return None
+                            except Exception as e:
+                                logging.error(f"❌ Vol waitlist recheck {vw_item.get('symbol', '?')}: {e}")
                                 return None
-                        except Exception as e:
-                            logging.error(f"❌ Vol waitlist recheck {vw_item.get('symbol', '?')}: {e}")
-                            return None
 
-                    results = await asyncio.gather(*[_check_one_vw(vw) for vw in batch])
-                    vol_passed.extend([r for r in results if r is not None])
-                    if batch_start + batch_size < len(vol_waitlist):
-                        await asyncio.sleep(1)
+                        results = await asyncio.gather(*[_check_one_vw(vw) for vw in batch])
+                        vol_passed.extend([r for r in results if r is not None])
+                        if batch_start + batch_size < len(price_passed):
+                            await asyncio.sleep(1)
 
-                # Phase 2: Full pipeline for passed coins (fetch data → AI → classify → send)
+                # ── Phase 2: Full pipeline for passed coins (fetch data → AI → classify → send) ──
                 if vol_passed:
                     logging.info(f"📊🚀 VOL PASS pipeline: {len(vol_passed)} coins to process")
-
-                    # Load stored_lines for line_data
-                    _vp_stored_lines = {"1D": {}, "4H": {}}
-                    if os.path.exists(TREND_STATE_FILE):
-                        try:
-                            with open(TREND_STATE_FILE, 'r') as f:
-                                _vp_state = json.load(f)
-                                _vp_stored_lines = _vp_state.get("lines", {"1D": {}, "4H": {}})
-                        except Exception as e:
-                            logging.error(f"❌ VOL PASS: can't load stored_lines: {e}")
 
                     for vw_item in vol_passed:
                         sym = vw_item["symbol"]
@@ -758,27 +793,10 @@ async def main():
                         logging.info(f"📊🤖 VOL PASS pipeline: {sym} {tf}")
 
                         try:
-                            # Get line_data from stored_lines
                             line_data = _vp_stored_lines.get(tf, {}).get(sym)
                             if not line_data:
                                 logging.warning(f"⚠️ VOL PASS {sym}: no line_data in stored_lines for {tf}, skipping")
                                 continue
-
-                            # ── EARLY 2% CHECK ── before loading heavy klines/SMC
-                            # Use price from volume check (already fetched, no extra API call)
-                            _early_price = vw_item.get("_current_price", 0)
-                            _early_line_price = line_data.get("line_price", 0)
-                            if _early_price > 0 and _early_line_price > 0:
-                                _early_above_pct = ((_early_price / _early_line_price) - 1) * 100
-                                if _early_above_pct < 2.0:
-                                    _vw_alert = vw_item.get("alert", {})
-                                    logging.info(f"📊❌ VOL PASS EARLY REJECT: {sym} price {_early_price:.6f} only {_early_above_pct:.1f}% above line {_early_line_price:.6f} (need ≥2%) — skipping heavy fetch")
-                                    add_to_volume_waitlist(
-                                        sym, tf, _vw_alert,
-                                        vw_item.get("vol_12h", 0), vw_item.get("vol_1h", 0),
-                                        vw_item.get("candle_green", False)
-                                    )
-                                    continue
 
                             await wait_for_weight(session, 2350)
 
