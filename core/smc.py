@@ -814,7 +814,12 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         active_fvgs = [f for f in all_fvgs if not f["mitigated"]]
 
         # ── 7. TRAILING EXTREMES + STRONG/WEAK HIGH/LOW ──
-        trailing = compute_trailing_extremes(df, swing_pivots, swing_trend, swing_size=swing_size)
+        # When swing_trend is undefined (0, no swing structures detected),
+        # fall back to internal_trend for Strong/Weak labels.
+        # This handles coins in extreme trends where swing crossovers are missed
+        # because price moves too far before swing pivots are confirmed (swing_size=50).
+        _effective_trend = swing_trend if swing_trend != 0 else internal_trend
+        trailing = compute_trailing_extremes(df, swing_pivots, _effective_trend, swing_size=swing_size)
 
         # ── 8. PREMIUM / DISCOUNT ZONES ──
         zones = get_premium_discount(trailing, current_price)
