@@ -706,6 +706,9 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
             max_internal_obs = _smc_cfg.get("internal_obs", 5) or 5
         if max_swing_obs is None:
             max_swing_obs = _smc_cfg.get("swing_obs", 0) or 5
+        # AIAlisa mode: use custom internal_size; TView mode: always LuxAlgo default (5)
+        if not strict_luxalgo:
+            internal_size = _smc_cfg.get("internal_size", 5)
 
     if df is None or len(df) < 30:
         return {"summary": f"[{tf_label}] Insufficient data for SMC analysis."}

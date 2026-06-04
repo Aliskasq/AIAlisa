@@ -594,6 +594,7 @@ _DEFAULT_SMC_SETTINGS = {
     "strict_luxalgo": True,
     "internal_obs": 5,    # 0=off, 3, 5, 10
     "swing_obs": 0,       # 0=off, 3, 5, 10
+    "internal_size": 5,   # AIAlisa mode only: 3=sensitive, 5=standard, 7=strong
 }
 
 def load_smc_settings() -> dict:

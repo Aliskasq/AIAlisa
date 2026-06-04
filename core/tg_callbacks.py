@@ -493,30 +493,45 @@ async def handle_callback_query(app_session, update):
             s["swing_obs"] = val
             save_smc_settings(s)
             toast = f"Swing OB: {'OFF' if val == 0 else val}"
+        # Internal size (AIAlisa mode only)
+        elif cb_data.startswith("smc_isz_"):
+            val = int(cb_data.split("_")[-1])
+            s["internal_size"] = val
+            save_smc_settings(s)
+            toast = f"Internal Size: {val}"
 
         # --- Render menu ---
         strict = s.get("strict_luxalgo", True)
         iob = s.get("internal_obs", 5)
         sob = s.get("swing_obs", 0)
+        isz = s.get("internal_size", 5)
 
-        mode_name = "📺 TradingView (LuxAlgo)" if strict else "🤖 AIAlisa (ранний internal)"
+        mode_name = "📺 TradingView (LuxAlgo)" if strict else "🤖 AIAlisa (кастом)"
 
         def _ob_label(val):
             return "OFF" if val == 0 else str(val)
+
+        _isz_hint = {3: "чувствительный", 5: "стандарт", 7: "крупные"}
+
+        if strict:
+            mode_desc = "_📺 Точная копия LuxAlgo (internal\\_size=5)_"
+        else:
+            mode_desc = f"_🤖 Кастомный (internal\\_size={isz} — {_isz_hint.get(isz, '')})_"
 
         msg_text = (
             f"📐 *Настройки SMC*\n\n"
             f"*Режим:* {mode_name}\n"
             f"*Internal OB:* {_ob_label(iob)}\n"
-            f"*Swing OB:* {_ob_label(sob)}\n\n"
-            f"_TView = точная копия LuxAlgo_\n"
-            f"_AIAlisa = ранний internal structure_"
+            f"*Swing OB:* {_ob_label(sob)}\n"
         )
+        if not strict:
+            msg_text += f"*Internal Size:* {isz} ({_isz_hint.get(isz, '')})\n"
+        msg_text += f"\n{mode_desc}"
 
         def _ck_v(current, val, label):
             return f"✅ {label}" if current == val else label
 
-        kb = {"inline_keyboard": [
+        rows = [
             # Row 1: Mode
             [
                 {"text": _ck_v(strict, True, "📺 TView"), "callback_data": "smc_tview"},
@@ -540,7 +555,16 @@ async def handle_callback_query(app_session, update):
                 {"text": _ck_v(sob, 5, "5"), "callback_data": "smc_sob_5"},
                 {"text": _ck_v(sob, 10, "10"), "callback_data": "smc_sob_10"},
             ],
-        ]}
+        ]
+        # Show internal_size selector only in AIAlisa mode
+        if not strict:
+            rows.append([{"text": "── Чувствительность ──", "callback_data": "smc_noop"}])
+            rows.append([
+                {"text": _ck_v(isz, 3, "3 🔬"), "callback_data": "smc_isz_3"},
+                {"text": _ck_v(isz, 5, "5 ⚖️"), "callback_data": "smc_isz_5"},
+                {"text": _ck_v(isz, 7, "7 🏗️"), "callback_data": "smc_isz_7"},
+            ])
+        kb = {"inline_keyboard": rows}
         await _slm_edit(app_session, chat_id, msg_id_cb, msg_text, kb, cq_id, toast)
         return
 
