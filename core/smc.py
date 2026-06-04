@@ -167,11 +167,52 @@ def detect_structure(df: pd.DataFrame, size: int,
                     last_low["price"] = p["price"]
                     last_low["index"] = p["index"]
                     last_low["crossed"] = False
+                    # Retroactive crossover: check if close already crossed below
+                    # this level between pivot bar and detection bar.
+                    # In extreme downtrends, price moves past pivot level before
+                    # detection (bar + size), so the normal crossover check misses it.
+                    if not internal:
+                        _retro_level = p["price"]
+                        for _rb in range(p["index"] + 1, i):
+                            _rc = closes[_rb]
+                            _rc_prev = closes[_rb - 1] if _rb > 0 else float('inf')
+                            if _rc_prev >= _retro_level and _rc < _retro_level:
+                                # Found missed crossover — mark as already crossed
+                                # and record the structure break
+                                tag = "CHoCH" if trend == BULLISH else "BOS"
+                                last_low["crossed"] = True
+                                trend = BEARISH
+                                structures.append({
+                                    "type": tag,
+                                    "bias": BEARISH,
+                                    "price": _retro_level,
+                                    "break_index": _rb,
+                                    "pivot_index": p["index"],
+                                })
+                                break
                 elif p["type"] == "high":
                     last_high["last_price"] = last_high["price"]
                     last_high["price"] = p["price"]
                     last_high["index"] = p["index"]
                     last_high["crossed"] = False
+                    # Retroactive crossover: check if close already crossed above
+                    if not internal:
+                        _retro_level = p["price"]
+                        for _rb in range(p["index"] + 1, i):
+                            _rc = closes[_rb]
+                            _rc_prev = closes[_rb - 1] if _rb > 0 else 0
+                            if _rc_prev <= _retro_level and _rc > _retro_level:
+                                tag = "CHoCH" if trend == BEARISH else "BOS"
+                                last_high["crossed"] = True
+                                trend = BULLISH
+                                structures.append({
+                                    "type": tag,
+                                    "bias": BULLISH,
+                                    "price": _retro_level,
+                                    "break_index": _rb,
+                                    "pivot_index": p["index"],
+                                })
+                                break
 
         # Candle shape filter (Pine: bullishBar / bearishBar)
         # Only active when confluence_filter=True AND internal=True
