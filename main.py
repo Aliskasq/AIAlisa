@@ -745,7 +745,6 @@ async def main():
                     if cur_price > 0 and line_price > 0:
                         above_pct = ((cur_price / line_price) - 1) * 100
                         if above_pct < 2.0:
-                            logging.info(f"📊⏭️ PRICE FILTER: {sym} {cur_price:.6f} only {above_pct:.1f}% above line {line_price:.6f} — skip volume check")
                             continue
                     elif not line_data:
                         logging.warning(f"⚠️ VOL WAITLIST {sym}: no line_data for {tf}, skipping")
