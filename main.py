@@ -723,6 +723,7 @@ async def main():
                             vol_result = await check_volume_pass(session, vw_item["symbol"])
                             if vol_result["pass"]:
                                 remove_from_volume_waitlist(vw_item["key"])
+                                vw_item["_current_price"] = vol_result.get("current_price", 0)
                                 logging.info(f"📊✅ VOL PASS: {vw_item['symbol']} (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
                                 return vw_item
                             else:
@@ -757,13 +758,29 @@ async def main():
                         logging.info(f"📊🤖 VOL PASS pipeline: {sym} {tf}")
 
                         try:
-                            await wait_for_weight(session, 2350)
-
                             # Get line_data from stored_lines
                             line_data = _vp_stored_lines.get(tf, {}).get(sym)
                             if not line_data:
                                 logging.warning(f"⚠️ VOL PASS {sym}: no line_data in stored_lines for {tf}, skipping")
                                 continue
+
+                            # ── EARLY 2% CHECK ── before loading heavy klines/SMC
+                            # Use price from volume check (already fetched, no extra API call)
+                            _early_price = vw_item.get("_current_price", 0)
+                            _early_line_price = line_data.get("line_price", 0)
+                            if _early_price > 0 and _early_line_price > 0:
+                                _early_above_pct = ((_early_price / _early_line_price) - 1) * 100
+                                if _early_above_pct < 2.0:
+                                    _vw_alert = vw_item.get("alert", {})
+                                    logging.info(f"📊❌ VOL PASS EARLY REJECT: {sym} price {_early_price:.6f} only {_early_above_pct:.1f}% above line {_early_line_price:.6f} (need ≥2%) — skipping heavy fetch")
+                                    add_to_volume_waitlist(
+                                        sym, tf, _vw_alert,
+                                        vw_item.get("vol_12h", 0), vw_item.get("vol_1h", 0),
+                                        vw_item.get("candle_green", False)
+                                    )
+                                    continue
+
+                            await wait_for_weight(session, 2350)
 
                             # Fetch klines + MTF data (same as _prepare_breakout_data)
                             interval_fetch = '1d' if tf == "1D" else '4h'
@@ -841,9 +858,8 @@ async def main():
                             current_price = float(full_df.iloc[-1]['close'])
                             dynamic_trigger = line_data.get('trigger_price', current_price)
 
-                            # --- VOL WAIT: verify breakout still valid (price >= 2% above trendline) ---
-                            # Use FRESH line_price from stored_lines (recalculated every cycle)
-                            # instead of stale slope/intercept from old alert
+                            # --- VOL WAIT: final 2% safety check with fresh price from klines ---
+                            # (early check already done before heavy fetch, this catches price drift)
                             _vw_alert = vw_item.get("alert", {})
                             _vw_line_price = line_data.get("line_price", 0)
                             if _vw_line_price <= 0:

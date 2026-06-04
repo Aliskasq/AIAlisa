@@ -640,7 +640,8 @@ async def check_volume_pass(session, symbol: str) -> dict:
         "pass": passed,
         "vol_12h": vol_12h,
         "vol_1h": vol_1h,
-        "candle_green": candle_green
+        "candle_green": candle_green,
+        "current_price": candle_1h["close"],
     }
 
 
