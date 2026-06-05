@@ -204,6 +204,9 @@ def detect_structure(df: pd.DataFrame, size: int,
         # cross_ref_high = level at end of previous bar (for [1] comparison)
         if last_high["price"] is not None and not last_high["crossed"]:
             prev_close = closes[i - 1] if i > 0 else 0
+            # Debug: log crossover check for swing structures (size >= 50)
+            if size >= 50 and i in pivot_at_bar:
+                logging.info(f"  🔍 XOVER-HIGH check bar={i}: close={closes[i]:.6f} prev={prev_close:.6f} level={last_high['price']:.6f} ref={cross_ref_high} crossed={last_high['crossed']}")
             # Use cross_ref_high for [1] comparison; None means level wasn't set
             # on previous bar (Pine: na[1] → crossover returns false)
             if cross_ref_high is not None and prev_close <= cross_ref_high and closes[i] > last_high["price"]:
@@ -244,6 +247,9 @@ def detect_structure(df: pd.DataFrame, size: int,
         #   = close < currentLevel AND close[1] >= currentLevel[1]
         if last_low["price"] is not None and not last_low["crossed"]:
             prev_close = closes[i - 1] if i > 0 else float('inf')
+            # Debug: log crossunder check for swing structures (size >= 50)
+            if size >= 50 and i in pivot_at_bar:
+                logging.info(f"  🔍 XUNDER-LOW check bar={i}: close={closes[i]:.6f} prev={prev_close:.6f} level={last_low['price']:.6f} ref={cross_ref_low} crossed={last_low['crossed']}")
             if cross_ref_low is not None and prev_close >= cross_ref_low and closes[i] < last_low["price"]:
                 # Internal confluence filter:
                 # Pine v5: extraCondition = internalLow.currentLevel != swingLow.currentLevel
@@ -796,6 +802,9 @@ def analyze_smc(df: pd.DataFrame, tf_label: str = "4H",
         sym_tag = f" [{symbol}]" if symbol else ""
         if _smc_debug:
             logging.info(f"🔍 SMC{sym_tag} {tf_label}: {n} candles, swing_structures={len(swing_structures)}, swing_pivots={len(swing_pivots)}")
+            for p in swing_pivots:
+                det_bar = p['index'] + swing_size
+                logging.info(f"  🔸 Swing pivot {p['type'].upper()} price={p['price']:.6f} bar={p['index']} detected@{det_bar}")
             for s in swing_structures[-10:]:
                 logging.info(f"  🔹 Swing {s['type']} {'BULL' if s['bias']==BULLISH else 'BEAR'} price={s['price']:.6f} pivot@{s['pivot_index']} break@{s['break_index']}")
 
