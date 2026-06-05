@@ -158,7 +158,20 @@ def detect_structure(df: pd.DataFrame, size: int,
                 pivot_at_bar[detection_bar] = []
             pivot_at_bar[detection_bar].append(p)
 
+    # Track pivot levels at end of previous bar for correct ta.crossover/crossunder.
+    # Pine: ta.crossover(close, level) = close > level AND close[1] <= level[1]
+    # where level[1] is the value at end of the PREVIOUS bar (before any updates on
+    # the current bar). Without this, Python uses the just-updated level for the [1]
+    # comparison, missing crossovers when pivot levels change dramatically (e.g. coins
+    # in extreme trends like PTB where swing high drops from 0.065 to 0.005).
+    prev_bar_high_level = None  # swingHigh.currentLevel at end of previous bar
+    prev_bar_low_level = None   # swingLow.currentLevel at end of previous bar
+
     for i in range(n):
+        # Snapshot levels from end of previous bar BEFORE any updates on this bar
+        cross_ref_high = prev_bar_high_level
+        cross_ref_low = prev_bar_low_level
+
         # Update pivots that occur at this bar
         if i in pivot_at_bar:
             for p in pivot_at_bar[i]:
@@ -186,10 +199,14 @@ def detect_structure(df: pd.DataFrame, size: int,
             bearish_bar = True
 
         # Check bullish break: close crosses above last high
+        # Pine: ta.crossover(close, p_ivot.currentLevel)
+        #   = close > currentLevel AND close[1] <= currentLevel[1]
+        # cross_ref_high = level at end of previous bar (for [1] comparison)
         if last_high["price"] is not None and not last_high["crossed"]:
-            # Crossover: previous close <= level AND current close > level
             prev_close = closes[i - 1] if i > 0 else 0
-            if prev_close <= last_high["price"] and closes[i] > last_high["price"]:
+            # Use cross_ref_high for [1] comparison; None means level wasn't set
+            # on previous bar (Pine: na[1] → crossover returns false)
+            if cross_ref_high is not None and prev_close <= cross_ref_high and closes[i] > last_high["price"]:
                 # Internal confluence filter:
                 # Pine v5: extraCondition = internalHigh.currentLevel != swingHigh.currentLevel
                 # Pine v5 float semantics: (x != na) → true, so when swingLevel is na
@@ -223,9 +240,11 @@ def detect_structure(df: pd.DataFrame, size: int,
                     })
 
         # Check bearish break: close crosses below last low
+        # Pine: ta.crossunder(close, p_ivot.currentLevel)
+        #   = close < currentLevel AND close[1] >= currentLevel[1]
         if last_low["price"] is not None and not last_low["crossed"]:
             prev_close = closes[i - 1] if i > 0 else float('inf')
-            if prev_close >= last_low["price"] and closes[i] < last_low["price"]:
+            if cross_ref_low is not None and prev_close >= cross_ref_low and closes[i] < last_low["price"]:
                 # Internal confluence filter:
                 # Pine v5: extraCondition = internalLow.currentLevel != swingLow.currentLevel
                 # Pine v5 float semantics: (x != na) → true, so when swingLevel is na
@@ -257,6 +276,10 @@ def detect_structure(df: pd.DataFrame, size: int,
                         "break_index": i,
                         "pivot_index": last_low["index"],
                     })
+
+        # Save levels at end of this bar for next bar's crossover [1] reference
+        prev_bar_high_level = last_high["price"]
+        prev_bar_low_level = last_low["price"]
 
     return structures, raw_pivots, trend
 
