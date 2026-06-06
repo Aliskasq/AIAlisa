@@ -705,7 +705,7 @@ def add_to_volume_waitlist(symbol, tf, alert_data, vol_12h, vol_1h, candle_green
         "added_at": datetime.now(timezone.utc).isoformat()
     })
     save_volume_waitlist(waitlist)
-    # logging.info(f"📊 VOL WAITLIST added: {symbol} {tf} (12h=${vol_12h:,.0f}, 1h=${vol_1h:,.0f})")  # TEMP muted
+    logging.info(f"📊 VOL WAITLIST added: {symbol} {tf} (12h=${vol_12h:,.0f}, 1h=${vol_1h:,.0f})")
 
 
 def remove_from_volume_waitlist(key: str):
@@ -713,7 +713,7 @@ def remove_from_volume_waitlist(key: str):
     waitlist = load_volume_waitlist()
     waitlist = [w for w in waitlist if w.get("key") != key]
     save_volume_waitlist(waitlist)
-    # logging.info(f"📊 VOL WAITLIST removed: {key}")  # TEMP muted
+    logging.info(f"📊 VOL WAITLIST removed: {key}")
 
 
 def clear_volume_waitlist():
