@@ -317,7 +317,7 @@ async def handle_message(app_session, update):
                 "🔑 `/testapi AIzaSy...` — test Gemini key\n"
                 "🔑 `/testall` — test all AI keys\n\n"
                 "🧠 *ML (XGBoost):*\n"
-                "🧠 `/mltrain` — обучить все 3 модели\n"
+                "🧠 `/mltrain` — обучить все 3 XGBoost модели\n"
                 "🧠 `/mltrain --tf 4h` — только 4H\n"
                 "🧠 `/mltrain --dry-run` — статистика без обучения\n"
                 "📊 `/mlstatus` — модели, точность, cron\n"
@@ -1228,24 +1228,15 @@ async def handle_message(app_session, update):
                     elif s.get("dry_run"):
                         status_lines.append(f"  {tf}: {s['pairs']} пар, {s['samples']} сэмплов (dry-run)")
                     elif "models" in s:
-                        # New ensemble format
                         status_lines.append(f"\n  *{tf}*: {s['pairs']} пар, {s['samples_total']} сэмплов")
                         models = s.get("models", {})
-                        for mt in ["xgb", "lgb"]:
-                            if mt in models and "accuracy" in models[mt]:
-                                ms = models[mt]
-                                status_lines.append(f"    {mt.upper()}: {ms['accuracy']}% точность")
-                                top = ms.get("top_features", {})
-                                if top:
-                                    top3 = ", ".join(list(top.keys())[:3])
-                                    status_lines.append(f"      топ фичи: {top3}")
-                        ens = s.get("ensemble_accuracy")
-                        ew = s.get("ensemble_weights", {})
-                        if ens and ew:
-                            w_str = ", ".join(f"{mt.upper()}={w:.3f}" for mt, w in ew.items())
-                            status_lines.append(f"    🏆 Ансамбль: {ens}% ({w_str})")
-                        elif ens:
-                            status_lines.append(f"    🏆 Ансамбль: {ens}%")
+                        xgb = models.get("xgb")
+                        if xgb and "accuracy" in xgb:
+                            status_lines.append(f"    XGB: {xgb['accuracy']}% точность")
+                            top = xgb.get("top_features", {})
+                            if top:
+                                top3 = ", ".join(list(top.keys())[:3])
+                                status_lines.append(f"      топ фичи: {top3}")
                     else:
                         # Legacy single-model format
                         status_lines.append(f"  {tf}: {s.get('accuracy', '?')}% точность, {s['pairs']} пар, {s['samples_total']} сэмплов")
