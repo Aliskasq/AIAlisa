@@ -33,9 +33,9 @@ def get_ml_engine() -> "MLEngine":
 
 # Timeframe → model filenames (ensemble: xgb + lgb)
 TF_MODELS = {
-    "4H": {"xgb": "xgb_4h.pkl", "lgb": "lgb_4h.pkl"},
-    "1H": {"xgb": "xgb_1h.pkl", "lgb": "lgb_1h.pkl"},
-    "15m": {"xgb": "xgb_15m.pkl", "lgb": "lgb_15m.pkl"},
+    "4H": {"xgb": "xgb_4h.pkl"},
+    "1H": {"xgb": "xgb_1h.pkl"},
+    "15m": {"xgb": "xgb_15m.pkl"},
 }
 
 # Legacy single-model filenames (backward compat)
