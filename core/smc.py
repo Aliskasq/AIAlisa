@@ -53,13 +53,9 @@ def _compute_legs(highs: np.ndarray, lows: np.ndarray, size: int) -> np.ndarray:
         # ta.lowest(size) = min of bars [i-size+1 .. i]
         window_low = np.min(lows[i - size + 1: i + 1])
 
-        # Pine uses two SEPARATE if statements (not if/elif):
-        #   if newLegHigh → leg := 0
-        #   if newLegLow  → leg := 1
-        # When both are true (volatile bar), the second `if` wins → BULLISH_LEG.
         if bar_high > window_high:
             current_leg = BEARISH_LEG  # pivot high detected → start of bearish leg
-        if bar_low < window_low:
+        elif bar_low < window_low:
             current_leg = BULLISH_LEG  # pivot low detected → start of bullish leg
 
         legs[i] = current_leg
