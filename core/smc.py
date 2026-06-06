@@ -77,7 +77,12 @@ def _detect_pivots_from_legs(highs: np.ndarray, lows: np.ndarray,
     n = len(legs)
     pivots = []
 
-    for i in range(size + 1, n):
+    # Start at `size` (not `size + 1`) to catch the very first leg change.
+    # Pine: `var leg = 0` initializes leg to 0 on all bars before `size`.
+    # At bar `size`, leg() computes the first real value. If it differs from
+    # the initial 0, ta.change(leg) fires and Pine creates a pivot.
+    # legs[0..size-1] are 0 (default), matching Pine's `var leg = 0`.
+    for i in range(size, n):
         change = legs[i] - legs[i - 1]
         if change == 0:
             continue
