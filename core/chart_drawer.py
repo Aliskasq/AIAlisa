@@ -105,7 +105,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
 
     try:
         # Compute indicator addplots for panels (RSI only, no MACD)
-        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit, tf=tf)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style=custom_style,
@@ -994,11 +994,12 @@ def _draw_below_obs_strip(fig, smc_data, plot_df, axlist):
                  fontsize=9, fontweight='bold', ha='right', va='top')
 
 
-def _compute_indicator_addplots(plot_df, view_limit):
+def _compute_indicator_addplots(plot_df, view_limit, tf='4h'):
     """
     Compute OBV, RSI(6,12,24), MACD from plot_df and return list of
     mpf.make_addplot() objects for panels 1, 2, 3.
     Also returns the MACD histogram colors for bar chart (drawn post-render).
+    tf: timeframe string (e.g. '15m', '1h', '4h', '1d') — controls OBV SMA period.
     """
     close = plot_df['close'].astype(float)
     volume = plot_df['volume'].astype(float)
@@ -1007,7 +1008,9 @@ def _compute_indicator_addplots(plot_df, view_limit):
     # --- OBV ---
     obv_change = np.sign(close.diff()) * volume
     obv = obv_change.fillna(0).cumsum()
-    obv_sma20 = obv.rolling(20).mean().fillna(obv.iloc[0] if n > 0 else 0)
+    # SMA period: 10 for short TFs (15m, 1h), 20 for longer (4h, 1d, etc.)
+    _obv_sma_period = 10 if tf in ('15m', '1h') else 20
+    obv_sma = obv.rolling(_obv_sma_period).mean().fillna(obv.iloc[0] if n > 0 else 0)
 
     # --- RSI 6, 12, 24 ---
     delta = close.diff()
@@ -1038,12 +1041,22 @@ def _compute_indicator_addplots(plot_df, view_limit):
     macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
+    # --- Scaled Price (for OBV divergence) ---
+    obv_hi = obv.rolling(200, min_periods=1).max()
+    obv_lo = obv.rolling(200, min_periods=1).min()
+    price_hi = close.rolling(200, min_periods=1).max()
+    price_lo = close.rolling(200, min_periods=1).min()
+    price_range = (price_hi - price_lo).replace(0, 1)
+    scaled_price = obv_lo + (close - price_lo) / price_range * (obv_hi - obv_lo)
+
     # Build addplots: OBV (panel 1) + RSI (panel 2), no MACD
     # RSI colors match Binance: RSI(6) yellow, RSI(12) pink, RSI(24) dark purple
+    # Order matters: OBV green line drawn LAST so it renders on top
     addplots = [
-        # Panel 1: OBV
+        # Panel 1: scaled price + SMA drawn first (below), then OBV on top
+        mpf.make_addplot(scaled_price, panel=1, color='#AB47BC', width=1.0),
+        mpf.make_addplot(obv_sma, panel=1, color='#ef5350', width=1.0, linestyle='--'),
         mpf.make_addplot(obv, panel=1, color='#26a69a', width=1.0, ylabel='OBV'),
-        mpf.make_addplot(obv_sma20, panel=1, color='#ef5350', width=0.8, linestyle='--'),
         # Panel 2: RSI 6, 12, 24 (Binance-style colors)
         mpf.make_addplot(rsi6, panel=2, color='#F0B90B', width=1.2, ylabel='RSI'),
         mpf.make_addplot(rsi12, panel=2, color='#E040FB', width=1.0),
@@ -1422,7 +1435,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
 
     try:
         # Compute indicator addplots (RSI only)
-        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit, tf=tf)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
@@ -1541,7 +1554,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
 
     try:
         # Compute indicator addplots (RSI only)
-        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit, tf=tf)
 
         fig, axlist = mpf.plot(
             plot_df, type='candle', style='charles',
