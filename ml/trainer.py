@@ -137,6 +137,7 @@ async def fetch_klines_raw(session: aiohttp.ClientSession, symbol: str,
                     "low": float(c[3]),
                     "close": float(c[4]),
                     "volume": float(c[5]),
+                    "taker_buy_volume": float(c[9]) if len(c) > 9 else float(c[5]) * 0.5,
                 }
                 for c in raw
             ]

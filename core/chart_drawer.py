@@ -113,7 +113,7 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {line_type}",
             figsize=(14, 12), returnfig=True, tight_layout=False,
-            panel_ratios=(6, 1, 1)
+            panel_ratios=(13, 3, 2)
         )
 
         ax = axlist[0]
@@ -1041,6 +1041,11 @@ def _compute_indicator_addplots(plot_df, view_limit, tf='4h'):
     macd_signal = macd_line.ewm(span=9, adjust=False).mean()
     macd_hist = macd_line - macd_signal
 
+    # --- CVD (Cumulative Volume Delta) ---
+    taker_buy = plot_df['taker_buy_volume'].astype(float) if 'taker_buy_volume' in plot_df.columns else volume * 0.5
+    taker_sell = volume - taker_buy
+    cvd = (taker_buy - taker_sell).cumsum()
+
     # --- Scaled Price (for OBV divergence) ---
     obv_hi = obv.rolling(200, min_periods=1).max()
     obv_lo = obv.rolling(200, min_periods=1).min()
@@ -1049,11 +1054,18 @@ def _compute_indicator_addplots(plot_df, view_limit, tf='4h'):
     price_range = (price_hi - price_lo).replace(0, 1)
     scaled_price = obv_lo + (close - price_lo) / price_range * (obv_hi - obv_lo)
 
+    # --- Scaled CVD (fit to OBV scale) ---
+    cvd_hi = cvd.rolling(200, min_periods=1).max()
+    cvd_lo = cvd.rolling(200, min_periods=1).min()
+    cvd_range = (cvd_hi - cvd_lo).replace(0, 1)
+    scaled_cvd = obv_lo + (cvd - cvd_lo) / cvd_range * (obv_hi - obv_lo)
+
     # Build addplots: OBV (panel 1) + RSI (panel 2), no MACD
     # RSI colors match Binance: RSI(6) yellow, RSI(12) pink, RSI(24) dark purple
     # Order matters: OBV green line drawn LAST so it renders on top
     addplots = [
-        # Panel 1: scaled price + SMA drawn first (below), then OBV on top
+        # Panel 1: CVD + scaled price + SMA drawn first (below), then OBV on top
+        mpf.make_addplot(scaled_cvd, panel=1, color='#29B6F6', width=1.0),
         mpf.make_addplot(scaled_price, panel=1, color='#AB47BC', width=1.0),
         mpf.make_addplot(obv_sma, panel=1, color='#ef5350', width=1.0, linestyle='--'),
         mpf.make_addplot(obv, panel=1, color='#26a69a', width=1.0, ylabel='OBV'),
@@ -1443,7 +1455,7 @@ async def draw_scan_chart(symbol: str, df: pd.DataFrame, line: dict, tf: str, sm
             addplot=addplots + _ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | {line_type}",
             figsize=(14, 12), returnfig=True, tight_layout=False,
-            panel_ratios=(6, 1, 1)
+            panel_ratios=(13, 3, 2)
         )
 
         ax = axlist[0]
@@ -1561,7 +1573,7 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
             addplot=_ind_addplots, yscale='log',
             title=f"\n{symbol} {tf} | SCAN",
             figsize=(14, 12), returnfig=True, tight_layout=False,
-            panel_ratios=(6, 1, 1)
+            panel_ratios=(13, 3, 2)
         )
 
         ax = axlist[0]

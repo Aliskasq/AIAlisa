@@ -55,7 +55,8 @@ async def fetch_klines(session, symbol, interval, limit=199):
                 return [
                     {
                         'open_time': int(c[0]), 'open': float(c[1]), 'high': float(c[2]),
-                        'low': float(c[3]), 'close': float(c[4]), 'volume': float(c[5])
+                        'low': float(c[3]), 'close': float(c[4]), 'volume': float(c[5]),
+                        'taker_buy_volume': float(c[9]) if len(c) > 9 else float(c[5]) * 0.5
                     } for c in raw
                 ]
             elif resp.status == 429:
