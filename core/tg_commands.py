@@ -78,6 +78,7 @@ async def handle_message(app_session, update):
                 "📈 `/top gainers` · 📉 `/top losers`\n"
                 "📊 `/trend` — _breakouts / пробития_\n"
                 "🔔 `/alert BTC 69500` — _price alert_\n"
+                "📐 `алерт BTC` — _ручная линия / trendline_\n"
                 "🌐 `/lang en` | `/lang ru` — _language_\n\n"
                 "Type `/help` for full list! 🚀"
             )
@@ -439,6 +440,10 @@ async def handle_message(app_session, update):
             "    _Price alert / Алерт на цену_\n"
             "🔔 `/alert list` — _active / активные_\n"
             "🔔 `/alert clear` — _remove all / удалить все_\n\n"
+            "📐 `алерт BTC` / `alert BTC`\n"
+            "    _Ручная линия + алерт касания_\n"
+            "📐 `алерт список` — _активные линии_\n"
+            "📐 `алерт удалить` — _удалить все линии_\n\n"
             "🌐 `/lang en` — English\n"
             "🌐 `/lang ru` — Русский"
         )
