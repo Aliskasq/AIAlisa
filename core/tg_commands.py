@@ -107,7 +107,7 @@ async def handle_message(app_session, update):
     # ==========================================
     ma_state = get_manual_alert_state(chat_id)
     if ma_state:
-        # --- AWAITING PRICES: user enters "69500 67200" ---
+        # --- AWAITING PRICES: user enters "69500 67200" → process immediately ---
         if ma_state.get('step') == 'awaiting_prices':
             parts_raw = original_text.replace(",", ".").split()
             try:
@@ -119,17 +119,9 @@ async def handle_message(app_session, update):
                     "⚠️ Введи две цены через пробел, например:\n`69500 67200`", msg_id, parse_mode="Markdown")
                 return
             ma_state['prices'] = prices
-            ma_state['step'] = 'awaiting_mode'
-            set_manual_alert_state(chat_id, ma_state)
-            mode_kb = {"inline_keyboard": [
-                [{"text": "📈 По верхам (High)", "callback_data": "malert_mode_high"},
-                 {"text": "📉 По низам (Low)", "callback_data": "malert_mode_low"}],
-                [{"text": "🕯 По телам (Body Mid)", "callback_data": "malert_mode_body"},
-                 {"text": "📅 По датам", "callback_data": "malert_mode_date"}],
-            ]}
-            await send_response(app_session, chat_id,
-                f"✅ Цены: `{prices[0]}` и `{prices[1]}`\n\nКак строить линию?",
-                msg_id, reply_markup=mode_kb, parse_mode="Markdown")
+            # Mode was already selected before prices — process now
+            mode = ma_state.get('mode', 'high')
+            await _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode)
             return
 
         # --- AWAITING DATES: user enters "15.05.26 18:15-16.05.26 21:45" ---
@@ -2012,6 +2004,10 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                     candle_price = float(row['low'])
                 elif mode_str in ('body', 'body_mid'):
                     candle_price = (float(row['open']) + float(row['close'])) / 2
+                elif mode_str == 'body_top':
+                    candle_price = max(float(row['open']), float(row['close']))
+                elif mode_str == 'body_bot':
+                    candle_price = min(float(row['open']), float(row['close']))
                 elif mode_str == 'date_top':
                     candle_price = max(float(row['open']), float(row['close']))
                 elif mode_str == 'date_bottom':
