@@ -2045,16 +2045,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         last_idx = view_limit - 1
         base_open_time = int(df_l['open_time'].iloc[-1])
 
-        # Draw chart
-        manual_line = {
-            'price_a': actual_price_a,
-            'price_b': actual_price_b,
-            'index_a': idx_a,
-            'index_b': idx_b,
-        }
-        chart_path = await draw_alert_chart(symbol, df, [manual_line], tf)
-
-        # Save alert
+        # Save alert FIRST so it appears on the chart
         alert_entry = {
             "symbol": symbol,
             "tf": tf,
@@ -2075,6 +2066,14 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         alerts.append(alert_entry)
         save_manual_alerts(alerts)
 
+        # Draw chart with ALL active lines for this symbol+tf
+        all_lines_for_chart = [
+            {'price_a': a['price_a'], 'price_b': a['price_b'],
+             'index_a': a['index_a'], 'index_b': a['index_b']}
+            for a in alerts if a['symbol'] == symbol and a['tf'] == tf
+        ]
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+
         clear_manual_alert_state(chat_id)
 
         # Send chart
@@ -2082,6 +2081,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         line_price_now = _math.exp(log_slope * last_idx + log_intercept)
         current_price = float(df_l['close'].iloc[-1])
         diff_pct = ((current_price / line_price_now) - 1) * 100
+        total_lines = len(all_lines_for_chart)
 
         caption = (
             f"📐 Ручная линия: *${short_sym}* ({tf})\n"
@@ -2089,7 +2089,8 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             f"🔴 B: {actual_price_b:.8g} (свеча {idx_b})\n"
             f"📊 Линия сейчас: {line_price_now:.8g}\n"
             f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
-            f"🔔 Алерт при пробое!"
+            f"📐 Всего линий: {total_lines}\n"
+            f"🔔 Алерт при касании!"
         )
 
         if chart_path:
@@ -2212,16 +2213,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         last_idx = view_limit - 1
         base_open_time = int(df_l['open_time'].iloc[-1])
 
-        # Draw chart
-        manual_line = {
-            'price_a': actual_price_a,
-            'price_b': actual_price_b,
-            'index_a': idx_a,
-            'index_b': idx_b,
-        }
-        chart_path = await draw_alert_chart(symbol, df, [manual_line], tf)
-
-        # Save alert
+        # Save alert FIRST so it appears on the chart
         alert_entry = {
             "symbol": symbol,
             "tf": tf,
@@ -2242,6 +2234,14 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         alerts.append(alert_entry)
         save_manual_alerts(alerts)
 
+        # Draw chart with ALL active lines for this symbol+tf
+        all_lines_for_chart = [
+            {'price_a': a['price_a'], 'price_b': a['price_b'],
+             'index_a': a['index_a'], 'index_b': a['index_b']}
+            for a in alerts if a['symbol'] == symbol and a['tf'] == tf
+        ]
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+
         clear_manual_alert_state(chat_id)
 
         # Send chart
@@ -2249,6 +2249,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         line_price_now = _math.exp(log_slope * last_idx + log_intercept)
         current_price = float(df_l['close'].iloc[-1])
         diff_pct = ((current_price / line_price_now) - 1) * 100
+        total_lines = len(all_lines_for_chart)
 
         body_type = "верх тела" if date_mode == 'date_top' else "низ тела"
         caption = (
@@ -2258,7 +2259,8 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
             f"🔴 B: {actual_price_b:.8g} ({dt_b.strftime('%d.%m.%y %H:%M')})\n"
             f"📊 Линия сейчас: {line_price_now:.8g}\n"
             f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
-            f"🔔 Алерт при пробое!"
+            f"📐 Всего линий: {total_lines}\n"
+            f"🔔 Алерт при касании!"
         )
 
         if chart_path:

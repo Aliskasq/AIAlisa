@@ -280,7 +280,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 short_sym = sym.replace("USDT", "")
                 diff_pct = ((touch_price / line_price) - 1) * 100
 
-                # Draw chart on original TF
+                # Draw chart on original TF with ALL remaining lines for this symbol+tf
                 chart_path = None
                 try:
                     tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
@@ -288,13 +288,18 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                     raw = await fetch_klines(session, sym, binance_interval, 199)
                     if raw:
                         df = pd.DataFrame(raw)
-                        manual_line = {
-                            'price_a': alert['price_a'],
-                            'price_b': alert['price_b'],
-                            'index_a': alert['index_a'],
-                            'index_b': alert['index_b'],
-                        }
-                        chart_path = await draw_alert_chart(sym, df, [manual_line], tf)
+                        # Include triggered line + all remaining lines for this symbol+tf
+                        all_lines_for_chart = [
+                            {'price_a': a['price_a'], 'price_b': a['price_b'],
+                             'index_a': a['index_a'], 'index_b': a['index_b']}
+                            for a in remaining if a['symbol'] == sym and a['tf'] == tf
+                        ]
+                        # Also add the triggered line itself (shown as the one that fired)
+                        all_lines_for_chart.append({
+                            'price_a': alert['price_a'], 'price_b': alert['price_b'],
+                            'index_a': alert['index_a'], 'index_b': alert['index_b'],
+                        })
+                        chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
                 except Exception as e:
                     logging.error(f"❌ Manual alert chart error for {sym}: {repr(e)}")
 
