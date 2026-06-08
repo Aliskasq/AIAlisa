@@ -1661,3 +1661,196 @@ async def draw_simple_chart(symbol: str, df: pd.DataFrame, tf: str, smc_overlay:
     if os.path.exists(file_path):
         return file_path
     return None
+
+
+async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf: str,
+                           auto_line: dict = None, smc_overlay: dict = None) -> str | None:
+    """
+    Draw chart with manual trendlines (BLACK) and optional auto trendline (GOLD).
+    manual_lines: list of dicts with keys: price_a, price_b, index_a, index_b
+    Each line is drawn as a straight line from point A to point B and extended to current candle.
+    Returns file path to PNG or None.
+    """
+    import math as _math
+
+    view_limit = min(len(df), 199)
+    plot_df = df.iloc[-view_limit:].copy().reset_index(drop=True)
+    plot_df['ds'] = pd.to_datetime(plot_df['open_time'], unit='ms')
+    plot_df.set_index('ds', inplace=True)
+
+    file_path = f"malert_{symbol}_{tf}.png"
+    fig = None
+
+    try:
+        # Compute indicator addplots (OBV+CVD, RSI)
+        _ind_addplots, _rsi_vals = _compute_indicator_addplots(plot_df, view_limit, tf=tf)
+
+        # Build manual trendline data and scatter points
+        addplots = []
+        alines_list = []
+        alines_colors = []
+        alines_widths = []
+
+        for ml in manual_lines:
+            idx_a = ml['index_a']
+            idx_b = ml['index_b']
+            price_a = ml['price_a']
+            price_b = ml['price_b']
+
+            # Compute line in log space for visually straight line on log chart
+            if price_a > 0 and price_b > 0 and idx_b != idx_a:
+                log_a = _math.log(price_a)
+                log_b = _math.log(price_b)
+                log_slope = (log_b - log_a) / (idx_b - idx_a)
+                log_intercept = log_a - log_slope * idx_a
+
+                line_vals = []
+                for i in range(view_limit):
+                    val = _math.exp(log_slope * i + log_intercept)
+                    line_vals.append(val)
+
+                alines_list.append(list(zip(plot_df.index, line_vals)))
+                alines_colors.append('black')
+                alines_widths.append(2)
+
+                # Point A scatter
+                if 0 <= idx_a < view_limit:
+                    pa_series = [float('nan')] * view_limit
+                    pa_series[idx_a] = price_a
+                    addplots.append(mpf.make_addplot(pa_series, type='scatter', markersize=120, marker='o', color='blue'))
+
+                # Point B scatter
+                if 0 <= idx_b < view_limit:
+                    pb_series = [float('nan')] * view_limit
+                    pb_series[idx_b] = price_b
+                    addplots.append(mpf.make_addplot(pb_series, type='scatter', markersize=120, marker='o', color='red'))
+
+        # Auto trendline (gold) if provided
+        if auto_line:
+            tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
+            tf_ms = tf_ms_map.get(tf, 14400000)
+            curr_last_time = int(plot_df['open_time'].iloc[-1])
+            base_open_time = auto_line.get('base_open_time', curr_last_time)
+            shift = round((curr_last_time - base_open_time) / tf_ms)
+            if shift < 0:
+                shift = 0
+            base_idx = auto_line.get('base_idx', view_limit - 1)
+            last_math_x = base_idx + shift
+            offset = last_math_x - (view_limit - 1)
+
+            auto_vals = []
+            min_chart_price = plot_df['low'].min() * 0.001
+            max_chart_price = plot_df['high'].max() * 1000.0
+            for i in range(view_limit):
+                math_x = i + offset
+                val_log = auto_line['slope'] * math_x + auto_line['intercept']
+                val = np.exp(val_log)
+                val_safe = max(min(val, max_chart_price), min_chart_price)
+                auto_vals.append(val_safe)
+            alines_list.append(list(zip(plot_df.index, auto_vals)))
+            alines_colors.append('gold')
+            alines_widths.append(2)
+
+        # Build alines dict
+        alines_kwargs = {}
+        if alines_list:
+            alines_kwargs = dict(
+                alines=dict(alines=alines_list, colors=alines_colors, linewidths=alines_widths)
+            )
+
+        fig, axlist = mpf.plot(
+            plot_df, type='candle', style='charles',
+            **alines_kwargs,
+            addplot=addplots + _ind_addplots, yscale='log',
+            title=f"\n{symbol} {tf} | MANUAL ALERT",
+            figsize=(14, 12), returnfig=True, tight_layout=False,
+            panel_ratios=(13, 3, 2)
+        )
+
+        ax = axlist[0]
+        ax.set_xlim(-0.5, view_limit - 0.5)
+
+        # Tight Y-axis
+        _candle_low = float(plot_df['low'].min())
+        _candle_high = float(plot_df['high'].max())
+        if _candle_low > 0 and _candle_high > _candle_low:
+            _log_lo = _math.log(_candle_low)
+            _log_hi = _math.log(_candle_high)
+            _log_pad = (_log_hi - _log_lo) * 0.05
+            ax.set_ylim(_math.exp(_log_lo - _log_pad), _math.exp(_log_hi + _log_pad))
+
+        # Price labels at points A and B
+        for ml in manual_lines:
+            idx_a = ml['index_a']
+            idx_b = ml['index_b']
+            if 0 <= idx_a < view_limit:
+                ax.text(idx_a, ml['price_a'], _fmt_price(ml['price_a']),
+                        color='blue', fontsize=11, fontweight='bold', ha='center', va='bottom')
+            if 0 <= idx_b < view_limit:
+                ax.text(idx_b, ml['price_b'], _fmt_price(ml['price_b']),
+                        color='red', fontsize=11, fontweight='bold', ha='center', va='bottom')
+
+        # Clamp Y-axis before SMC overlay
+        clamp_info = {}
+        if smc_overlay:
+            clamp_info = _prepare_chart_ylim(ax, smc_overlay, plot_df)
+
+        # Watermark
+        _draw_watermark_and_clamped(ax, view_limit, plot_df, smc_overlay, clamp_info)
+
+        # SMC overlay
+        if smc_overlay:
+            try:
+                _draw_smc_overlay(ax, plot_df, smc_overlay, view_limit, 0, clamp_info)
+            except Exception as e:
+                logging.error(f"❌ SMC overlay error (alert chart): {repr(e)}")
+
+        # Custom grid + SMC annotations
+        _apply_custom_grid(ax, plot_df, view_limit)
+        if smc_overlay:
+            _draw_smc_annotations(ax, fig, smc_overlay, view_limit, plot_df, clamp_info)
+
+        # Style indicator panels
+        try:
+            _style_indicator_panels(axlist, rsi_values=_rsi_vals, fig=fig)
+        except Exception as e:
+            logging.error(f"❌ Indicator panels style error (alert chart): {repr(e)}")
+
+        # OB strips
+        if smc_overlay:
+            try:
+                _draw_above_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Above OB strip error (alert chart): {repr(e)}")
+            try:
+                _draw_below_obs_strip(fig, smc_overlay, plot_df, axlist)
+            except Exception as e:
+                logging.error(f"❌ Below OB strip error (alert chart): {repr(e)}")
+
+        # Date labels
+        _apply_date_labels_main(ax, fig, plot_df, view_limit, axlist=axlist)
+
+        # Nuke offset text
+        from matplotlib.ticker import ScalarFormatter as _SF
+        for _ax in axlist:
+            _fmt = _ax.yaxis.get_major_formatter()
+            if isinstance(_fmt, _SF):
+                _fmt.set_useOffset(False)
+            _ot = _ax.yaxis.get_offset_text()
+            _ot.set_visible(False)
+            _ot.set_text("")
+
+        fig.savefig(file_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
+
+    except Exception as e:
+        logging.error(f"❌ Error generating alert chart {symbol}: {repr(e)}")
+        return None
+    finally:
+        if fig:
+            fig.clf()
+        plt.close('all')
+        gc.collect()
+
+    if os.path.exists(file_path):
+        return file_path
+    return None

@@ -9,6 +9,19 @@ import os
 import json
 from config import BOT_TOKEN, GROUP_CHAT_ID, CHAT_ID
 
+# --- MANUAL ALERT CONVERSATION STATE ---
+# {chat_id: {step, symbol, tf, prices, mode, date_mode}}
+_manual_alert_state = {}
+
+def get_manual_alert_state(chat_id):
+    return _manual_alert_state.get(chat_id)
+
+def set_manual_alert_state(chat_id, state):
+    _manual_alert_state[chat_id] = state
+
+def clear_manual_alert_state(chat_id):
+    _manual_alert_state.pop(chat_id, None)
+
 # --- OPENROUTER FREE MODELS (dynamic) ---
 _or_free_models_cache = {"models": [], "ts": 0}
 

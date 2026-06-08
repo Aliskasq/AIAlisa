@@ -569,6 +569,84 @@ async def handle_callback_query(app_session, update):
         return
 
     # ------------------------------------------------------------------ #
+    # MANUAL TRENDLINE ALERT CALLBACKS (malert_ prefix)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("malert_"):
+        from core.tg_state import get_manual_alert_state, set_manual_alert_state, clear_manual_alert_state
+
+        ma_state = get_manual_alert_state(chat_id)
+
+        # Answer callback immediately
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id, "text": "✅"},
+        )
+
+        # --- Timeframe selection ---
+        if cb_data.startswith("malert_tf_"):
+            if not ma_state or ma_state.get('step') != 'awaiting_tf':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            tf_val = cb_data.replace("malert_tf_", "").upper()
+            tf_map_cb = {"15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D"}
+            tf_label = tf_map_cb.get(tf_val, "4H")
+            ma_state['tf'] = tf_label
+            ma_state['step'] = 'awaiting_prices'
+            set_manual_alert_state(chat_id, ma_state)
+            short_sym = ma_state['symbol'].replace("USDT", "")
+            await send_response(app_session, chat_id,
+                f"⏱ TF: *{tf_label}*\n\n"
+                f"Введи две цены через пробел:\n"
+                f"Например: `69500 67200`",
+                parse_mode="Markdown")
+            return
+
+        # --- Mode selection (high / low / body / date) ---
+        if cb_data.startswith("malert_mode_"):
+            if not ma_state or ma_state.get('step') != 'awaiting_mode':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            mode = cb_data.replace("malert_mode_", "")
+
+            if mode == "date":
+                # Show sub-buttons for date mode
+                ma_state['step'] = 'awaiting_date_mode'
+                set_manual_alert_state(chat_id, ma_state)
+                date_kb = {"inline_keyboard": [
+                    [{"text": "⬆️ Верх тела (max O/C)", "callback_data": "malert_date_top"},
+                     {"text": "⬇️ Низ тела (min O/C)", "callback_data": "malert_date_bottom"}],
+                ]}
+                await send_response(app_session, chat_id,
+                    "📅 *По датам*\n\nОт какой части тела свечи строить?",
+                    reply_markup=date_kb, parse_mode="Markdown")
+                return
+
+            # For high/low/body — process immediately
+            from core.tg_commands import _finalize_manual_alert
+            msg_id_cb = cq.get("message", {}).get("message_id")
+            await _finalize_manual_alert(app_session, chat_id, msg_id_cb, ma_state, mode)
+            return
+
+        # --- Date sub-mode (top/bottom body) ---
+        if cb_data.startswith("malert_date_"):
+            if not ma_state or ma_state.get('step') != 'awaiting_date_mode':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            date_mode = cb_data.replace("malert_", "")  # "date_top" or "date_bottom"
+            ma_state['date_mode'] = date_mode
+            ma_state['step'] = 'awaiting_dates'
+            set_manual_alert_state(chat_id, ma_state)
+            body_label = "верх тела" if date_mode == "date_top" else "низ тела"
+            await send_response(app_session, chat_id,
+                f"📅 Режим: *{body_label}*\n\n"
+                f"Введи две даты через дефис:\n"
+                f"`15.05.26 18:15-16.05.26 21:45`",
+                parse_mode="Markdown")
+            return
+
+        return  # unknown malert_ callback
+
+    # ------------------------------------------------------------------ #
     # 1. Square Integration (Admin check)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("sq_"):

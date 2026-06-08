@@ -17,6 +17,7 @@ import aiohttp
 
 # --- AI AND INDICATOR IMPORTS ---
 from core.tg_listener import telegram_polling_loop, auto_trend_sender, price_alert_monitor, get_chat_lang
+from core.tg_background import manual_alert_monitor
 from core.indicators import calculate_binance_indicators
 from agent.analyzer import ask_ai_analysis
 from agent.square_publisher import auto_square_poster
@@ -154,6 +155,9 @@ async def main():
 
         # Start log cleanup task (23:55 UTC daily)
         asyncio.create_task(log_cleanup_task())
+
+        # Start manual trendline alert monitor (checks every 60s)
+        asyncio.create_task(manual_alert_monitor(session))
 
 
 

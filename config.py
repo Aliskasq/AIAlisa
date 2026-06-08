@@ -647,3 +647,24 @@ def save_price_alerts(alerts):
             json.dump(alerts, f, indent=2)
     except Exception as e:
         logging.error(f"Error writing price alerts: {e}")
+
+
+# --- MANUAL TRENDLINE ALERTS ---
+MANUAL_ALERTS_FILE = "data/manual_alerts.json"
+
+def load_manual_alerts():
+    if os.path.exists(MANUAL_ALERTS_FILE):
+        try:
+            with open(MANUAL_ALERTS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+def save_manual_alerts(alerts):
+    try:
+        os.makedirs(os.path.dirname(MANUAL_ALERTS_FILE), exist_ok=True)
+        with open(MANUAL_ALERTS_FILE, "w") as f:
+            json.dump(alerts, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing manual alerts: {e}")
