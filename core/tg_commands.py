@@ -181,19 +181,27 @@ async def handle_message(app_session, update):
         # Sub-commands: list / clear
         if remaining_ma in ("список", "list"):
             alerts = load_manual_alerts()
-            user_alerts = [a for a in alerts if a.get("chat_id") == chat_id]
+            user_alerts = [(i, a) for i, a in enumerate(alerts) if a.get("chat_id") == chat_id]
             if not user_alerts:
                 await send_response(app_session, chat_id,
                     "📭 Нет активных ручных линий.\n\nИспользуй: `алерт BTC`",
                     msg_id, parse_mode="Markdown")
             else:
                 lines_txt = ["📐 *Ручные алерт-линии:*\n"]
-                for i, a in enumerate(user_alerts, 1):
+                delete_buttons = []
+                for num, (global_idx, a) in enumerate(user_alerts, 1):
                     short = a["symbol"].replace("USDT", "")
                     lines_txt.append(
-                        f"{i}. `${short}` {a['tf']} | A={a['price_a']:.2f} B={a['price_b']:.2f} | {a.get('mode', '?')}"
+                        f"{num}. `${short}` {a['tf']} | A={a['price_a']:.8g} B={a['price_b']:.8g} | {a.get('mode', '?')}"
                     )
-                await send_response(app_session, chat_id, "\n".join(lines_txt), msg_id, parse_mode="Markdown")
+                    delete_buttons.append(
+                        {"text": f"❌ {num}", "callback_data": f"malert_del_{global_idx}"}
+                    )
+                # Group buttons in rows of 4
+                button_rows = [delete_buttons[i:i+4] for i in range(0, len(delete_buttons), 4)]
+                kb = {"inline_keyboard": button_rows} if button_rows else None
+                await send_response(app_session, chat_id, "\n".join(lines_txt), msg_id,
+                                    reply_markup=kb, parse_mode="Markdown")
             return
 
         if remaining_ma in ("удалить", "очистить", "clear"):

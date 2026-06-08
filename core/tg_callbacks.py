@@ -644,6 +644,25 @@ async def handle_callback_query(app_session, update):
                 parse_mode="Markdown")
             return
 
+        # --- Delete specific alert ---
+        if cb_data.startswith("malert_del_"):
+            try:
+                del_idx = int(cb_data.replace("malert_del_", ""))
+                from config import load_manual_alerts, save_manual_alerts
+                alerts = load_manual_alerts()
+                if 0 <= del_idx < len(alerts):
+                    removed = alerts.pop(del_idx)
+                    save_manual_alerts(alerts)
+                    short = removed["symbol"].replace("USDT", "")
+                    await send_response(app_session, chat_id,
+                        f"✅ Линия удалена: `${short}` {removed['tf']}", parse_mode="Markdown")
+                else:
+                    await send_response(app_session, chat_id, "⚠️ Алерт не найден (возможно уже удалён).")
+            except Exception as e:
+                logging.error(f"❌ malert_del error: {repr(e)}")
+                await send_response(app_session, chat_id, "❌ Ошибка при удалении.")
+            return
+
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #

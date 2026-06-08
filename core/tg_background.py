@@ -185,29 +185,26 @@ async def price_alert_monitor(session: aiohttp.ClientSession):
 
 
 async def manual_alert_monitor(session: aiohttp.ClientSession):
-    """Background task: checks manual trendline alerts every 60 seconds for breakouts."""
+    """
+    Background task: checks manual trendline alerts every 5 minutes.
+    Loads 50 candles on 5m TF (weight=1 per symbol) and checks if ANY candle
+    touched the line (high/low vs line price). Any touch = immediate alert
+    to admin DM (CHAT_ID) with chart. No AI analysis.
+    """
     import math
+    import os
     import numpy as np
     import pandas as pd
+    from core.binance_api import fetch_klines
     from core.chart_drawer import draw_alert_chart
 
-    logging.info("📐 Manual alert monitor started.")
+    logging.info("📐 Manual alert monitor started (5m candles, every 5 min).")
+
     while True:
         try:
             alerts = load_manual_alerts()
             if not alerts:
-                await asyncio.sleep(60)
-                continue
-
-            # Batch price fetch
-            prices = {}
-            try:
-                async with session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
-                    if resp.status == 200:
-                        for t in await resp.json():
-                            prices[t["symbol"]] = float(t["price"])
-            except Exception:
-                await asyncio.sleep(60)
+                await asyncio.sleep(300)
                 continue
 
             triggered = []
@@ -215,57 +212,77 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
 
             for alert in alerts:
                 sym = alert["symbol"]
-                current_price = prices.get(sym)
-                if current_price is None:
-                    remaining.append(alert)
-                    continue
-
-                # Calculate current line price
                 slope = alert.get("slope", 0)
                 intercept = alert.get("intercept", 0)
                 base_idx = alert.get("base_idx", 198)
                 base_open_time = alert.get("base_open_time", 0)
-                tf_ms = alert.get("tf_ms", 14400000)
+                alert_tf_ms = alert.get("tf_ms", 14400000)  # original TF in ms
 
-                now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                candles_passed = int((now_ms - base_open_time) / tf_ms)
-                if candles_passed < 0:
-                    candles_passed = 0
+                try:
+                    # Fetch 50 candles on 5m (weight = 1)
+                    raw_5m = await fetch_klines(session, sym, "5m", 50)
+                    if not raw_5m:
+                        remaining.append(alert)
+                        continue
 
-                current_math_x = base_idx + candles_passed
-                line_price_now = math.exp(slope * current_math_x + intercept)
+                    hit = False
+                    touch_price = 0
+                    touch_type = ""  # "wick" or "body"
 
-                # Determine breakout direction based on line slope
-                # Descending line (slope < 0) = resistance → breakout when price ABOVE
-                # Ascending line (slope > 0) = support → breakout when price BELOW
-                hit = False
-                if slope <= 0:
-                    # Resistance line — breakout above
-                    if current_price > line_price_now:
-                        hit = True
-                else:
-                    # Support line — breakout below
-                    if current_price < line_price_now:
-                        hit = True
+                    for candle in raw_5m:
+                        candle_open_time = int(candle['open_time'])
 
-                if hit:
-                    triggered.append((alert, current_price, line_price_now))
-                else:
+                        # Calculate how many ORIGINAL TF candles passed since base
+                        candles_passed = (candle_open_time - base_open_time) / alert_tf_ms
+                        if candles_passed < 0:
+                            continue
+                        current_math_x = base_idx + candles_passed
+
+                        # Line price at this 5m candle's time
+                        line_price = math.exp(slope * current_math_x + intercept)
+
+                        c_high = float(candle['high'])
+                        c_low = float(candle['low'])
+                        c_open = float(candle['open'])
+                        c_close = float(candle['close'])
+                        body_top = max(c_open, c_close)
+                        body_bot = min(c_open, c_close)
+
+                        # Touch detection: candle range crosses the line
+                        if slope <= 0:
+                            # Descending/flat line = resistance → touch when high ≥ line
+                            if c_high >= line_price:
+                                hit = True
+                                touch_price = c_close
+                                touch_type = "body" if body_top >= line_price else "wick"
+                                break
+                        else:
+                            # Ascending line = support → touch when low ≤ line
+                            if c_low <= line_price:
+                                hit = True
+                                touch_price = c_close
+                                touch_type = "body" if body_bot <= line_price else "wick"
+                                break
+
+                    if hit:
+                        triggered.append((alert, touch_price, line_price, touch_type))
+                    else:
+                        remaining.append(alert)
+
+                except Exception as e:
+                    logging.error(f"❌ Manual alert check error for {sym}: {repr(e)}")
                     remaining.append(alert)
 
-            # Process triggered alerts
-            for alert, current_price, line_price_now in triggered:
+            # Send alerts to admin DM (CHAT_ID)
+            for alert, touch_price, line_price, touch_type in triggered:
                 sym = alert["symbol"]
                 tf = alert["tf"]
-                chat_id = alert["chat_id"]
                 short_sym = sym.replace("USDT", "")
+                diff_pct = ((touch_price / line_price) - 1) * 100
 
-                diff_pct = ((current_price / line_price_now) - 1) * 100
-
-                # Fetch fresh data and draw chart
+                # Draw chart on original TF
                 chart_path = None
                 try:
-                    from core.binance_api import fetch_klines
                     tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
                     binance_interval = tf_map.get(tf, "4h")
                     raw = await fetch_klines(session, sym, binance_interval, 199)
@@ -281,31 +298,34 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 except Exception as e:
                     logging.error(f"❌ Manual alert chart error for {sym}: {repr(e)}")
 
-                direction = "📈 ВЫШЕ" if diff_pct > 0 else "📉 НИЖЕ"
+                touch_emoji = "🔴" if touch_type == "body" else "🟡"
+                touch_label = "Тело пробило" if touch_type == "body" else "Тень коснулась"
                 notify_text = (
-                    f"🚨 *ПРОБОЙ РУЧНОЙ ЛИНИИ!*\n\n"
+                    f"{touch_emoji} *КАСАНИЕ РУЧНОЙ ЛИНИИ!*\n\n"
                     f"🪙 `${short_sym}` ({tf})\n"
-                    f"💰 Цена: `{current_price:.8g}`\n"
-                    f"📊 Линия: `{line_price_now:.8g}`\n"
-                    f"{direction} линии на {abs(diff_pct):.2f}%"
+                    f"💰 Цена: `{touch_price:.8g}`\n"
+                    f"📊 Линия: `{line_price:.8g}`\n"
+                    f"📐 {touch_label} ({diff_pct:+.2f}%)"
                 )
 
+                # Send to admin DM
+                target_chat = str(CHAT_ID)
                 try:
                     if chart_path:
-                        import os
                         photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                         with open(chart_path, 'rb') as f:
                             data = aiohttp.FormData()
-                            data.add_field('chat_id', str(chat_id))
+                            data.add_field('chat_id', target_chat)
                             data.add_field('caption', notify_text)
                             data.add_field('parse_mode', 'Markdown')
                             data.add_field('photo', f, filename=f"{sym}_malert.png", content_type='image/png')
                             async with session.post(photo_url, data=data, timeout=30) as resp:
                                 if resp.status != 200:
-                                    # Fallback to text
+                                    resp_text = await resp.text()
+                                    logging.error(f"❌ Manual alert photo error: {resp.status} - {resp_text}")
                                     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                                     await session.post(url, json={
-                                        "chat_id": chat_id, "text": notify_text, "parse_mode": "Markdown"
+                                        "chat_id": target_chat, "text": notify_text, "parse_mode": "Markdown"
                                     })
                         try:
                             if os.path.exists(chart_path):
@@ -315,8 +335,9 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                     else:
                         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                         await session.post(url, json={
-                            "chat_id": chat_id, "text": notify_text, "parse_mode": "Markdown"
+                            "chat_id": target_chat, "text": notify_text, "parse_mode": "Markdown"
                         })
+                    logging.info(f"📐 Manual alert sent: {sym} ({tf}) — {touch_label}")
                 except Exception as e:
                     logging.error(f"❌ Manual alert notification error: {e}")
 
@@ -324,7 +345,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 save_manual_alerts(remaining)
                 logging.info(f"📐 {len(triggered)} manual alert(s) triggered, {len(remaining)} remaining.")
 
-            await asyncio.sleep(60)
+            await asyncio.sleep(300)  # 5 minutes
         except Exception as e:
             logging.error(f"❌ Manual alert monitor error: {e}")
-            await asyncio.sleep(60)
+            await asyncio.sleep(300)
