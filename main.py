@@ -54,6 +54,7 @@ class TradeLogFilter(logging.Filter):
         "Data ready", "After volume filter", "Starting AI queue",
         "parallel data fetch", "price_alert_monitor",
         "Monitor recheck loop started", "Monitor: 0 due",
+        "VOL PRICE:", "VOL WAIT:", "VOL REMOVED:",
     )
     def filter(self, record):
         msg = record.getMessage()
