@@ -446,6 +446,11 @@ async def main():
                                 filtered_queue.append(item)
                                 logging.info(f"✅ {item['symbol']}: vol OK (12h=${vol_result['vol_12h']:,.0f}, 1h=${vol_result['vol_1h']:,.0f})")
                             else:
+                                # Skip delisted/dead coins (zero volume everywhere)
+                                if vol_result["vol_12h"] == 0 and vol_result["vol_1h"] == 0:
+                                    logging.info(f"🗑️ {item['symbol']}: zero volume, skipping (likely delisted)")
+                                    alerts_to_remove.append(item["alert"])
+                                    continue
                                 # Failed volume — add to waitlist, remove alert
                                 add_to_volume_waitlist(
                                     item["symbol"], item.get("tf", "4H"), item["alert"],
@@ -717,6 +722,11 @@ async def main():
                         async def _check_one_vw(vw_item):
                             try:
                                 vol_result = await check_volume_pass(session, vw_item["symbol"])
+                                # Remove delisted/dead coins (zero volume)
+                                if vol_result["vol_12h"] == 0 and vol_result["vol_1h"] == 0:
+                                    remove_from_volume_waitlist(vw_item["key"])
+                                    logging.info(f"🗑️ VOL REMOVED: {vw_item['symbol']} (zero volume, likely delisted)")
+                                    return None
                                 if vol_result["pass"]:
                                     remove_from_volume_waitlist(vw_item["key"])
                                     vw_item["_current_price"] = vol_result.get("current_price", 0) or vw_item.get("_current_price", 0)
@@ -954,8 +964,8 @@ async def main():
                             import traceback
                             logging.error(traceback.format_exc())
 
-            # Cleanup volume waitlist at 23:58 UTC (full rescan at 00:00)
-            if now_utc.hour == 23 and now_utc.minute == 58:
+            # Cleanup volume waitlist at 23:55 UTC (full rescan at 00:00)
+            if now_utc.hour == 23 and now_utc.minute == 55:
                 clear_volume_waitlist()
                 logging.info("🧹 Volume waitlist cleared (23:58 UTC)")
 
