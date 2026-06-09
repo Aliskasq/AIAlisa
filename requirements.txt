@@ -6,7 +6,7 @@ numpy
 mplfinance
 matplotlib
 beautifulsoup4
-xgboost
-scikit-learn
-joblib
-
+python-dotenv
+python-telegram-bot
+pydantic
+openai
