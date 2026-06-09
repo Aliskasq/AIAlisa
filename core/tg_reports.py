@@ -1,14 +1,12 @@
 """
 tg_reports.py — Signal report builders (virtual bank, trailing stop checks).
-AI signals bank + ML predictions bank.
 """
 import asyncio
 import aiohttp
 import logging
 from datetime import datetime, timezone, timedelta
 from config import (load_breakout_log, load_virtual_bank, VIRTUAL_BANK_POSITION_SIZE,
-                     load_ml_breakout_log, load_ml_virtual_bank, TRAILING_STOP_PCT,
-                     load_sl_settings)
+                     TRAILING_STOP_PCT, load_sl_settings)
 from core.signal_pipeline import (check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles,
                                    check_fixed_atr_sl_tp, check_candle_trailing, check_ema_sl,
                                    check_btc_shield)
@@ -132,7 +130,7 @@ async def _batch_check_trailing(session: aiohttp.ClientSession, log: list,
                                  bank_name: str = "signals") -> dict:
     """
     For all entries in a breakout log, check stop via 5m candles.
-    bank_name: 'signals' or 'bankml' — selects settings.
+    bank_name: 'signals' — selects settings.
     Returns dict: symbol_tf → (status, close_price, peak_price, trailing_sl)
     """
     sem = asyncio.Semaphore(35)
@@ -451,37 +449,6 @@ async def build_signals_close_text(session: aiohttp.ClientSession, lang: str = "
     return _build_bank_report(log, bank, trailing_results, price_map, lang,
                                "Виртуальный банк (AI)", direction_key="ai_direction",
                                sl_key="ai_sl", is_close=True, bank_already_updated=bank_already_updated)
-
-
-# ============================
-# ML BANK
-# ============================
-
-async def build_ml_signals_text(session: aiohttp.ClientSession, lang: str = "ru") -> list:
-    """Build ML bank — live view."""
-    log = load_ml_breakout_log()
-    bank = load_ml_virtual_bank()
-    price_map = await _fetch_all_prices(session)
-    trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ml_direction", sl_key="ml_sl",
-                                                    bank_name="bankml")
-    return _build_bank_report(log, bank, trailing_results, price_map, lang,
-                               "Виртуальный банк (ML)", direction_key="ml_direction",
-                               sl_key="ml_sl", is_close=False)
-
-
-async def build_ml_signals_close_text(session: aiohttp.ClientSession, lang: str = "ru",
-                                       show_bank: bool = True, bank_already_updated: bool = False) -> list:
-    """Build ML bank — close snapshot."""
-    log = load_ml_breakout_log()
-    bank = load_ml_virtual_bank()
-    price_map = await _fetch_all_prices(session)
-    trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                    direction_key="ml_direction", sl_key="ml_sl",
-                                                    bank_name="bankml")
-    return _build_bank_report(log, bank, trailing_results, price_map, lang,
-                               "Виртуальный банк (ML)", direction_key="ml_direction",
-                               sl_key="ml_sl", is_close=True, bank_already_updated=bank_already_updated)
 
 
 # ============================

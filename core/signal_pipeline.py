@@ -6,7 +6,7 @@ AI verdict is the sole authority:
 - SKIP → no trade
 - Confidence < 62.5% → forced SKIP
 
-ML predictions tracked in separate ML bank.
+
 Trailing stop (3%) replaces fixed TP. Initial SL from AI (capped 10%).
 """
 
@@ -92,34 +92,6 @@ def calculate_atr_sl_tp(indicators: dict, direction: str, entry_price: float) ->
         "tp_pct": round(tp_pct, 2),
         "rr_ratio": round(tp_distance / sl_distance, 2) if sl_distance > 0 else 0
     }
-
-
-def calculate_ml_sl(indicators: dict, direction: str, entry_price: float) -> float:
-    """
-    Calculate ML SL based on ATR, clamped between 5% and 10%.
-    
-    SL = 1.5 × ATR, but min 5%, max 10% from entry.
-    Returns: SL price level.
-    """
-    from config import ML_SL_ATR_MULT, ML_SL_MIN_PCT, ML_SL_MAX_PCT
-    
-    atr = indicators.get("atr14_value", 0)
-    if not atr or atr <= 0:
-        atr = entry_price * 0.05  # fallback: 5%
-    
-    sl_distance = ML_SL_ATR_MULT * atr
-    
-    # Clamp between 5% and 10%
-    sl_min = entry_price * (ML_SL_MIN_PCT / 100)
-    sl_max = entry_price * (ML_SL_MAX_PCT / 100)
-    sl_distance = max(sl_min, min(sl_distance, sl_max))
-    
-    if direction == "LONG":
-        return round(entry_price - sl_distance, 8)
-    elif direction == "SHORT":
-        return round(entry_price + sl_distance, 8)
-    else:
-        return 0
 
 
 async def check_btc_shield(session, ema_period: int = 25) -> dict:

@@ -46,8 +46,6 @@ from core.tg_state import (                        # noqa: F401
 from core.tg_reports import (                      # noqa: F401
     build_signals_text,
     build_signals_close_text,
-    build_ml_signals_text,
-    build_ml_signals_close_text,
 )
 
 from core.tg_background import (                   # noqa: F401

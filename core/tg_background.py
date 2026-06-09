@@ -9,66 +9,24 @@ from datetime import datetime, timezone, timedelta
 from config import (BOT_TOKEN, CHAT_ID, load_breakout_log, load_virtual_bank,
                      update_bank_with_trades, VIRTUAL_BANK_POSITION_SIZE,
                      load_manual_alerts, save_manual_alerts,
-                     load_ml_breakout_log, load_ml_virtual_bank,
-                     update_ml_bank_with_trades, load_price_alerts, save_price_alerts)
+                     load_price_alerts, save_price_alerts)
 from core.tg_state import send_response
-from core.tg_reports import (build_signals_close_text, build_ml_signals_close_text,
+from core.tg_reports import (build_signals_close_text,
                               _batch_check_trailing, _fetch_all_prices, calc_trailing_pnl_for_daily)
 
 
-async def _daily_ml_close(session: aiohttp.ClientSession):
-    """23:58 — ML bank daily close: update ML bank, send report, clear log."""
-    try:
-        log = load_ml_breakout_log()
-        if not log:
-            logging.info("📭 No ML signals to report.")
-            return
-
-        price_map = await _fetch_all_prices(session)
-        bank = load_ml_virtual_bank()
-        trailing_results = await _batch_check_trailing(session, log, price_map,
-                                                        direction_key="ml_direction", sl_key="ml_sl",
-                                                        bank_name="bankml")
-
-        trades_pnl = calc_trailing_pnl_for_daily(log, trailing_results, price_map, bank,
-                                                   direction_key="ml_direction")
-        update_ml_bank_with_trades(trades_pnl)
-
-        chunks = await build_ml_signals_close_text(session, lang="ru", show_bank=True, bank_already_updated=True)
-        if chunks:
-            chunks[0] = f"🕐 *ML ежедневный итог (23:58 UTC)*\n\n{chunks[0]}"
-
-        tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        for chunk in chunks:
-            await session.post(tg_url, json={"chat_id": CHAT_ID, "text": chunk, "parse_mode": "Markdown"})
-            await asyncio.sleep(0.5)
-
-        from config import clear_ml_breakout_log
-        clear_ml_breakout_log()
-        logging.info(f"✅ ML daily close: {len(trades_pnl)} trades processed, log cleared.")
-    except Exception as e:
-        logging.error(f"❌ ML daily close error: {e}")
-
-
 async def auto_trend_sender(session: aiohttp.ClientSession):
-    """Background task: 23:58 ML close, 23:59 AI close — daily summary to admin DM."""
+    """Background task: 23:59 AI close — daily summary to admin DM."""
     while True:
         try:
             now = datetime.now(timezone.utc)
-            # Target: 23:58 for ML close
-            target_ml = now.replace(hour=23, minute=58, second=0, microsecond=0)
-            if target_ml <= now:
-                target_ml += timedelta(days=1)
+            target = now.replace(hour=23, minute=59, second=15, microsecond=0)
+            if target <= now:
+                target += timedelta(days=1)
 
-            sleep_sec = (target_ml - now).total_seconds()
-            logging.info(f"📊 Daily summary sleeping {sleep_sec:.0f}s until {target_ml.strftime('%Y-%m-%d %H:%M')} UTC")
+            sleep_sec = (target - now).total_seconds()
+            logging.info(f"📊 Daily summary sleeping {sleep_sec:.0f}s until {target.strftime('%Y-%m-%d %H:%M')} UTC")
             await asyncio.sleep(sleep_sec)
-
-            # === 23:58 — ML BANK CLOSE ===
-            await _daily_ml_close(session)
-
-            # Wait 75 seconds for 23:59:15
-            await asyncio.sleep(75)
 
             # === 23:59 — AI SIGNALS CLOSE ===
             log = load_breakout_log()

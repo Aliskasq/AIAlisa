@@ -45,7 +45,7 @@ async def _slm_edit(session, chat_id, msg_id, text, kb, cq_id, toast=""):
 
 
 def _slm_bank_prefix(bank_key):
-    return "slm_s" if bank_key == "signals" else "slm_m"
+    return "slm_s"
 
 
 def _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names):
@@ -53,7 +53,7 @@ def _slm_render_bank_menu(bank_key, bank_label, bs, _mode_names):
     p = _slm_bank_prefix(bank_key)
     mode = bs["mode"]
 
-    modes = ["stopai", "trailing", "fixed", "ema"] if bank_key == "signals" else ["trailing", "fixed", "ema"]
+    modes = ["stopai", "trailing", "fixed", "ema"]
     rows = []
     row = []
     for m in modes:
@@ -267,9 +267,6 @@ async def handle_callback_query(app_session, update):
             if parts[1] == "s":
                 bank_key = "signals"
                 bank_label = "📊 Signals"
-            elif parts[1] == "m":
-                bank_key = "bankml"
-                bank_label = "🤖 BankML"
 
         # --- BTC SHIELD TOGGLE: slm_btc ---
         if len(parts) >= 2 and parts[1] == "btc":
@@ -282,17 +279,14 @@ async def handle_callback_query(app_session, update):
             toast = f"🅱️ BTC Shield: {_shield_names[new_val]}"
 
             sig_mode = settings["signals"]["mode"]
-            ml_mode = settings["bankml"]["mode"]
             text = (
                 f"⚙️ *Настройки стоп-лосса*\n\n"
                 f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
-                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
                 f"🅱️ *BTC Shield:* {_shield_names[new_val]}\n\n"
                 f"Выберите банк для настройки:"
             )
             kb = {"inline_keyboard": [
-                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
-                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}],
+                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"}],
                 [{"text": f"🅱️ BTC Shield: {_shield_names[new_val]}", "callback_data": "slm_btc"}]
             ]}
             await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, toast)
@@ -317,13 +311,6 @@ async def handle_callback_query(app_session, update):
         action = parts[2] if len(parts) > 2 else ""
 
         if action in ("stopai", "trailing", "fixed", "ema"):
-            # For bankml, no stopai
-            if bank_key == "bankml" and action == "stopai":
-                await app_session.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                    json={"callback_query_id": cq_id, "text": "⛔️ StopAI только для Signals", "show_alert": True},
-                )
-                return
             bs["mode"] = action
             save_sl_settings(settings)
             toast = f"✅ {bank_label}: {_mode_names[action]}"
@@ -349,19 +336,16 @@ async def handle_callback_query(app_session, update):
         # --- BACK TO TOP: slm_s_top ---
         if action == "top":
             sig_mode = settings["signals"]["mode"]
-            ml_mode = settings["bankml"]["mode"]
             btc_shield = settings.get("btc_shield", "off")
             _shield_names = {"off": "ВЫКЛ", "soft": "Soft"}
             text = (
                 f"⚙️ *Настройки стоп-лосса*\n\n"
                 f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
-                f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
                 f"🅱️ *BTC Shield:* {_shield_names.get(btc_shield, btc_shield)}\n\n"
                 f"Выберите банк для настройки:"
             )
             kb = {"inline_keyboard": [
-                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
-                 {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"}],
+                [{"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"}],
                 [{"text": f"🅱️ BTC Shield: {_shield_names.get(btc_shield, btc_shield)}", "callback_data": "slm_btc"}]
             ]}
             await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)

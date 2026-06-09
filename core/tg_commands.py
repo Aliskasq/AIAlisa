@@ -13,8 +13,6 @@ from config import (
     BOT_TOKEN, load_breakout_log, load_price_alerts, save_price_alerts,
     load_virtual_bank, save_virtual_bank, reset_virtual_bank,
     VIRTUAL_BANK_POSITION_SIZE,
-    load_ml_breakout_log, load_ml_virtual_bank,
-    reset_ml_virtual_bank,
     load_manual_alerts, save_manual_alerts,
 )
 import config as _cfg
@@ -47,7 +45,6 @@ from core.tg_state import (
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
-    build_ml_signals_text, build_ml_signals_close_text,
 )
 
 
@@ -447,9 +444,7 @@ async def handle_message(app_session, update):
                 "🔄 `/signals clear` — reset bank to $10k\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
                 "📐 `/smc` — настройки SMC: режим, OB блоки\n"
-                "🧠 `/bankml` — ML bank & trades\n"
-                "🔒 `/bankml close` — close all ML positions now\n"
-                "🔄 `/bankml clear` — reset ML bank to $10k\n"
+
                 "🧠 `/models` — AI engine\n"
                 "🧠 `/models all` — all OpenRouter models\n"
                 "🧠 `/models <id>` — switch to any model\n"
@@ -464,16 +459,7 @@ async def handle_message(app_session, update):
 
                 "🔑 `/testapi AIzaSy...` — test Gemini key\n"
                 "🔑 `/testall` — test all AI keys\n\n"
-                "🧠 *ML (XGBoost):*\n"
-                "🧠 `/mltrain` — обучить все 3 XGBoost модели\n"
-                "🧠 `/mltrain --tf 4h` — только 4H\n"
-                "🧠 `/mltrain --dry-run` — статистика без обучения\n"
-                "📊 `/mlstatus` — модели, точность, cron\n"
-                "⏰ `/mlcron 4ч ср+вс 03:45` — 4H по расписанию\n"
-                "⏰ `/mlcron 1ч+15м daily 03:20` — 1H+15m ежедневно\n"
-                "⏰ `/mlcron all ср+вс 04:00` — все модели\n"
-                "⏰ `/mlcron off` — отключить cron\n"
-                "⏰ `/mlcron off 4h` — отключить только 4H"
+
             )
         await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
         return
@@ -899,7 +885,6 @@ async def handle_message(app_session, update):
         from config import load_sl_settings
         s = load_sl_settings()
         sig_mode = s["signals"]["mode"]
-        ml_mode = s["bankml"]["mode"]
         btc_shield = s.get("btc_shield", "off")
 
         _mode_names = {"stopai": "🎯 StopAI", "trailing": "🔄 Trailing",
@@ -909,14 +894,12 @@ async def handle_message(app_session, update):
         msg_text = (
             f"⚙️ *Настройки стоп-лосса*\n\n"
             f"📊 *Signals:* {_mode_names.get(sig_mode, sig_mode)}\n"
-            f"🤖 *BankML:* {_mode_names.get(ml_mode, ml_mode)}\n"
             f"🅱️ *BTC Shield:* {_shield_names.get(btc_shield, btc_shield)}\n\n"
             f"Выберите банк для настройки:"
         )
         kb = {"inline_keyboard": [
             [
                 {"text": f"📊 Signals ({_mode_names.get(sig_mode, '?')})", "callback_data": "slm_s"},
-                {"text": f"🤖 BankML ({_mode_names.get(ml_mode, '?')})", "callback_data": "slm_m"},
             ],
             [
                 {"text": f"🅱️ BTC Shield: {_shield_names.get(btc_shield, btc_shield)}", "callback_data": "slm_btc"},
@@ -1024,47 +1007,6 @@ async def handle_message(app_session, update):
                 await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
         except Exception as e:
             logging.error(f"❌ /signals error: {e}")
-            await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
-        return
-
-    # ==========================================
-    # ML BANK: /bankml
-    # ==========================================
-    if text.startswith("/bankml"):
-        if not is_admin(msg):
-            deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
-            await send_response(app_session, chat_id, deny, msg_id)
-            return
-
-        bm_parts = text.split()
-        if len(bm_parts) >= 2 and bm_parts[1] in ("clear", "reset", "сброс"):
-            reset_ml_virtual_bank()
-            await send_response(app_session, chat_id,
-                "🔄 *ML банк сброшен!*\n\n"
-                "💰 Баланс: `$10,000.00`\n"
-                "📊 All-time статистика обнулена\n"
-                "📋 Сегодняшние сигналы остались в списке",
-                msg_id, parse_mode="Markdown")
-            return
-
-        if len(bm_parts) >= 2 and bm_parts[1] in ("close", "закрыть"):
-            try:
-                chunks = await build_ml_signals_close_text(app_session, lang=lang_pref)
-                for i, chunk in enumerate(chunks):
-                    rid = msg_id if i == 0 else None
-                    await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
-            except Exception as e:
-                logging.error(f"❌ /bankml close error: {e}")
-                await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
-            return
-
-        try:
-            chunks = await build_ml_signals_text(app_session, lang=lang_pref)
-            for i, chunk in enumerate(chunks):
-                rid = msg_id if i == 0 else None
-                await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
-        except Exception as e:
-            logging.error(f"❌ /bankml error: {e}")
             await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
         return
 
@@ -1282,323 +1224,6 @@ async def handle_message(app_session, update):
     # ==========================================
     # CHART ANALYSIS (scan / check / посмотри …)
     # ==========================================
-    # ==========================================
-    # ML TRAINING COMMANDS (/mltrain, /mlstatus, /mlcron)
-    # ==========================================
-    if text.startswith("/mltrain"):
-        if not is_admin(msg):
-            await send_response(app_session, chat_id, "⛔ Admin only", msg_id)
-            return
-        
-        parts = text.split()
-        tf_arg = None
-        dry_run = "--dry-run" in text or "--dry" in text
-        for p in parts[1:]:
-            if p.lower() in ("4h", "1h", "15m"):
-                tf_arg = p.lower()
-        
-        status_text = "🧠 ML обучение запущено"
-        if tf_arg:
-            status_text += f" (только {tf_arg.upper()})"
-        if dry_run:
-            status_text += " [dry-run]"
-        status_text += "\n⏳ Это займёт 5-15 минут..."
-        await send_response(app_session, chat_id, status_text, msg_id)
-        
-        # Run trainer in background subprocess
-        import subprocess
-        cmd = ["python3", "-m", "ml.trainer"]
-        if tf_arg:
-            cmd.extend(["--tf", tf_arg])
-        if dry_run:
-            cmd.append("--dry-run")
-        
-        async def _run_ml_train():
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd, cwd="/root/AIAlisa",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT
-                )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3600)
-                output = stdout.decode("utf-8", errors="ignore") if stdout else ""
-                
-                # Parse last lines for summary
-                lines = output.strip().split("\n")
-                summary_lines = [l for l in lines[-15:] if any(k in l for k in ["Training complete", "acc", "pairs", "samples", "DRY RUN", "error", "❌"])]
-                summary = "\n".join(summary_lines[-8:]) if summary_lines else "Завершено (детали в ml/train.log)"
-                
-                if proc.returncode == 0:
-                    result_text = f"✅ ML обучение завершено!\n\n{summary}"
-                    # Reload models in running bot
-                    try:
-                        from ml.engine import get_ml_engine
-                        engine = get_ml_engine()
-                        engine.load_models()
-                        result_text += "\n\n🔄 Модели перезагружены в боте"
-                    except Exception:
-                        result_text += "\n\n⚠️ Рестартни бота чтобы подхватить модели"
-                else:
-                    result_text = f"❌ ML обучение завершилось с ошибкой (код {proc.returncode})\n\n{summary}"
-                
-                await send_response(app_session, chat_id, result_text, msg_id)
-            except asyncio.TimeoutError:
-                await send_response(app_session, chat_id, "❌ ML обучение: timeout (>60 мин)", msg_id)
-            except Exception as e:
-                await send_response(app_session, chat_id, f"❌ ML ошибка: {e}", msg_id)
-        
-        asyncio.create_task(_run_ml_train())
-        return
-
-    if text.startswith("/mlstatus"):
-        import json as _json
-        import os as _os
-        stats_path = "/root/AIAlisa/ml/models/train_stats.json"
-        try:
-            from ml.engine import get_ml_engine
-            engine = get_ml_engine()
-            
-            status_lines = ["🧠 *ML Status*\n"]
-            
-            if engine.is_ready:
-                status_lines.append(f"✅ Модели загружены: {', '.join(engine.models.keys())}")
-            else:
-                status_lines.append("⚠️ Модели не загружены (обучение не запускалось)")
-            
-            if _os.path.exists(stats_path):
-                with open(stats_path) as f:
-                    stats = _json.load(f)
-                status_lines.append(f"\n📅 Последнее обучение: {stats.get('trained_at', '?')}")
-                status_lines.append(f"⏱ Время: {stats.get('total_elapsed_min', '?')} мин")
-                for tf, s in stats.get("timeframes", {}).items():
-                    if "error" in s:
-                        status_lines.append(f"  {tf}: ❌ {s['error']}")
-                    elif s.get("dry_run"):
-                        status_lines.append(f"  {tf}: {s['pairs']} пар, {s['samples']} сэмплов (dry-run)")
-                    elif "models" in s:
-                        status_lines.append(f"\n  *{tf}*: {s['pairs']} пар, {s['samples_total']} сэмплов")
-                        models = s.get("models", {})
-                        xgb = models.get("xgb")
-                        if xgb and "accuracy" in xgb:
-                            status_lines.append(f"    XGB: {xgb['accuracy']}% точность")
-                            top = xgb.get("top_features", {})
-                            if top:
-                                top3 = ", ".join(list(top.keys())[:3])
-                                status_lines.append(f"      топ фичи: {top3}")
-                    else:
-                        # Legacy single-model format
-                        status_lines.append(f"  {tf}: {s.get('accuracy', '?')}% точность, {s['pairs']} пар, {s['samples_total']} сэмплов")
-                        top = s.get("top_features", {})
-                        if top:
-                            top3 = ", ".join(list(top.keys())[:3])
-                            status_lines.append(f"      топ фичи: {top3}")
-            else:
-                status_lines.append("\n📊 Статистика обучения: нет данных")
-            
-            # Cron info
-            try:
-                import subprocess
-                cron_out = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
-                ml_cron = [l.strip() for l in cron_out.split("\n") if "ml.trainer" in l and not l.startswith("#")]
-                if ml_cron:
-                    status_lines.append(f"\n⏰ Cron ({len(ml_cron)}):")
-                    for _cl in ml_cron:
-                        status_lines.append(f"  `{_cl}`")
-                else:
-                    status_lines.append("\n⏰ Cron: не настроен")
-            except Exception:
-                status_lines.append("\n⏰ Cron: не удалось проверить")
-            
-            await send_response(app_session, chat_id, "\n".join(status_lines), msg_id, parse_mode="Markdown")
-        except Exception as e:
-            await send_response(app_session, chat_id, f"❌ ML status error: {e}", msg_id)
-        return
-
-    if text.startswith("/mlcron"):
-        if not is_admin(msg):
-            await send_response(app_session, chat_id, "⛔ Admin only", msg_id)
-            return
-        
-        parts = text.split()
-        
-        if len(parts) == 1:
-            # Show current cron + help
-            help_text = (
-                "⏰ *ML Cron — расписание обучения*\n\n"
-                "*По таймфреймам:*\n"
-                "`/mlcron 4ч ср+вс 03:45` — 4H модель\n"
-                "`/mlcron 1ч+15м daily 03:20` — 1H и 15m\n"
-                "`/mlcron 4h wed+sun 03:45` — EN формат\n"
-                "`/mlcron 1h+15m пн+вт+ср+чт+пт+сб+вс 03:20`\n\n"
-                "*Все модели разом:*\n"
-                "`/mlcron all ср+вс 04:00` — все 3 модели\n"
-                "`/mlcron all daily 04:00` — каждый день\n\n"
-                "*Управление:*\n"
-                "`/mlcron off` — отключить всё\n"
-                "`/mlcron off 4h` — отключить только 4H\n\n"
-                "Текущее расписание: `/mlstatus`"
-            )
-            await send_response(app_session, chat_id, help_text, msg_id, parse_mode="Markdown")
-            return
-        
-        import subprocess
-        
-        # Day name mapping (EN + RU)
-        day_map = {
-            "mon": "1", "tue": "2", "wed": "3", "thu": "4",
-            "fri": "5", "sat": "6", "sun": "0",
-            "пн": "1", "вт": "2", "ср": "3", "чт": "4",
-            "пт": "5", "сб": "6", "вс": "0",
-            "daily": "*", "ежедневно": "*", "каждыйдень": "*",
-        }
-        
-        # Timeframe aliases (RU + EN)
-        tf_aliases = {
-            "4h": "4h", "4ч": "4h",
-            "1h": "1h", "1ч": "1h",
-            "15m": "15m", "15м": "15m", "15мин": "15m",
-            "all": "all", "все": "all", "всё": "all",
-        }
-        
-        # /mlcron off [tf]
-        if parts[1].lower() == "off":
-            tf_filter = None
-            if len(parts) >= 3:
-                tf_filter = tf_aliases.get(parts[2].lower())
-            
-            try:
-                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
-                if tf_filter and tf_filter != "all":
-                    # Remove only specific TF cron
-                    new_lines = [l for l in current.split("\n") if not (f"--tf {tf_filter}" in l and "ml.trainer" in l) and l.strip()]
-                else:
-                    # Remove all ML cron entries
-                    new_lines = [l for l in current.split("\n") if "ml.trainer" not in l and l.strip()]
-                new_cron = "\n".join(new_lines) + "\n" if new_lines else ""
-                subprocess.run(["crontab", "-"], input=new_cron, text=True, check=True)
-                if tf_filter and tf_filter != "all":
-                    await send_response(app_session, chat_id, f"✅ ML cron для {tf_filter} отключён", msg_id)
-                else:
-                    await send_response(app_session, chat_id, "✅ ML cron отключён (все)", msg_id)
-            except subprocess.CalledProcessError:
-                await send_response(app_session, chat_id, "✅ Cron уже пуст", msg_id)
-            return
-        
-        # Parse: /mlcron <tf_spec> <days> <time>
-        # tf_spec: "4ч", "1ч+15м", "4h", "1h+15m", "all"
-        # days: "ср+вс", "daily", "пн+вт+ср+чт+пт+сб+вс"
-        # time: "03:45"
-        
-        if len(parts) < 3:
-            await send_response(app_session, chat_id, "❌ Формат: `/mlcron <модели> <дни> <время>`\nПример: `/mlcron 4ч ср+вс 03:45`", msg_id, parse_mode="Markdown")
-            return
-        
-        tf_spec = parts[1].lower()
-        schedule = parts[2].lower()
-        time_str = parts[3] if len(parts) > 3 else "04:00"
-        
-        # Parse time
-        try:
-            hour, minute = time_str.split(":")
-            hour, minute = int(hour), int(minute)
-            if not (0 <= hour < 24 and 0 <= minute < 60):
-                raise ValueError
-        except (ValueError, IndexError):
-            await send_response(app_session, chat_id, "❌ Формат времени: HH:MM (UTC)", msg_id)
-            return
-        
-        # Parse timeframes from tf_spec (e.g. "1ч+15м" → ["1h", "15m"])
-        tf_parts_raw = tf_spec.replace("-", "+").replace(",", "+").split("+")
-        tf_list = []
-        for tp in tf_parts_raw:
-            tp = tp.strip()
-            if tp in tf_aliases:
-                resolved = tf_aliases[tp]
-                if resolved == "all":
-                    tf_list = ["all"]
-                    break
-                tf_list.append(resolved)
-            else:
-                await send_response(app_session, chat_id,
-                    f"❌ Неизвестный таймфрейм: `{tp}`\n"
-                    f"Допустимо: 4h/4ч, 1h/1ч, 15m/15м, all/все",
-                    msg_id, parse_mode="Markdown")
-                return
-        
-        if not tf_list:
-            await send_response(app_session, chat_id, "❌ Не указаны таймфреймы", msg_id)
-            return
-        
-        # Parse days
-        if schedule in day_map and day_map[schedule] == "*":
-            dow = "*"
-        else:
-            days = schedule.replace("+", ",").split(",")
-            dow_parts = []
-            for d in days:
-                d = d.strip().lower()
-                if d in day_map:
-                    dow_parts.append(day_map[d])
-                else:
-                    await send_response(app_session, chat_id,
-                        f"❌ Неизвестный день: `{d}`\n"
-                        f"Допустимо: mon,tue,wed,thu,fri,sat,sun (или пн,вт,ср,чт,пт,сб,вс), daily/ежедневно",
-                        msg_id, parse_mode="Markdown")
-                    return
-            dow = ",".join(dow_parts)
-        
-        # Build cron lines
-        new_cron_lines = []
-        if "all" in tf_list:
-            # Single cron for all models
-            cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && python3 -m ml.trainer >> ml/train.log 2>&1"
-            new_cron_lines.append(cron_line)
-            remove_filter = lambda l: "ml.trainer" in l  # remove all old ML cron
-        else:
-            # Separate cron per TF, chained with &&
-            tf_cmds = " && ".join(f"python3 -m ml.trainer --tf {tf}" for tf in tf_list)
-            cron_line = f"{minute} {hour} * * {dow} cd /root/AIAlisa && {tf_cmds} >> ml/train.log 2>&1"
-            new_cron_lines.append(cron_line)
-            # Remove old cron for these specific TFs (and "all" entries)
-            remove_tfs = set(tf_list)
-            def remove_filter(l):
-                if "ml.trainer" not in l:
-                    return False
-                # Remove lines that train any of our TFs, or train all (no --tf flag)
-                for tf in remove_tfs:
-                    if f"--tf {tf}" in l:
-                        return True
-                # Also remove "all" lines (no --tf) if we're setting specific TFs
-                if "--tf" not in l and "ml.trainer" in l:
-                    return True
-                return False
-        
-        try:
-            try:
-                current = subprocess.check_output(["crontab", "-l"], stderr=subprocess.STDOUT, text=True)
-            except subprocess.CalledProcessError:
-                current = ""
-            
-            # Keep existing lines that don't conflict
-            kept_lines = [l for l in current.split("\n") if l.strip() and not remove_filter(l)]
-            kept_lines.extend(new_cron_lines)
-            final_cron = "\n".join(kept_lines) + "\n"
-            subprocess.run(["crontab", "-"], input=final_cron, text=True, check=True)
-            
-            tf_display = "+".join(tf_list) if "all" not in tf_list else "все"
-            cron_display = "\n".join(f"`{cl}`" for cl in new_cron_lines)
-            await send_response(app_session, chat_id, 
-                f"✅ ML cron установлен!\n\n"
-                f"📦 Модели: *{tf_display}*\n"
-                f"📅 Дни: {schedule}\n"
-                f"⏰ Время: {time_str} UTC\n\n"
-                f"{cron_display}",
-                msg_id, parse_mode="Markdown")
-        except Exception as e:
-            await send_response(app_session, chat_id, f"❌ Cron ошибка: {e}", msg_id)
-        return
-
-    # ==========================================
     # COIN ANALYSIS (посмотри/scan/check...)
     # ==========================================
     analysis_prefixes = [
@@ -1701,20 +1326,7 @@ async def handle_message(app_session, update):
                     "bot_token": BOT_TOKEN
                 }
 
-            # ML prediction for manual scan
-            _ml_result_scan = None
-            try:
-                from ml.engine import get_ml_engine
-                _ml_scan_engine = get_ml_engine()
-                if _ml_scan_engine.is_ready:
-                    _ind_4h_s = mtf_data.get("4H", last_row)
-                    _ind_1h_s = mtf_data.get("1H")
-                    _ind_15m_s = mtf_data.get("15m")
-                    _ml_result_scan = _ml_scan_engine.predict_all(_ind_4h_s, _ind_1h_s, _ind_15m_s)
-            except Exception:
-                pass
-
-            ai_msg = await ask_ai_analysis(symbol, tf_label, last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_scan)
+            ai_msg = await ask_ai_analysis(symbol, tf_label, last_row, lang=lang_pref, telegram_stream=tg_stream, extended=True, mode="extended", mtf_data=mtf_data, smc_data=smc_data)
 
             async def _delayed_delete(sess, cid, mid, delay=15):
                 await asyncio.sleep(delay)
@@ -1763,14 +1375,6 @@ async def handle_message(app_session, update):
                 _parts = ai_msg.split("---", 1)
                 ai_brief = _parts[0].strip()
                 ai_extended = _parts[1].strip() if len(_parts) > 1 and _parts[1].strip() else None
-
-            # Inject ML scores into brief caption
-            if ai_brief and _ml_result_scan and _ml_result_scan.get("available"):
-                try:
-                    from ml.inject import inject_ml_into_caption
-                    ai_brief = inject_ml_into_caption(ai_brief, _ml_result_scan)
-                except Exception:
-                    pass
 
             import re as _re
             _part_hdr = _re.compile(r'^={2,}\s*PART\s*\d*.*?={2,}\s*\n?', _re.IGNORECASE | _re.MULTILINE)
@@ -1929,27 +1533,7 @@ async def handle_message(app_session, update):
                 except Exception as e:
                     logging.error(f"❌ SMC look error: {e}")
 
-                # ML prediction for margin scan
-                _ml_result_margin = None
-                try:
-                    from ml.engine import get_ml_engine
-                    _ml_margin_engine = get_ml_engine()
-                    if _ml_margin_engine.is_ready:
-                        _ml_result_margin = _ml_margin_engine.predict_all(
-                            mtf_data.get("4H", last_row), mtf_data.get("1H"), mtf_data.get("15m")
-                        )
-                except Exception:
-                    pass
-
-                ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mode="scan", mtf_data=mtf_data, smc_data=smc_data, ml_data=_ml_result_margin)
-                
-                # Inject ML into response
-                if ai_msg and _ml_result_margin and _ml_result_margin.get("available"):
-                    try:
-                        from ml.inject import inject_ml_into_caption
-                        ai_msg = inject_ml_into_caption(ai_msg, _ml_result_margin)
-                    except Exception:
-                        pass
+                ai_msg = await ask_ai_analysis(coin_to_analyze, "4H", last_row, user_margin=margin_data, lang=lang_pref, mode="scan", mtf_data=mtf_data, smc_data=smc_data)
 
                 await send_response(app_session, chat_id, ai_msg, msg_id)
 

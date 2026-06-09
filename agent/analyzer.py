@@ -761,7 +761,7 @@ from agent.skills import (
     get_address_pnl_rank
 )
 
-async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None, ml_data: dict = None) -> str:
+async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None) -> str:
     """
     AI Agent: Executes Binance Market Intelligence Skills
     and sends aggregated context to OpenRouter.
@@ -1253,15 +1253,6 @@ SKIP RULES:
     positioning = clean_indic.get("positioning", {})
     positioning_text = format_positioning_text(positioning, price) if positioning else ""
 
-    # ML predictions block (if available)
-    ml_prompt_block = ""
-    if ml_data and ml_data.get("available"):
-        try:
-            from ml.inject import format_ml_for_prompt
-            ml_prompt_block = format_ml_for_prompt(ml_data)
-        except Exception:
-            pass
-
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
 [MULTI-TIMEFRAME DATA — check SCORECARD per TF]
@@ -1273,11 +1264,9 @@ SKIP RULES:
 
 [ADDITIONAL]
 {funding_text}
-{ml_prompt_block}
 INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
 SMC SCORECARD counts structure, order blocks, FVG, zones separately.
 MARKET POSITIONING shows crowd behavior (OI, L/S ratio, taker volume) — use to confirm or question your direction.
-{('ML MODEL provides XGBoost statistical predictions — use ML data to inform your analysis but DO NOT include 🧠 ML lines in your output. ML lines will be injected automatically after your response. If ML strongly disagrees with indicators, mention the divergence in your text analysis (e.g. "ML disagrees") but do NOT write the 🧠 ML score lines yourself.' if ml_prompt_block else '')}
 Combine ALL scorecards to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
 For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels. Use liquidation zones to identify potential price magnets.

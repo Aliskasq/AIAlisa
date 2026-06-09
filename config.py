@@ -67,24 +67,6 @@ _DEFAULT_SL_SETTINGS = {
             "ema_period": 25,    # 25 | 50
             "ema_tf": "15m"      # 5m | 15m
         }
-    },
-    "bankml": {
-        "mode": "trailing",  # trailing | fixed | ema (no stopai)
-        "trailing": {
-            "anchor": "low-1",
-            "activation_candles": 3,
-            "initial_sl_atr": 1.5,
-            "trail_atr": 1.0
-        },
-        "fixed": {
-            "sl_atr": 1.5,
-            "tp_atr": 3.0
-        },
-        "ema": {
-            "initial_sl_atr": 1.5,
-            "ema_period": 25,
-            "ema_tf": "15m"
-        }
     }
 }
 
@@ -98,7 +80,7 @@ def load_sl_settings() -> dict:
                 saved = json.load(f)
                 if "btc_shield" in saved:
                     defaults["btc_shield"] = saved["btc_shield"]
-                for bank in ("signals", "bankml"):
+                for bank in ("signals",):
                     if bank in saved:
                         defaults[bank]["mode"] = saved[bank].get("mode", defaults[bank]["mode"])
                         for sub in ("trailing", "fixed", "ema"):
@@ -174,9 +156,6 @@ BREAKOUT_LOG_FILE = "data/breakout_log.json"
 PRICE_ALERTS_FILE = "data/price_alerts.json"
 VIRTUAL_BANK_FILE = "data/virtual_bank.json"
 
-# --- ML virtual bank (tracks ML model predictions separately) ---
-ML_BREAKOUT_LOG_FILE = "data/breakout_log_ml.json"
-ML_VIRTUAL_BANK_FILE = "data/virtual_bank_ml.json"
 
 # --- VIRTUAL BANK ($10,000 starting) ---
 VIRTUAL_BANK_POSITION_SIZE = 100  # $ per trade
@@ -197,9 +176,7 @@ BREAKEVEN_TRIGGER_PCT = 5.0       # Move SL to breakeven+profit when price moves
 BREAKEVEN_PROFIT_PCT = 0.5        # Guaranteed profit % after breakeven trigger
 BREAKEVEN_TIME_TRIGGER_PCT = 3.0  # Alternative: +3% in our favor...
 BREAKEVEN_TIME_CANDLES = 20       # ...AND 20+ candles (5m) passed → also activate breakeven
-ML_SL_ATR_MULT = 1.5              # ML SL = 1.5 × ATR, clamped 5-10%
-ML_SL_MIN_PCT = 5.0               # ML SL minimum
-ML_SL_MAX_PCT = 10.0              # ML SL maximum
+
 
 def load_virtual_bank():
     if os.path.exists(VIRTUAL_BANK_FILE):
@@ -484,107 +461,6 @@ def add_breakout_entry(symbol, tf, breakout_price, current_price, line_type="", 
 
 def clear_breakout_log():
     save_breakout_log([])
-
-
-# ============================
-# ML VIRTUAL BANK (tracks ML model predictions)
-# ============================
-
-def load_ml_virtual_bank():
-    if os.path.exists(ML_VIRTUAL_BANK_FILE):
-        try:
-            with open(ML_VIRTUAL_BANK_FILE, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logging.error(f"Error reading ML virtual bank: {e}")
-    return {"starting_balance": 10000, "balance": 10000, "total_trades": 0, "total_wins": 0, "total_losses": 0, "history": []}
-
-def save_ml_virtual_bank(bank):
-    try:
-        os.makedirs(os.path.dirname(ML_VIRTUAL_BANK_FILE), exist_ok=True)
-        with open(ML_VIRTUAL_BANK_FILE, "w") as f:
-            json.dump(bank, f, indent=2)
-    except Exception as e:
-        logging.error(f"Error writing ML virtual bank: {e}")
-
-def reset_ml_virtual_bank():
-    bank = {
-        "starting_balance": 10000,
-        "balance": 10000,
-        "total_trades": 0,
-        "total_wins": 0,
-        "total_losses": 0,
-        "history": []
-    }
-    save_ml_virtual_bank(bank)
-    return bank
-
-def update_ml_bank_with_trades(trades_pnl):
-    bank = load_ml_virtual_bank()
-    for symbol, pnl_pct, pnl_dollar in trades_pnl:
-        bank["balance"] += pnl_dollar
-        bank["total_trades"] += 1
-        if pnl_pct >= 0:
-            bank["total_wins"] += 1
-        else:
-            bank["total_losses"] += 1
-        bank["history"].append({
-            "symbol": symbol,
-            "pnl_pct": round(pnl_pct, 2),
-            "pnl_dollar": round(pnl_dollar, 2),
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        })
-    bank["balance"] = round(bank["balance"], 2)
-    save_ml_virtual_bank(bank)
-    return bank
-
-def load_ml_breakout_log():
-    if os.path.exists(ML_BREAKOUT_LOG_FILE):
-        try:
-            with open(ML_BREAKOUT_LOG_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
-
-def save_ml_breakout_log(log):
-    try:
-        os.makedirs(os.path.dirname(ML_BREAKOUT_LOG_FILE), exist_ok=True)
-        with open(ML_BREAKOUT_LOG_FILE, "w") as f:
-            json.dump(log, f, indent=2)
-    except Exception as e:
-        logging.error(f"Error writing ML breakout log: {e}")
-
-def add_ml_breakout_entry(symbol, tf, current_price, ml_direction, ml_sl, indicators=None, atr_value=None):
-    """Add ML prediction to ML breakout log (deduplicates by symbol+tf).
-    If same symbol+tf exists but direction was empty, upgrade it.
-    """
-    log = load_ml_breakout_log()
-    existing = next((e for e in log if e["symbol"] == symbol and e["tf"] == tf), None)
-    if existing:
-        old_dir = existing.get("ml_direction", "").upper()
-        new_dir = ml_direction.upper() if ml_direction else ""
-        if old_dir not in ("LONG", "SHORT") and new_dir in ("LONG", "SHORT"):
-            log.remove(existing)
-            logging.info(f"♻️ ML upgrade {symbol} {tf}: {old_dir or 'NONE'} → {new_dir}")
-            save_ml_breakout_log(log)  # save after remove
-        else:
-            return  # already exists
-    entry = {
-        "symbol": symbol,
-        "tf": tf,
-        "current_price": round(current_price, 8),
-        "ml_direction": ml_direction.upper() if ml_direction else "",
-        "ml_sl": round(ml_sl, 8) if ml_sl else None,
-        "time": datetime.now(timezone.utc).isoformat()
-    }
-    if atr_value is not None:
-        entry["atr_value"] = round(atr_value, 8)
-    log.append(entry)
-    save_ml_breakout_log(log)
-
-def clear_ml_breakout_log():
-    save_ml_breakout_log([])
 
 
 # --- SMC MODE ---
