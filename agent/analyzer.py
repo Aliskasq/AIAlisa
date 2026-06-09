@@ -292,13 +292,15 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
 
 
 def daily_reset_to_gemini_1():
-    """Called at 03:05 MSK — reset active provider to Gemini #1.
-    If Gemini #1 doesn't respond, fall back to openrouter/free."""
+    """Called at 00:05 UTC — reset active provider to Gemini #1.
+    Keeps the last user-chosen Gemini model (e.g. flash-lite)."""
     s = _get_ai_settings()
     s["active_provider"] = "gemini"
     s["active_key_index"] = 0
+    # Keep gemini_model as-is — user's last choice persists
+    model = s.get("gemini_model", "gemini-2.5-flash")
     _save_and_cache_settings(s)
-    logging.info("🔄 Daily reset: active provider → Gemini #1")
+    logging.info(f"🔄 Daily reset: active provider → Gemini #1, model={model}")
 
 async def test_provider_key(provider, api_key, model):
     """Test a single provider key with a tiny prompt. Returns True/False."""

@@ -115,6 +115,8 @@ async def log_cleanup_task():
             await asyncio.sleep(60)
 
 
+_daily_reset_done = {"date": None}
+
 async def main():
     # Ensure data directory exists on fresh installs
     os.makedirs("data", exist_ok=True)
@@ -973,11 +975,12 @@ async def main():
                 save_alerts([])
                 logging.info("🧹 All alerts cleared (23:58 UTC, clean slate for rescan)")
 
-            # Daily AI reset: 03:05 MSK = 00:05 UTC → Gemini #1
-            if now_utc.hour == 0 and now_utc.minute == 5:
+            # Daily AI reset: 00:00-00:10 UTC → Gemini #1 (once per day)
+            if now_utc.hour == 0 and now_utc.minute <= 10 and _daily_reset_done.get("date") != str(now_utc.date()):
+                _daily_reset_done["date"] = str(now_utc.date())
                 from agent.analyzer import daily_reset_to_gemini_1
                 daily_reset_to_gemini_1()
-                logging.info("🔄 Daily AI reset: Gemini #1 (03:05 MSK)")
+                logging.info("🔄 Daily AI reset: Gemini #1 (00:00-00:10 UTC window)")
 
             # =========================================================
             # BLOCK 3: SMART TIMER (Sleep until exact time XX:05:02, XX:10:02)
