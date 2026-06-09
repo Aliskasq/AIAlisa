@@ -32,17 +32,24 @@ GEMINI_API_KEYS = [k for k in [
     os.getenv(f"GEMINI_KEY_{i}", "") for i in range(1, 9)
 ] if k]
 
-# Key account labels (for UI display)
-KEY_ACCOUNT_LABELS = {
-    0: "talalai5208",
-    1: "dmitrijtalalaj27",
-    2: "sudanialisa",
-    3: "zhoriha",
-    4: "alisasudani211",
-    5: "alisasudani",
-    6: "alasasudani210",
-    7: "alisasudani1",
+# Key account labels — maps env var index to account name
+_GEMINI_KEY_LABELS = {
+    1: "talalai5208",
+    2: "dmitrijtalalaj27",
+    # 3: removed (sudanialisa — 403 banned)
+    4: "zhoriha",
+    5: "alisasudani211",
+    6: "alisasudani",
+    7: "alasasudani210",
+    8: "alisasudani1",
 }
+# Build runtime labels matching GEMINI_API_KEYS list indices
+KEY_ACCOUNT_LABELS = {}
+_idx = 0
+for i in range(1, 9):
+    if os.getenv(f"GEMINI_KEY_{i}", ""):
+        KEY_ACCOUNT_LABELS[_idx] = _GEMINI_KEY_LABELS.get(i, f"key_{i}")
+        _idx += 1
 
 # AI provider settings persistence
 AI_SETTINGS_FILE = "data/ai_settings.json"
