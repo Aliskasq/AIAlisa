@@ -1691,11 +1691,29 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
         alines_colors = []
         alines_widths = []
 
+        # Recalculate indices based on time (like auto trendline) so lines don't shift
+        tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
+        curr_last_time = int(plot_df['open_time'].iloc[-1])
+
         for ml in manual_lines:
-            idx_a = ml['index_a']
-            idx_b = ml['index_b']
+            idx_a_orig = ml['index_a']
+            idx_b_orig = ml['index_b']
             price_a = ml['price_a']
             price_b = ml['price_b']
+
+            # Time-based index recalculation: shift indices based on how many candles passed
+            ml_tf_ms = ml.get('tf_ms', tf_ms_map.get(tf, 14400000))
+            ml_base_time = ml.get('base_open_time', 0)
+            ml_base_idx = ml.get('base_idx', view_limit - 1)
+
+            if ml_base_time and ml_tf_ms:
+                candles_shifted = round((curr_last_time - ml_base_time) / ml_tf_ms)
+                offset = candles_shifted  # how many candles have passed since creation
+                idx_a = idx_a_orig - offset
+                idx_b = idx_b_orig - offset
+            else:
+                idx_a = idx_a_orig
+                idx_b = idx_b_orig
 
             # Compute line in log space for visually straight line on log chart
             if price_a > 0 and price_b > 0 and idx_b != idx_a:

@@ -1654,7 +1654,8 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         # Draw chart with ALL active lines for this symbol+tf
         all_lines_for_chart = [
             {'price_a': a['price_a'], 'price_b': a['price_b'],
-             'index_a': a['index_a'], 'index_b': a['index_b']}
+             'index_a': a['index_a'], 'index_b': a['index_b'],
+             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
         chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
@@ -1822,7 +1823,8 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         # Draw chart with ALL active lines for this symbol+tf
         all_lines_for_chart = [
             {'price_a': a['price_a'], 'price_b': a['price_b'],
-             'index_a': a['index_a'], 'index_b': a['index_b']}
+             'index_a': a['index_a'], 'index_b': a['index_b'],
+             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
         chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)

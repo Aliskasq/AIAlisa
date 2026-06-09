@@ -249,13 +249,19 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                         # Include triggered line + all remaining lines for this symbol+tf
                         all_lines_for_chart = [
                             {'price_a': a['price_a'], 'price_b': a['price_b'],
-                             'index_a': a['index_a'], 'index_b': a['index_b']}
+                             'index_a': a['index_a'], 'index_b': a['index_b'],
+                             'base_open_time': a.get('base_open_time', 0),
+                             'base_idx': a.get('base_idx', 0),
+                             'tf_ms': a.get('tf_ms', 0)}
                             for a in remaining if a['symbol'] == sym and a['tf'] == tf
                         ]
                         # Also add the triggered line itself (shown as the one that fired)
                         all_lines_for_chart.append({
                             'price_a': alert['price_a'], 'price_b': alert['price_b'],
                             'index_a': alert['index_a'], 'index_b': alert['index_b'],
+                            'base_open_time': alert.get('base_open_time', 0),
+                            'base_idx': alert.get('base_idx', 0),
+                            'tf_ms': alert.get('tf_ms', 0),
                         })
                         chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
                 except Exception as e:
