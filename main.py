@@ -694,6 +694,7 @@ async def main():
 
                 # Filter: keep only coins ≥2% above trendline
                 price_passed = []
+                _price_log_lines = []
                 for vw_item in vol_waitlist:
                     sym = vw_item["symbol"]
                     tf = vw_item.get("tf", "4H")
@@ -703,15 +704,23 @@ async def main():
 
                     if cur_price > 0 and line_price > 0:
                         above_pct = ((cur_price / line_price) - 1) * 100
+                        status = "✅" if above_pct >= 2.0 else "⏳"
+                        _price_log_lines.append(f"{status} {sym} {tf}: {above_pct:+.1f}% (price={cur_price}, line={line_price:.8g})")
                         if above_pct < 2.0:
                             continue
+                    elif cur_price == 0:
+                        _price_log_lines.append(f"🗑️ {sym} {tf}: no price (delisted?)")
+                        continue
                     elif not line_data:
+                        _price_log_lines.append(f"⚠️ {sym} {tf}: no line_data")
                         logging.warning(f"⚠️ VOL WAITLIST {sym}: no line_data for {tf}, skipping")
                         continue
 
                     vw_item["_current_price"] = cur_price
                     price_passed.append(vw_item)
 
+                for line in _price_log_lines:
+                    logging.info(f"📊 VOL PRICE: {line}")
                 logging.info(f"📊 Price filter: {len(vol_waitlist)} → {len(price_passed)} coins above 2%")
 
                 # ── Phase 1: Check volume only for price-passed coins ──
