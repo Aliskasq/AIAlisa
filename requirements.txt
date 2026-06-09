@@ -7,6 +7,4 @@ mplfinance
 matplotlib
 beautifulsoup4
 python-dotenv
-python-telegram-bot
 pydantic
-openai
