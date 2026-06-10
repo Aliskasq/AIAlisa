@@ -110,16 +110,15 @@ async def handle_message(app_session, update):
             raw_text = original_text.replace(",", ".").strip()
             parts_raw = raw_text.split()
             try:
-                prices = []
-                pct_offsets = []
+                prices = []       # base prices (for candle matching)
+                pct_offsets = []   # percent offsets (applied to trendline AFTER matching)
                 for p in parts_raw:
                     # Parse price with optional percent: "0.215+2%" or "0.215-1.33%"
                     pct_match = _re_price.match(r'^([\d.]+)([+-][\d.]+)%$', p)
                     if pct_match:
                         base_price = float(pct_match.group(1))
                         pct = float(pct_match.group(2))
-                        adjusted = base_price * (1 + pct / 100)
-                        prices.append(adjusted)
+                        prices.append(base_price)
                         pct_offsets.append(pct)
                     elif p.replace(".", "", 1).isdigit():
                         prices.append(float(p))
@@ -134,6 +133,7 @@ async def handle_message(app_session, update):
                     msg_id, parse_mode="Markdown")
                 return
             ma_state['prices'] = prices
+            ma_state['pct_offsets'] = pct_offsets
             # Mode was already selected before prices — process now
             mode = ma_state.get('mode', 'high')
             await _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode)
@@ -1572,7 +1572,8 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
 
     symbol = ma_state['symbol']
     tf = ma_state['tf']
-    prices = ma_state['prices']  # [price_a_target, price_b_target]
+    prices = ma_state['prices']  # [price_a_base, price_b_base] — base prices for candle matching
+    pct_offsets = ma_state.get('pct_offsets', [0, 0])  # percent offsets applied AFTER matching
 
     tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
     tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
@@ -1655,7 +1656,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             set_manual_alert_state(chat_id, ma_state)
             title = "точной" if exact_a else "ближайшей"
             await send_response(app_session, chat_id,
-                f"🔍 Для точки A ({price_a_target}) найдено несколько совпадений {title} цены.\n"
+                f"🔍 Для точки A ({price_a_target:.8g}) найдено несколько совпадений {title} цены.\n"
                 f"Выбери свечу:",
                 msg_id, reply_markup={"inline_keyboard": buttons})
             return
@@ -1675,7 +1676,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             set_manual_alert_state(chat_id, ma_state)
             title = "точной" if exact_b else "ближайшей"
             await send_response(app_session, chat_id,
-                f"🔍 Для точки B ({price_b_target}) найдено несколько совпадений {title} цены.\n"
+                f"🔍 Для точки B ({price_b_target:.8g}) найдено несколько совпадений {title} цены.\n"
                 f"Выбери свечу:",
                 msg_id, reply_markup={"inline_keyboard": buttons})
             return
@@ -1694,13 +1695,23 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             return
 
         # Ensure A is before B (left to right)
+        swapped = False
         if idx_a > idx_b:
             idx_a, idx_b = idx_b, idx_a
             actual_price_a, actual_price_b = actual_price_b, actual_price_a
+            swapped = True
 
-        # Calculate slope in log space
-        log_a = _math.log(actual_price_a)
-        log_b = _math.log(actual_price_b)
+        # Apply percent offsets AFTER candle matching (shift trendline up/down)
+        pct_a = pct_offsets[0] if len(pct_offsets) > 0 else 0
+        pct_b = pct_offsets[1] if len(pct_offsets) > 1 else 0
+        if swapped:
+            pct_a, pct_b = pct_b, pct_a
+        line_price_a = actual_price_a * (1 + pct_a / 100) if pct_a else actual_price_a
+        line_price_b = actual_price_b * (1 + pct_b / 100) if pct_b else actual_price_b
+
+        # Calculate slope in log space (using offset prices for the trendline)
+        log_a = _math.log(line_price_a)
+        log_b = _math.log(line_price_b)
         log_slope = (log_b - log_a) / (idx_b - idx_a)
         log_intercept = log_a - log_slope * idx_a
 
@@ -1714,8 +1725,8 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             "symbol": symbol,
             "tf": tf,
             "chat_id": chat_id,
-            "price_a": actual_price_a,
-            "price_b": actual_price_b,
+            "price_a": line_price_a,
+            "price_b": line_price_b,
             "index_a": idx_a,
             "index_b": idx_b,
             "slope": log_slope,
@@ -1749,10 +1760,13 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         diff_pct = ((current_price / line_price_now) - 1) * 100
         total_lines = len(all_lines_for_chart)
 
+        # Build caption with offset info if percent was used
+        pct_info_a = f" ({pct_a:+g}%)" if pct_a else ""
+        pct_info_b = f" ({pct_b:+g}%)" if pct_b else ""
         caption = (
             f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"🔵 A: {actual_price_a:.8g} (свеча {idx_a})\n"
-            f"🔴 B: {actual_price_b:.8g} (свеча {idx_b})\n"
+            f"🔵 A: {line_price_a:.8g}{pct_info_a} (свеча {idx_a})\n"
+            f"🔴 B: {line_price_b:.8g}{pct_info_b} (свеча {idx_b})\n"
             f"📊 Линия сейчас: {line_price_now:.8g}\n"
             f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
             f"📐 Всего линий: {total_lines}\n"
@@ -1804,6 +1818,7 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
     actual_price_a = ma_state['chosen_a_price']
     idx_b = ma_state['chosen_b_idx']
     actual_price_b = ma_state['chosen_b_price']
+    pct_offsets = ma_state.get('pct_offsets', [0, 0])
 
     tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
     tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
@@ -1829,12 +1844,22 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
             clear_manual_alert_state(chat_id)
             return
 
+        swapped = False
         if idx_a > idx_b:
             idx_a, idx_b = idx_b, idx_a
             actual_price_a, actual_price_b = actual_price_b, actual_price_a
+            swapped = True
 
-        log_a = _math.log(actual_price_a)
-        log_b = _math.log(actual_price_b)
+        # Apply percent offsets AFTER candle matching
+        pct_a = pct_offsets[0] if len(pct_offsets) > 0 else 0
+        pct_b = pct_offsets[1] if len(pct_offsets) > 1 else 0
+        if swapped:
+            pct_a, pct_b = pct_b, pct_a
+        line_price_a = actual_price_a * (1 + pct_a / 100) if pct_a else actual_price_a
+        line_price_b = actual_price_b * (1 + pct_b / 100) if pct_b else actual_price_b
+
+        log_a = _math.log(line_price_a)
+        log_b = _math.log(line_price_b)
         log_slope = (log_b - log_a) / (idx_b - idx_a)
         log_intercept = log_a - log_slope * idx_a
 
@@ -1844,7 +1869,7 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
 
         alert_entry = {
             "symbol": symbol, "tf": tf, "chat_id": chat_id,
-            "price_a": actual_price_a, "price_b": actual_price_b,
+            "price_a": line_price_a, "price_b": line_price_b,
             "index_a": idx_a, "index_b": idx_b,
             "slope": log_slope, "intercept": log_intercept,
             "base_idx": last_idx, "base_open_time": base_open_time,
@@ -1872,10 +1897,12 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
         diff_pct = ((current_price / line_price_now) - 1) * 100
         total_lines = len(all_lines_for_chart)
 
+        pct_info_a = f" ({pct_a:+g}%)" if pct_a else ""
+        pct_info_b = f" ({pct_b:+g}%)" if pct_b else ""
         caption = (
             f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"🔵 A: {actual_price_a:.8g} (свеча {idx_a})\n"
-            f"🔴 B: {actual_price_b:.8g} (свеча {idx_b})\n"
+            f"🔵 A: {line_price_a:.8g}{pct_info_a} (свеча {idx_a})\n"
+            f"🔴 B: {line_price_b:.8g}{pct_info_b} (свеча {idx_b})\n"
             f"📊 Линия сейчас: {line_price_now:.8g}\n"
             f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
             f"📐 Всего линий: {total_lines}\n"
@@ -1922,7 +1949,6 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
 
     symbol = ma_state['symbol']
     tf = ma_state['tf']
-    prices = ma_state['prices']
     date_mode = ma_state.get('date_mode', 'date_top')  # date_top or date_bottom
     dates = ma_state.get('dates', [])
 
