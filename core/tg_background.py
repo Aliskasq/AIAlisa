@@ -213,8 +213,8 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                         body_bot = min(c_open, c_close)
 
                         # Touch detection based on MODE (not slope)
-                        # 0.05% tolerance for near-touches; full crosses also count
-                        tol = line_price * 0.0005  # 0.05%
+                        # 0.01% tolerance for near-touches; full crosses also count
+                        tol = line_price * 0.0001  # 0.01%
                         alert_mode = alert.get("mode", "high")
 
                         if alert_mode in ("low", "body_bot", "date_bottom"):
