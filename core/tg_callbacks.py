@@ -579,6 +579,18 @@ async def handle_callback_query(app_session, update):
                 parse_mode="Markdown")
             return
 
+        # --- Back button → return to price input ---
+        if cb_data == "malert_back":
+            if ma_state:
+                mode = ma_state.get('mode', 'high')
+                ma_state['step'] = 'awaiting_prices'
+                set_manual_alert_state(chat_id, ma_state)
+                await send_response(app_session, chat_id,
+                    "⬅️ Введи две цены заново:", parse_mode="Markdown")
+            else:
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+            return
+
         # --- Timeframe selection → show 5 mode buttons ---
         if cb_data.startswith("malert_tf_"):
             if not ma_state or ma_state.get('step') != 'awaiting_tf':

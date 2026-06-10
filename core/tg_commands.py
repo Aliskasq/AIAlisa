@@ -1707,11 +1707,15 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                 return min(float(row['open']), float(row['close']))
             return float(row['high'])
 
-        def _find_matches(df_local, target_price, mode_str, tolerance_pct=0.05):
-            """Find candles matching target_price within tolerance.
-            Returns list of (idx, candle_price, candle_time_ms).
-            If exact matches found → return only exact. Otherwise closest ones."""
-            matches = []
+        def _find_matches(df_local, target_price, mode_str):
+            """Find candles matching target_price.
+            Returns (matches_list, exact_bool).
+            - Exact match (0.001%): use only exact matches
+            - If exact matches are all consecutive → return just the LAST one (single, no buttons)
+            - If exact matches are non-consecutive → return all for button selection
+            - No exact match → return top 5 closest (0.1% tolerance) for buttons"""
+            exact = []      # within 0.001%
+            nearby = []     # within 0.1%
             all_diffs = []
             for i in range(len(df_local)):
                 row = df_local.iloc[i]
@@ -1719,14 +1723,28 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                 diff_pct = abs(candle_price - target_price) / target_price * 100 if target_price > 0 else float('inf')
                 candle_time = int(row['open_time'])
                 all_diffs.append((i, candle_price, candle_time, diff_pct))
-                if diff_pct <= tolerance_pct:
-                    matches.append((i, candle_price, candle_time))
+                if diff_pct <= 0.001:
+                    exact.append((i, candle_price, candle_time))
+                elif diff_pct <= 0.1:
+                    nearby.append((i, candle_price, candle_time))
 
-            if len(matches) == 0:
-                # No exact match — return top 5 closest for buttons
-                all_diffs.sort(key=lambda x: x[3])
-                return [(d[0], d[1], d[2]) for d in all_diffs[:5]], False
-            return matches, True
+            if exact:
+                # Check if all exact matches are consecutive
+                indices = [m[0] for m in exact]
+                is_consecutive = all(indices[j+1] - indices[j] == 1 for j in range(len(indices)-1))
+                if len(exact) == 1 or is_consecutive:
+                    # Single match or consecutive → use last one silently (no buttons)
+                    return [exact[-1]], True
+                else:
+                    # Non-consecutive exact matches → show buttons
+                    return exact, True
+
+            if nearby:
+                return nearby, False
+
+            # Nothing close — return top 5 by proximity
+            all_diffs.sort(key=lambda x: x[3])
+            return [(d[0], d[1], d[2]) for d in all_diffs[:5]], False
 
         def _format_candle_time(time_ms):
             """Format candle timestamp for button label (in user's timezone)."""
@@ -1745,6 +1763,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                 label = f"{_format_candle_time(time_ms)} — {price}"
                 cb_data = f"malert_pick_a_{idx}_{price}"
                 buttons.append([{"text": label, "callback_data": cb_data}])
+            buttons.append([{"text": "⬅️ Назад", "callback_data": "malert_back"}])
             # Save state for picking
             ma_state['step'] = 'picking_point_a'
             ma_state['_df_cache_key'] = f"{symbol}_{tf}"
@@ -1767,6 +1786,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                 label = f"{_format_candle_time(time_ms)} — {price}"
                 cb_data = f"malert_pick_b_{idx}_{price}"
                 buttons.append([{"text": label, "callback_data": cb_data}])
+            buttons.append([{"text": "⬅️ Назад", "callback_data": "malert_back"}])
             ma_state['step'] = 'picking_point_b'
             ma_state['chosen_a_idx'] = idx_a
             ma_state['chosen_a_price'] = actual_price_a
