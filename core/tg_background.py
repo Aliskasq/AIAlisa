@@ -212,19 +212,30 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                         body_top = max(c_open, c_close)
                         body_bot = min(c_open, c_close)
 
-                        # Touch detection: candle must CROSS the line
-                        # Line price must be within candle's [low, high] range
-                        # Small tolerance (0.3%) for near-touches
-                        tol = line_price * 0.003
-                        if c_low - tol <= line_price <= c_high + tol:
-                            hit = True
-                            touch_price = c_close
-                            # Body touch if line is within [body_bot, body_top]
-                            if body_bot <= line_price <= body_top:
-                                touch_type = "body"
-                            else:
-                                touch_type = "wick"
-                            break
+                        # Touch detection based on MODE (not slope)
+                        # 0.05% tolerance for near-touches; full crosses also count
+                        tol = line_price * 0.0005  # 0.05%
+                        alert_mode = alert.get("mode", "high")
+
+                        if alert_mode in ("low", "body_bot", "date_bottom"):
+                            # SUPPORT line → alert when price breaks DOWN to line
+                            near_touch = (line_price - tol <= c_low <= line_price + tol)
+                            full_cross = (c_low <= line_price <= c_high)
+                            if near_touch or full_cross:
+                                hit = True
+                                touch_price = c_close
+                                touch_type = "body" if body_bot <= line_price else "wick"
+                                break
+
+                        elif alert_mode in ("high", "body_top", "date_top"):
+                            # RESISTANCE line → alert when price breaks UP to line
+                            near_touch = (line_price - tol <= c_high <= line_price + tol)
+                            full_cross = (c_low <= line_price <= c_high)
+                            if near_touch or full_cross:
+                                hit = True
+                                touch_price = c_close
+                                touch_type = "body" if body_top >= line_price else "wick"
+                                break
 
                     if hit:
                         triggered.append((alert, touch_price, line_price, touch_type))
