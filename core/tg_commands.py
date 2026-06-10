@@ -1725,9 +1725,10 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             return matches, True
 
         def _format_candle_time(time_ms):
-            """Format candle timestamp for button label."""
-            from datetime import datetime as _dt, timezone as _tz
-            dt = _dt.fromtimestamp(time_ms / 1000, tz=_tz.utc)
+            """Format candle timestamp for button label (in user's timezone)."""
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            tz_off = get_user_tz_offset(chat_id)
+            dt = _dt.fromtimestamp(time_ms / 1000, tz=_tz.utc) + _td(hours=tz_off)
             return dt.strftime("%d.%m.%y %H:%M")
 
         matches_a, exact_a = _find_matches(df_l, price_a_target, mode)
@@ -2162,11 +2163,16 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         total_lines = len(all_lines_for_chart)
 
         body_type = "верх тела" if date_mode == 'date_top' else "низ тела"
+        # Show times in user's timezone
+        tz_off = get_user_tz_offset(chat_id)
+        dt_a_display = dt_a + timedelta(hours=tz_off)
+        dt_b_display = dt_b + timedelta(hours=tz_off)
+        tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
         caption = (
             f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"📅 Режим: по датам ({body_type})\n"
-            f"🔵 A: {actual_price_a:.8g} ({dt_a.strftime('%d.%m.%y %H:%M')})\n"
-            f"🔴 B: {actual_price_b:.8g} ({dt_b.strftime('%d.%m.%y %H:%M')})\n"
+            f"📅 Режим: по датам ({body_type}, {tz_label})\n"
+            f"🔵 A: {actual_price_a:.8g} ({dt_a_display.strftime('%d.%m.%y %H:%M')})\n"
+            f"🔴 B: {actual_price_b:.8g} ({dt_b_display.strftime('%d.%m.%y %H:%M')})\n"
             f"📊 Линия сейчас: {line_price_now:.8g}\n"
             f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
             f"📐 Всего линий: {total_lines}\n"
