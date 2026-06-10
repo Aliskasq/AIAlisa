@@ -49,6 +49,72 @@ from core.tg_reports import (
 )
 
 
+def _build_alert_caption(short_sym, tf, current_price, all_alerts_for_sym_tf, chat_id, view_limit=199):
+    """Build unified caption showing ALL lines for a symbol+tf.
+    all_alerts_for_sym_tf: list of alert dicts from manual_alerts.json"""
+    import math as _m
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    _color_emojis = ['⚫', '🔵', '🟠', '🟤', '🟢', '🔴']
+    tz_off = get_user_tz_offset(chat_id)
+
+    lines_text = []
+    for a in all_alerts_for_sym_tf:
+        ci = a.get('color_idx', 0)
+        ce = _color_emojis[ci % len(_color_emojis)]
+
+        # Format A/B times in user's TZ
+        tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
+        a_tf_ms = a.get('tf_ms', tf_ms_map.get(tf, 14400000))
+        base_time = a.get('base_open_time', 0)
+        base_idx = a.get('base_idx', view_limit - 1)
+        idx_a = a.get('index_a', 0)
+        idx_b = a.get('index_b', 0)
+
+        # Calculate candle times from indices
+        time_a_ms = base_time - (base_idx - idx_a) * a_tf_ms
+        time_b_ms = base_time - (base_idx - idx_b) * a_tf_ms
+        dt_a = _dt.fromtimestamp(time_a_ms / 1000, tz=_tz.utc) + _td(hours=tz_off)
+        dt_b = _dt.fromtimestamp(time_b_ms / 1000, tz=_tz.utc) + _td(hours=tz_off)
+        time_a_str = dt_a.strftime("%d.%m %H:%M")
+        time_b_str = dt_b.strftime("%d.%m %H:%M")
+
+        price_a = a.get('price_a', 0)
+        price_b = a.get('price_b', 0)
+
+        # Line price now
+        slope = a.get('slope', 0)
+        intercept = a.get('intercept', 0)
+        # Recalculate current math_x
+        from datetime import datetime as _dt2
+        now_ms = int(_dt2.now(_tz.utc).timestamp() * 1000)
+        candles_passed = (now_ms - base_time) / a_tf_ms if a_tf_ms else 0
+        current_x = base_idx + candles_passed
+        line_now = _m.exp(slope * current_x + intercept) if slope != 0 or intercept != 0 else 0
+
+        # % to line: how much price needs to move
+        if line_now > 0 and current_price > 0:
+            if current_price > line_now:
+                pct_to = ((current_price / line_now) - 1) * 100
+                pct_str = f"↓ {pct_to:.2f}%"
+            else:
+                pct_to = ((line_now / current_price) - 1) * 100
+                pct_str = f"↑ {pct_to:.2f}%"
+        else:
+            pct_str = "—"
+
+        lines_text.append(
+            f"{ce}🅰️ `{price_a:.8g}` ({time_a_str})\n"
+            f"{ce}🅱️ `{price_b:.8g}` ({time_b_str})\n"
+            f"Линия: `{line_now:.8g}` | до линии: {pct_str}"
+        )
+
+    caption = f"📐 *${short_sym}* ({tf})\n💰 Цена: `{current_price:.8g}`\n\n"
+    caption += "\n\n".join(lines_text)
+    caption += f"\n\n📐 Всего линий: {len(all_alerts_for_sym_tf)}"
+    return caption
+
+
 def _parse_flexible_datetime(text, chat_id):
     """Parse date+time from flexible input formats.
     Accepts: '10.06.26 04:45', '10,06,26,04,45', '10.06.26.04.45',
@@ -1710,41 +1776,39 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         def _find_matches(df_local, target_price, mode_str):
             """Find candles matching target_price.
             Returns (matches_list, exact_bool).
-            - Exact match (0.001%): use only exact matches
-            - If exact matches are all consecutive → return just the LAST one (single, no buttons)
-            - If exact matches are non-consecutive → return all for button selection
-            - No exact match → return top 5 closest (0.1% tolerance) for buttons"""
-            exact = []      # within 0.001%
-            nearby = []     # within 0.1%
-            all_diffs = []
+            - Exact match (0.001%): use silently
+            - Consecutive exact matches → use last one silently
+            - Non-consecutive exact → show buttons
+            - No exact → 5 above + 5 below target price as buttons"""
+            exact = []
+            all_entries = []  # (idx, candle_price, candle_time)
             for i in range(len(df_local)):
                 row = df_local.iloc[i]
                 candle_price = _get_candle_price(row, mode_str)
                 diff_pct = abs(candle_price - target_price) / target_price * 100 if target_price > 0 else float('inf')
                 candle_time = int(row['open_time'])
-                all_diffs.append((i, candle_price, candle_time, diff_pct))
+                all_entries.append((i, candle_price, candle_time))
                 if diff_pct <= 0.001:
                     exact.append((i, candle_price, candle_time))
-                elif diff_pct <= 0.1:
-                    nearby.append((i, candle_price, candle_time))
 
             if exact:
-                # Check if all exact matches are consecutive
                 indices = [m[0] for m in exact]
                 is_consecutive = all(indices[j+1] - indices[j] == 1 for j in range(len(indices)-1))
                 if len(exact) == 1 or is_consecutive:
-                    # Single match or consecutive → use last one silently (no buttons)
                     return [exact[-1]], True
                 else:
-                    # Non-consecutive exact matches → show buttons
                     return exact, True
 
-            if nearby:
-                return nearby, False
-
-            # Nothing close — return top 5 by proximity
-            all_diffs.sort(key=lambda x: x[3])
-            return [(d[0], d[1], d[2]) for d in all_diffs[:5]], False
+            # No exact match → 5 candles above + 5 below target price
+            above = sorted([e for e in all_entries if e[1] >= target_price],
+                          key=lambda x: x[1])[:5]
+            below = sorted([e for e in all_entries if e[1] < target_price],
+                          key=lambda x: -x[1])[:5]
+            # Combine: below (descending) + above (ascending) → natural price order
+            combined = sorted(below + above, key=lambda x: x[1])
+            if not combined:
+                combined = sorted(all_entries, key=lambda x: abs(x[1] - target_price))[:10]
+            return combined, False
 
         def _format_candle_time(time_ms):
             """Format candle timestamp for button label (in user's timezone)."""
@@ -1879,23 +1943,9 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
 
         # Send chart
         short_sym = symbol.replace("USDT", "")
-        line_price_now = _math.exp(log_slope * last_idx + log_intercept)
         current_price = float(df_l['close'].iloc[-1])
-        diff_pct = ((current_price / line_price_now) - 1) * 100
-        total_lines = len(all_lines_for_chart)
-
-        # Build caption with offset info if percent was used
-        pct_info_a = f" ({pct_a:+g}%)" if pct_a else ""
-        pct_info_b = f" ({pct_b:+g}%)" if pct_b else ""
-        caption = (
-            f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"🔵 A: {line_price_a:.8g}{pct_info_a} (свеча {idx_a})\n"
-            f"🔴 B: {line_price_b:.8g}{pct_info_b} (свеча {idx_b})\n"
-            f"📊 Линия сейчас: {line_price_now:.8g}\n"
-            f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
-            f"📐 Всего линий: {total_lines}\n"
-            f"🔔 Алерт при касании!"
-        )
+        all_alerts_sym_tf = [a for a in alerts if a['symbol'] == symbol and a['tf'] == tf]
+        caption = _build_alert_caption(short_sym, tf, current_price, all_alerts_sym_tf, chat_id)
 
         if chart_path:
             import os
@@ -2021,22 +2071,9 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
         clear_manual_alert_state(chat_id)
 
         short_sym = symbol.replace("USDT", "")
-        line_price_now = _math.exp(log_slope * last_idx + log_intercept)
         current_price = float(df_l['close'].iloc[-1])
-        diff_pct = ((current_price / line_price_now) - 1) * 100
-        total_lines = len(all_lines_for_chart)
-
-        pct_info_a = f" ({pct_a:+g}%)" if pct_a else ""
-        pct_info_b = f" ({pct_b:+g}%)" if pct_b else ""
-        caption = (
-            f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"🔵 A: {line_price_a:.8g}{pct_info_a} (свеча {idx_a})\n"
-            f"🔴 B: {line_price_b:.8g}{pct_info_b} (свеча {idx_b})\n"
-            f"📊 Линия сейчас: {line_price_now:.8g}\n"
-            f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
-            f"📐 Всего линий: {total_lines}\n"
-            f"🔔 Алерт при касании!"
-        )
+        all_alerts_sym_tf = [a for a in alerts if a['symbol'] == symbol and a['tf'] == tf]
+        caption = _build_alert_caption(short_sym, tf, current_price, all_alerts_sym_tf, chat_id)
 
         if chart_path:
             import os
@@ -2199,27 +2236,9 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
 
         # Send chart
         short_sym = symbol.replace("USDT", "")
-        line_price_now = _math.exp(log_slope * last_idx + log_intercept)
         current_price = float(df_l['close'].iloc[-1])
-        diff_pct = ((current_price / line_price_now) - 1) * 100
-        total_lines = len(all_lines_for_chart)
-
-        body_type = "верх тела" if date_mode == 'date_top' else "низ тела"
-        # Show times in user's timezone
-        tz_off = get_user_tz_offset(chat_id)
-        dt_a_display = dt_a + timedelta(hours=tz_off)
-        dt_b_display = dt_b + timedelta(hours=tz_off)
-        tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
-        caption = (
-            f"📐 Ручная линия: *${short_sym}* ({tf})\n"
-            f"📅 Режим: по датам ({body_type}, {tz_label})\n"
-            f"🔵 A: {actual_price_a:.8g} ({dt_a_display.strftime('%d.%m.%y %H:%M')})\n"
-            f"🔴 B: {actual_price_b:.8g} ({dt_b_display.strftime('%d.%m.%y %H:%M')})\n"
-            f"📊 Линия сейчас: {line_price_now:.8g}\n"
-            f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
-            f"📐 Всего линий: {total_lines}\n"
-            f"🔔 Алерт при касании!"
-        )
+        all_alerts_sym_tf = [a for a in alerts if a['symbol'] == symbol and a['tf'] == tf]
+        caption = _build_alert_caption(short_sym, tf, current_price, all_alerts_sym_tf, chat_id)
 
         if chart_path:
             import os
