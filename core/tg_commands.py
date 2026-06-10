@@ -104,16 +104,34 @@ async def handle_message(app_session, update):
     # ==========================================
     ma_state = get_manual_alert_state(chat_id)
     if ma_state:
-        # --- AWAITING PRICES: user enters "69500 67200" → process immediately ---
+        # --- AWAITING PRICES: user enters "69500 67200" or "0.215+2% 0.240-1.5%" ---
         if ma_state.get('step') == 'awaiting_prices':
-            parts_raw = original_text.replace(",", ".").split()
+            import re as _re_price
+            raw_text = original_text.replace(",", ".").strip()
+            parts_raw = raw_text.split()
             try:
-                prices = [float(p) for p in parts_raw if p.replace(".", "", 1).isdigit()]
+                prices = []
+                pct_offsets = []
+                for p in parts_raw:
+                    # Parse price with optional percent: "0.215+2%" or "0.215-1.33%"
+                    pct_match = _re_price.match(r'^([\d.]+)([+-][\d.]+)%$', p)
+                    if pct_match:
+                        base_price = float(pct_match.group(1))
+                        pct = float(pct_match.group(2))
+                        adjusted = base_price * (1 + pct / 100)
+                        prices.append(adjusted)
+                        pct_offsets.append(pct)
+                    elif p.replace(".", "", 1).isdigit():
+                        prices.append(float(p))
+                        pct_offsets.append(0)
                 if len(prices) < 2:
                     raise ValueError("need 2 prices")
             except (ValueError, IndexError):
                 await send_response(app_session, chat_id,
-                    "⚠️ Введи две цены через пробел, например:\n`69500 67200`", msg_id, parse_mode="Markdown")
+                    "⚠️ Введи две цены через пробел, например:\n"
+                    "`69500 67200`\n"
+                    "Или с процентом: `0.215+2% 0.240-1.5%`",
+                    msg_id, parse_mode="Markdown")
                 return
             ma_state['prices'] = prices
             # Mode was already selected before prices — process now
@@ -124,14 +142,16 @@ async def handle_message(app_session, update):
         # --- AWAITING DATES: user enters "15.05.26 18:15-16.05.26 21:45" ---
         if ma_state.get('step') == 'awaiting_dates':
             date_text = original_text.strip()
-            # Parse format: "15.05.26 18:15-16.05.26 21:45" or "15.05.26 18:15 - 16.05.26 21:45"
+            # Normalize all dash types to regular hyphen
+            date_text = date_text.replace('–', '-').replace('—', '-').replace('−', '-')
+            # Parse format: "DD.MM.YY HH:MM-DD.MM.YY HH:MM" or with " - "
             import re as _re_date
-            # Try "DD.MM.YY HH:MM-DD.MM.YY HH:MM" or with " - "
             m = _re_date.match(
-                r'(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})',
+                r'(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})\s*-\s*(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})',
                 date_text
             )
             if not m:
+                logging.warning(f"⚠️ Manual alert date parse FAIL: {repr(date_text)}")
                 await send_response(app_session, chat_id,
                     "⚠️ Формат: `15.05.26 18:15-16.05.26 21:45`", msg_id, parse_mode="Markdown")
                 return
@@ -1575,39 +1595,96 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
 
         price_a_target, price_b_target = prices[0], prices[1]
 
-        # Find nearest candles based on mode
-        def _find_nearest(df_local, target_price, mode_str):
-            """Find candle index closest to target_price by given mode."""
-            best_idx = 0
-            best_diff = float('inf')
+        # Find candles matching target price
+        def _get_candle_price(row, mode_str):
+            """Get price from candle based on mode."""
+            if mode_str == 'high':
+                return float(row['high'])
+            elif mode_str == 'low':
+                return float(row['low'])
+            elif mode_str in ('body', 'body_mid'):
+                return (float(row['open']) + float(row['close'])) / 2
+            elif mode_str in ('body_top', 'date_top'):
+                return max(float(row['open']), float(row['close']))
+            elif mode_str in ('body_bot', 'date_bottom'):
+                return min(float(row['open']), float(row['close']))
+            return float(row['high'])
+
+        def _find_matches(df_local, target_price, mode_str, tolerance_pct=0.05):
+            """Find candles matching target_price within tolerance.
+            Returns list of (idx, candle_price, candle_time_ms).
+            If exact matches found → return only exact. Otherwise closest ones."""
+            matches = []
+            all_diffs = []
             for i in range(len(df_local)):
                 row = df_local.iloc[i]
-                if mode_str == 'high':
-                    candle_price = float(row['high'])
-                elif mode_str == 'low':
-                    candle_price = float(row['low'])
-                elif mode_str in ('body', 'body_mid'):
-                    candle_price = (float(row['open']) + float(row['close'])) / 2
-                elif mode_str == 'body_top':
-                    candle_price = max(float(row['open']), float(row['close']))
-                elif mode_str == 'body_bot':
-                    candle_price = min(float(row['open']), float(row['close']))
-                elif mode_str == 'date_top':
-                    candle_price = max(float(row['open']), float(row['close']))
-                elif mode_str == 'date_bottom':
-                    candle_price = min(float(row['open']), float(row['close']))
-                else:
-                    candle_price = float(row['high'])
+                candle_price = _get_candle_price(row, mode_str)
+                diff_pct = abs(candle_price - target_price) / target_price * 100 if target_price > 0 else float('inf')
+                candle_time = int(row['open_time'])
+                all_diffs.append((i, candle_price, candle_time, diff_pct))
+                if diff_pct <= tolerance_pct:
+                    matches.append((i, candle_price, candle_time))
 
-                diff = abs(candle_price - target_price)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_idx = i
-                    best_price = candle_price
-            return best_idx, best_price
+            if len(matches) == 0:
+                # No exact match — return top 5 closest for buttons
+                all_diffs.sort(key=lambda x: x[3])
+                return [(d[0], d[1], d[2]) for d in all_diffs[:5]], False
+            return matches, True
 
-        idx_a, actual_price_a = _find_nearest(df_l, price_a_target, mode)
-        idx_b, actual_price_b = _find_nearest(df_l, price_b_target, mode)
+        def _format_candle_time(time_ms):
+            """Format candle timestamp for button label."""
+            from datetime import datetime as _dt, timezone as _tz
+            dt = _dt.fromtimestamp(time_ms / 1000, tz=_tz.utc)
+            return dt.strftime("%d.%m.%y %H:%M")
+
+        matches_a, exact_a = _find_matches(df_l, price_a_target, mode)
+        matches_b, exact_b = _find_matches(df_l, price_b_target, mode)
+
+        # If multiple matches for point A → ask user to choose
+        if len(matches_a) > 1:
+            buttons = []
+            for idx, price, time_ms in matches_a:
+                label = f"{_format_candle_time(time_ms)} — {price}"
+                cb_data = f"malert_pick_a_{idx}_{price}"
+                buttons.append([{"text": label, "callback_data": cb_data}])
+            # Save state for picking
+            ma_state['step'] = 'picking_point_a'
+            ma_state['_df_cache_key'] = f"{symbol}_{tf}"
+            ma_state['matches_b'] = [(m[0], m[1], m[2]) for m in matches_b]
+            ma_state['exact_b'] = exact_b
+            set_manual_alert_state(chat_id, ma_state)
+            title = "точной" if exact_a else "ближайшей"
+            await send_response(app_session, chat_id,
+                f"🔍 Для точки A ({price_a_target}) найдено несколько совпадений {title} цены.\n"
+                f"Выбери свечу:",
+                msg_id, reply_markup={"inline_keyboard": buttons})
+            return
+
+        # If multiple matches for point B → ask user to choose
+        if len(matches_b) > 1:
+            idx_a = matches_a[0][0]
+            actual_price_a = matches_a[0][1]
+            buttons = []
+            for idx, price, time_ms in matches_b:
+                label = f"{_format_candle_time(time_ms)} — {price}"
+                cb_data = f"malert_pick_b_{idx}_{price}"
+                buttons.append([{"text": label, "callback_data": cb_data}])
+            ma_state['step'] = 'picking_point_b'
+            ma_state['chosen_a_idx'] = idx_a
+            ma_state['chosen_a_price'] = actual_price_a
+            set_manual_alert_state(chat_id, ma_state)
+            title = "точной" if exact_b else "ближайшей"
+            await send_response(app_session, chat_id,
+                f"🔍 Для точки B ({price_b_target}) найдено несколько совпадений {title} цены.\n"
+                f"Выбери свечу:",
+                msg_id, reply_markup={"inline_keyboard": buttons})
+            return
+
+        # Single match for both — proceed
+        idx_a = matches_a[0][0]
+        actual_price_a = matches_a[0][1]
+        idx_b = matches_b[0][0]
+        actual_price_b = matches_b[0][1]
 
         # Ensure A and B are different candles
         if idx_a == idx_b:
@@ -1631,6 +1708,8 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         base_open_time = int(df_l['open_time'].iloc[-1])
 
         # Save alert FIRST so it appears on the chart
+        # monitor_from_time = next candle after current last → don't trigger on existing candles
+        monitor_from_time = base_open_time + tf_ms
         alert_entry = {
             "symbol": symbol,
             "tf": tf,
@@ -1643,6 +1722,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             "intercept": log_intercept,
             "base_idx": last_idx,
             "base_open_time": base_open_time,
+            "monitor_from_time": monitor_from_time,
             "tf_ms": tf_ms,
             "mode": mode,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1709,6 +1789,129 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
 
     except Exception as e:
         logging.error(f"❌ Manual alert error: {repr(e)}")
+        await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
+        clear_manual_alert_state(chat_id)
+
+
+async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_state):
+    """Finalize manual alert when user has already picked point A and B indices via buttons."""
+    import math as _math
+
+    symbol = ma_state['symbol']
+    tf = ma_state['tf']
+    mode = ma_state.get('mode', 'high')
+    idx_a = ma_state['chosen_a_idx']
+    actual_price_a = ma_state['chosen_a_price']
+    idx_b = ma_state['chosen_b_idx']
+    actual_price_b = ma_state['chosen_b_price']
+
+    tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
+    tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
+    binance_interval = tf_map.get(tf, "4h")
+    tf_ms = tf_ms_map.get(tf, 14400000)
+
+    await send_response(app_session, chat_id, "⏳ Строю линию...", msg_id)
+
+    try:
+        raw = await fetch_klines(app_session, symbol, binance_interval, 199)
+        if not raw:
+            await send_response(app_session, chat_id, "❌ Не удалось получить данные.", msg_id)
+            clear_manual_alert_state(chat_id)
+            return
+
+        df = pd.DataFrame(raw)
+        df[['high', 'low', 'close', 'open']] = df[['high', 'low', 'close', 'open']].apply(pd.to_numeric)
+        view_limit = min(len(df), 199)
+        df_l = df.iloc[-view_limit:].copy().reset_index(drop=True)
+
+        if idx_a == idx_b:
+            await send_response(app_session, chat_id, "⚠️ Обе точки на одной свече.", msg_id)
+            clear_manual_alert_state(chat_id)
+            return
+
+        if idx_a > idx_b:
+            idx_a, idx_b = idx_b, idx_a
+            actual_price_a, actual_price_b = actual_price_b, actual_price_a
+
+        log_a = _math.log(actual_price_a)
+        log_b = _math.log(actual_price_b)
+        log_slope = (log_b - log_a) / (idx_b - idx_a)
+        log_intercept = log_a - log_slope * idx_a
+
+        last_idx = view_limit - 1
+        base_open_time = int(df_l['open_time'].iloc[-1])
+        monitor_from_time = base_open_time + tf_ms
+
+        alert_entry = {
+            "symbol": symbol, "tf": tf, "chat_id": chat_id,
+            "price_a": actual_price_a, "price_b": actual_price_b,
+            "index_a": idx_a, "index_b": idx_b,
+            "slope": log_slope, "intercept": log_intercept,
+            "base_idx": last_idx, "base_open_time": base_open_time,
+            "monitor_from_time": monitor_from_time,
+            "tf_ms": tf_ms, "mode": mode,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        alerts = load_manual_alerts()
+        alerts.append(alert_entry)
+        save_manual_alerts(alerts)
+
+        all_lines_for_chart = [
+            {'price_a': a['price_a'], 'price_b': a['price_b'],
+             'index_a': a['index_a'], 'index_b': a['index_b'],
+             'base_open_time': a.get('base_open_time', 0),
+             'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
+            for a in alerts if a['symbol'] == symbol and a['tf'] == tf
+        ]
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+        clear_manual_alert_state(chat_id)
+
+        short_sym = symbol.replace("USDT", "")
+        line_price_now = _math.exp(log_slope * last_idx + log_intercept)
+        current_price = float(df_l['close'].iloc[-1])
+        diff_pct = ((current_price / line_price_now) - 1) * 100
+        total_lines = len(all_lines_for_chart)
+
+        caption = (
+            f"📐 Ручная линия: *${short_sym}* ({tf})\n"
+            f"🔵 A: {actual_price_a:.8g} (свеча {idx_a})\n"
+            f"🔴 B: {actual_price_b:.8g} (свеча {idx_b})\n"
+            f"📊 Линия сейчас: {line_price_now:.8g}\n"
+            f"💰 Цена: {current_price:.8g} ({diff_pct:+.2f}%)\n"
+            f"📐 Всего линий: {total_lines}\n"
+            f"🔔 Алерт при касании!"
+        )
+
+        if chart_path:
+            import os
+            photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+            try:
+                with open(chart_path, 'rb') as f:
+                    import aiohttp as _aio
+                    data = _aio.FormData()
+                    data.add_field('chat_id', str(chat_id))
+                    data.add_field('caption', caption)
+                    data.add_field('parse_mode', 'Markdown')
+                    data.add_field('photo', f, filename=f"{symbol}_alert.png", content_type='image/png')
+                    async with app_session.post(photo_url, data=data, timeout=30) as resp:
+                        if resp.status != 200:
+                            resp_text = await resp.text()
+                            logging.error(f"❌ Alert chart send error: {resp.status} - {resp_text}")
+                            await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+            except Exception as e:
+                logging.error(f"❌ Alert chart send error: {repr(e)}")
+                await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+            finally:
+                try:
+                    if os.path.exists(chart_path):
+                        os.remove(chart_path)
+                except:
+                    pass
+        else:
+            await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+
+    except Exception as e:
+        logging.error(f"❌ Manual alert with indices error: {repr(e)}")
         await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
         clear_manual_alert_state(chat_id)
 
@@ -1798,6 +2001,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
 
         last_idx = view_limit - 1
         base_open_time = int(df_l['open_time'].iloc[-1])
+        monitor_from_time = base_open_time + tf_ms
 
         # Save alert FIRST so it appears on the chart
         alert_entry = {
@@ -1812,6 +2016,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
             "intercept": log_intercept,
             "base_idx": last_idx,
             "base_open_time": base_open_time,
+            "monitor_from_time": monitor_from_time,
             "tf_ms": tf_ms,
             "mode": date_mode,
             "created_at": datetime.now(timezone.utc).isoformat(),

@@ -186,9 +186,15 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                     hit = False
                     touch_price = 0
                     touch_type = ""  # "wick" or "body"
+                    # Only check candles AFTER alert creation (don't trigger on existing data)
+                    monitor_from = alert.get("monitor_from_time", 0)
 
                     for candle in raw_5m:
                         candle_open_time = int(candle['open_time'])
+
+                        # Skip candles that existed when alert was created
+                        if monitor_from and candle_open_time < monitor_from:
+                            continue
 
                         # Calculate how many ORIGINAL TF candles passed since base
                         candles_passed = (candle_open_time - base_open_time) / alert_tf_ms

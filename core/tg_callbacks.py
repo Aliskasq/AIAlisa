@@ -645,6 +645,62 @@ async def handle_callback_query(app_session, update):
                 parse_mode="Markdown")
             return
 
+        # --- Pick point A (duplicate price resolution) ---
+        if cb_data.startswith("malert_pick_a_"):
+            if not ma_state or ma_state.get('step') != 'picking_point_a':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            # Parse: malert_pick_a_{idx}_{price}
+            parts = cb_data.replace("malert_pick_a_", "").split("_", 1)
+            chosen_idx = int(parts[0])
+            chosen_price = float(parts[1])
+            ma_state['chosen_a_idx'] = chosen_idx
+            ma_state['chosen_a_price'] = chosen_price
+
+            # Check if point B also needs picking
+            matches_b = ma_state.get('matches_b', [])
+            if len(matches_b) > 1:
+                from core.tg_commands import _finalize_manual_alert
+                buttons = []
+                for m in matches_b:
+                    idx, price, time_ms = m[0], m[1], m[2]
+                    from datetime import datetime as _dt, timezone as _tz
+                    dt = _dt.fromtimestamp(time_ms / 1000, tz=_tz.utc)
+                    label = f"{dt.strftime('%d.%m.%y %H:%M')} — {price}"
+                    buttons.append([{"text": label, "callback_data": f"malert_pick_b_{idx}_{price}"}])
+                ma_state['step'] = 'picking_point_b'
+                set_manual_alert_state(chat_id, ma_state)
+                exact_b = ma_state.get('exact_b', True)
+                title = "точной" if exact_b else "ближайшей"
+                await send_response(app_session, chat_id,
+                    f"✅ Точка A выбрана.\n\n"
+                    f"🔍 Для точки B найдено несколько совпадений {title} цены.\nВыбери свечу:",
+                    reply_markup={"inline_keyboard": buttons})
+                return
+            else:
+                # B is single — finalize
+                if matches_b:
+                    ma_state['chosen_b_idx'] = matches_b[0][0]
+                    ma_state['chosen_b_price'] = matches_b[0][1]
+                ma_state['step'] = 'awaiting_prices'  # reset for _finalize
+                set_manual_alert_state(chat_id, ma_state)
+                from core.tg_commands import _finalize_manual_alert_with_indices
+                await _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_state)
+                return
+
+        # --- Pick point B (duplicate price resolution) ---
+        if cb_data.startswith("malert_pick_b_"):
+            if not ma_state or ma_state.get('step') != 'picking_point_b':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            parts = cb_data.replace("malert_pick_b_", "").split("_", 1)
+            ma_state['chosen_b_idx'] = int(parts[0])
+            ma_state['chosen_b_price'] = float(parts[1])
+            set_manual_alert_state(chat_id, ma_state)
+            from core.tg_commands import _finalize_manual_alert_with_indices
+            await _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_state)
+            return
+
         # --- Delete specific alert ---
         if cb_data.startswith("malert_del_"):
             try:
