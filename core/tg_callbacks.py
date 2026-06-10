@@ -558,6 +558,7 @@ async def handle_callback_query(app_session, update):
     if cb_data.startswith("malert_"):
         from core.tg_state import get_manual_alert_state, set_manual_alert_state, clear_manual_alert_state
 
+        msg_id = cq.get("message", {}).get("message_id")
         ma_state = get_manual_alert_state(chat_id)
 
         # Answer callback immediately
