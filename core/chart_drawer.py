@@ -1700,7 +1700,8 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
         tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
         curr_last_time = int(plot_df['open_time'].iloc[-1])
 
-        for li, ml in enumerate(manual_lines):
+        for ml in manual_lines:
+            li = ml.get('color_idx', 0)  # persistent color index
             idx_a_orig = ml['index_a']
             idx_b_orig = ml['index_b']
             price_a = ml['price_a']

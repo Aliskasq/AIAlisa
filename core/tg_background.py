@@ -258,7 +258,8 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                              'index_a': a['index_a'], 'index_b': a['index_b'],
                              'base_open_time': a.get('base_open_time', 0),
                              'base_idx': a.get('base_idx', 0),
-                             'tf_ms': a.get('tf_ms', 0)}
+                             'tf_ms': a.get('tf_ms', 0),
+                             'color_idx': a.get('color_idx', 0)}
                             for a in remaining if a['symbol'] == sym and a['tf'] == tf
                         ]
                         # Also add the triggered line itself (shown as the one that fired)
@@ -268,6 +269,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                             'base_open_time': alert.get('base_open_time', 0),
                             'base_idx': alert.get('base_idx', 0),
                             'tf_ms': alert.get('tf_ms', 0),
+                            'color_idx': alert.get('color_idx', 0),
                         })
                         chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
                 except Exception as e:
@@ -275,9 +277,8 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
 
                 # Color emoji matching chart line palette: ⚫🔵🟠🟤🟢🔴
                 _color_emojis = ['⚫', '🔵', '🟠', '🟤', '🟢', '🔴']
-                # Triggered line is appended last in all_lines_for_chart
-                line_color_idx = len(all_lines_for_chart) - 1 if all_lines_for_chart else 0
-                color_emoji = _color_emojis[line_color_idx % len(_color_emojis)]
+                triggered_color_idx = alert.get('color_idx', 0)
+                color_emoji = _color_emojis[triggered_color_idx % len(_color_emojis)]
                 touch_label = "Тело пробило" if touch_type == "body" else "Тень коснулась"
                 notify_text = (
                     f"{color_emoji} *КАСАНИЕ РУЧНОЙ ЛИНИИ!*\n\n"

@@ -1814,6 +1814,13 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         # Save alert FIRST so it appears on the chart
         # monitor_from_time = next candle after current last → don't trigger on existing candles
         monitor_from_time = base_open_time + tf_ms
+        alerts = load_manual_alerts()
+        # Assign persistent color index (next available for this symbol+tf)
+        existing_colors = [a.get('color_idx', 0) for a in alerts
+                          if a['symbol'] == symbol and a['tf'] == tf]
+        color_idx = 0
+        while color_idx in existing_colors:
+            color_idx += 1
         alert_entry = {
             "symbol": symbol,
             "tf": tf,
@@ -1829,9 +1836,9 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             "monitor_from_time": monitor_from_time,
             "tf_ms": tf_ms,
             "mode": mode,
+            "color_idx": color_idx,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        alerts = load_manual_alerts()
         alerts.append(alert_entry)
         save_manual_alerts(alerts)
 
@@ -1839,7 +1846,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         all_lines_for_chart = [
             {'price_a': a['price_a'], 'price_b': a['price_b'],
              'index_a': a['index_a'], 'index_b': a['index_b'],
-             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
+             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0), 'color_idx': a.get('color_idx', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
         chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
@@ -1960,6 +1967,12 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
         base_open_time = int(df_l['open_time'].iloc[-1])
         monitor_from_time = base_open_time + tf_ms
 
+        alerts = load_manual_alerts()
+        existing_colors = [a.get('color_idx', 0) for a in alerts
+                          if a['symbol'] == symbol and a['tf'] == tf]
+        color_idx = 0
+        while color_idx in existing_colors:
+            color_idx += 1
         alert_entry = {
             "symbol": symbol, "tf": tf, "chat_id": chat_id,
             "price_a": line_price_a, "price_b": line_price_b,
@@ -1967,10 +1980,9 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
             "slope": log_slope, "intercept": log_intercept,
             "base_idx": last_idx, "base_open_time": base_open_time,
             "monitor_from_time": monitor_from_time,
-            "tf_ms": tf_ms, "mode": mode,
+            "tf_ms": tf_ms, "mode": mode, "color_idx": color_idx,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        alerts = load_manual_alerts()
         alerts.append(alert_entry)
         save_manual_alerts(alerts)
 
@@ -2123,6 +2135,12 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         monitor_from_time = base_open_time + tf_ms
 
         # Save alert FIRST so it appears on the chart
+        alerts = load_manual_alerts()
+        existing_colors = [a.get('color_idx', 0) for a in alerts
+                          if a['symbol'] == symbol and a['tf'] == tf]
+        color_idx = 0
+        while color_idx in existing_colors:
+            color_idx += 1
         alert_entry = {
             "symbol": symbol,
             "tf": tf,
@@ -2138,9 +2156,9 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
             "monitor_from_time": monitor_from_time,
             "tf_ms": tf_ms,
             "mode": date_mode,
+            "color_idx": color_idx,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        alerts = load_manual_alerts()
         alerts.append(alert_entry)
         save_manual_alerts(alerts)
 
@@ -2148,7 +2166,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         all_lines_for_chart = [
             {'price_a': a['price_a'], 'price_b': a['price_b'],
              'index_a': a['index_a'], 'index_b': a['index_b'],
-             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
+             'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0), 'color_idx': a.get('color_idx', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
         chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
