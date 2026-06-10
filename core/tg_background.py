@@ -273,10 +273,14 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 except Exception as e:
                     logging.error(f"❌ Manual alert chart error for {sym}: {repr(e)}")
 
-                touch_emoji = "🔴" if touch_type == "body" else "🟡"
+                # Color emoji matching chart line palette: ⚫🔵🟠🟤🟢🔴
+                _color_emojis = ['⚫', '🔵', '🟠', '🟤', '🟢', '🔴']
+                # Triggered line is appended last in all_lines_for_chart
+                line_color_idx = len(all_lines_for_chart) - 1 if all_lines_for_chart else 0
+                color_emoji = _color_emojis[line_color_idx % len(_color_emojis)]
                 touch_label = "Тело пробило" if touch_type == "body" else "Тень коснулась"
                 notify_text = (
-                    f"{touch_emoji} *КАСАНИЕ РУЧНОЙ ЛИНИИ!*\n\n"
+                    f"{color_emoji} *КАСАНИЕ РУЧНОЙ ЛИНИИ!*\n\n"
                     f"🪙 `${short_sym}` ({tf})\n"
                     f"💰 Цена: `{touch_price:.8g}`\n"
                     f"📊 Линия: `{line_price:.8g}`\n"

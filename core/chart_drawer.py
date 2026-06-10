@@ -1691,10 +1691,10 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
         alines_colors = []
         alines_widths = []
 
-        # Color palette for manual lines (cycle if >5)
-        _line_colors = ['black', '#1a237e', '#1b5e20', '#e65100', '#76ff03']
-        _point_a_colors = ['#1565c0', '#283593', '#2e7d32', '#bf360c', '#64dd17']
-        _point_b_colors = ['#c62828', '#4a148c', '#004d40', '#ff6f00', '#aeea00']
+        # Color palette for manual lines — matches emoji: ⚫🔵🟠🟤🟢🔴
+        _line_colors = ['#000000', '#1565c0', '#e65100', '#5d4037', '#1b5e20', '#c62828']
+        _point_a_colors = ['#333333', '#1976d2', '#ff6d00', '#795548', '#2e7d32', '#d32f2f']
+        _point_b_colors = ['#555555', '#42a5f5', '#ff9100', '#8d6e63', '#4caf50', '#ef5350']
 
         # Recalculate indices based on time (like auto trendline) so lines don't shift
         tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
