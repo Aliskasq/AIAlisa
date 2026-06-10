@@ -306,9 +306,13 @@ async def handle_message(app_session, update):
 
         if remaining_ma in ("удалить", "очистить", "clear"):
             alerts = load_manual_alerts()
+            user_count = sum(1 for a in alerts if a.get("chat_id") == chat_id)
+            if user_count == 0:
+                await send_response(app_session, chat_id, "📭 Список пуст.", msg_id)
+                return
             remaining_alerts = [a for a in alerts if a.get("chat_id") != chat_id]
             save_manual_alerts(remaining_alerts)
-            await send_response(app_session, chat_id, "✅ Все ручные линии удалены.", msg_id)
+            await send_response(app_session, chat_id, f"✅ Удалено линий: {user_count}", msg_id)
             return
 
         # Start new manual alert: parse coin

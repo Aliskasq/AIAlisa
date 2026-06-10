@@ -212,21 +212,19 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                         body_top = max(c_open, c_close)
                         body_bot = min(c_open, c_close)
 
-                        # Touch detection: candle range crosses the line
-                        if slope <= 0:
-                            # Descending/flat line = resistance → touch when high ≥ line
-                            if c_high >= line_price:
-                                hit = True
-                                touch_price = c_close
-                                touch_type = "body" if body_top >= line_price else "wick"
-                                break
-                        else:
-                            # Ascending line = support → touch when low ≤ line
-                            if c_low <= line_price:
-                                hit = True
-                                touch_price = c_close
-                                touch_type = "body" if body_bot <= line_price else "wick"
-                                break
+                        # Touch detection: candle must CROSS the line
+                        # Line price must be within candle's [low, high] range
+                        # Small tolerance (0.3%) for near-touches
+                        tol = line_price * 0.003
+                        if c_low - tol <= line_price <= c_high + tol:
+                            hit = True
+                            touch_price = c_close
+                            # Body touch if line is within [body_bot, body_top]
+                            if body_bot <= line_price <= body_top:
+                                touch_type = "body"
+                            else:
+                                touch_type = "wick"
+                            break
 
                     if hit:
                         triggered.append((alert, touch_price, line_price, touch_type))

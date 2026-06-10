@@ -539,7 +539,24 @@ def load_manual_alerts():
     if os.path.exists(MANUAL_ALERTS_FILE):
         try:
             with open(MANUAL_ALERTS_FILE, "r") as f:
-                return json.load(f)
+                alerts = json.load(f)
+            # Migration: assign unique color_idx to old alerts missing it
+            needs_save = False
+            groups = {}  # (symbol, tf) → set of used color_idx
+            for a in alerts:
+                key = (a.get('symbol', ''), a.get('tf', ''))
+                if key not in groups:
+                    groups[key] = set()
+                if 'color_idx' not in a:
+                    needs_save = True
+                    ci = 0
+                    while ci in groups[key]:
+                        ci += 1
+                    a['color_idx'] = ci
+                groups[key].add(a['color_idx'])
+            if needs_save:
+                save_manual_alerts(alerts)
+            return alerts
         except Exception:
             pass
     return []
