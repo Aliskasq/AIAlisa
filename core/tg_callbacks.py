@@ -567,6 +567,18 @@ async def handle_callback_query(app_session, update):
             json={"callback_query_id": cq_id, "text": "✅"},
         )
 
+        # --- Timezone selection ---
+        if cb_data.startswith("malert_tz_"):
+            from config import set_user_tz_offset
+            tz_val = int(cb_data.replace("malert_tz_", ""))
+            set_user_tz_offset(chat_id, tz_val)
+            label = f"UTC{tz_val:+d}" if tz_val != 0 else "UTC±0"
+            await send_response(app_session, chat_id,
+                f"✅ Часовой пояс установлен: *{label}*\n"
+                f"Теперь все даты в алертах вводятся по этому поясу.",
+                parse_mode="Markdown")
+            return
+
         # --- Timeframe selection → show 5 mode buttons ---
         if cb_data.startswith("malert_tf_"):
             if not ma_state or ma_state.get('step') != 'awaiting_tf':
@@ -636,13 +648,16 @@ async def handle_callback_query(app_session, update):
                 return
             date_mode = cb_data.replace("malert_", "")  # "date_top" or "date_bottom"
             ma_state['date_mode'] = date_mode
-            ma_state['step'] = 'awaiting_dates'
+            ma_state['step'] = 'awaiting_date_a'
             set_manual_alert_state(chat_id, ma_state)
             body_label = "верх тела" if date_mode == "date_top" else "низ тела"
+            from config import get_user_tz_offset
+            tz_off = get_user_tz_offset(chat_id)
+            tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
             await send_response(app_session, chat_id,
-                f"📅 Режим: *{body_label}*\n\n"
-                f"Введи две даты через дефис:\n"
-                f"`15.05.26 18:15-16.05.26 21:45`",
+                f"📅 Режим: *{body_label}* ({tz_label})\n\n"
+                f"📍 Точка A — введи дату и время:\n"
+                f"Примеры: `10.06.26 04:45` или `10 06 26 04 45`",
                 parse_mode="Markdown")
             return
 

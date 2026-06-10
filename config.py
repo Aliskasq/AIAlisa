@@ -551,3 +551,38 @@ def save_manual_alerts(alerts):
             json.dump(alerts, f, indent=2)
     except Exception as e:
         logging.error(f"Error writing manual alerts: {e}")
+
+
+# ─── User Settings (timezone etc.) ────────────────────────────────────────
+USER_SETTINGS_FILE = "data/user_settings.json"
+
+def load_user_settings():
+    if os.path.exists(USER_SETTINGS_FILE):
+        try:
+            with open(USER_SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_user_settings(settings):
+    try:
+        os.makedirs(os.path.dirname(USER_SETTINGS_FILE), exist_ok=True)
+        with open(USER_SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing user settings: {e}")
+
+def get_user_tz_offset(chat_id):
+    """Get user's timezone offset in hours (default 0 = UTC)."""
+    settings = load_user_settings()
+    return settings.get(str(chat_id), {}).get("tz_offset", 0)
+
+def set_user_tz_offset(chat_id, offset_hours):
+    """Set user's timezone offset in hours."""
+    settings = load_user_settings()
+    key = str(chat_id)
+    if key not in settings:
+        settings[key] = {}
+    settings[key]["tz_offset"] = offset_hours
+    save_user_settings(settings)

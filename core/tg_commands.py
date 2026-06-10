@@ -14,6 +14,7 @@ from config import (
     load_virtual_bank, save_virtual_bank, reset_virtual_bank,
     VIRTUAL_BANK_POSITION_SIZE,
     load_manual_alerts, save_manual_alerts,
+    get_user_tz_offset, set_user_tz_offset,
 )
 import config as _cfg
 import agent.analyzer
@@ -46,6 +47,41 @@ from core.tg_state import (
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
 )
+
+
+def _parse_flexible_datetime(text, chat_id):
+    """Parse date+time from flexible input formats.
+    Accepts: '10.06.26 04:45', '10,06,26,04,45', '10.06.26.04.45',
+             '10 06 26 04 45', '10,06.26 12:00', '10.06 04:45' (current year).
+    Returns datetime in UTC (applies user timezone offset) or None."""
+    import re as _re
+    raw = text.strip()
+    # Normalize: replace commas/dots/dashes/colons/spaces with single separator
+    # First, keep the structure: extract all digit groups
+    nums = _re.findall(r'\d+', raw)
+    if len(nums) == 5:
+        # DD MM YY HH MM
+        day, month, year, hour, minute = [int(x) for x in nums]
+    elif len(nums) == 4:
+        # DD MM HH MM (no year → current year)
+        day, month, hour, minute = [int(x) for x in nums]
+        year = datetime.now(timezone.utc).year
+    elif len(nums) == 3:
+        # DD MM YY (no time → 00:00) — unlikely but handle
+        day, month, year = [int(x) for x in nums]
+        hour, minute = 0, 0
+    else:
+        return None
+    try:
+        if year < 100:
+            year += 2000
+        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+        # Apply timezone offset: user enters in their TZ, convert to UTC
+        tz_off = get_user_tz_offset(chat_id)
+        dt = dt - timedelta(hours=tz_off)
+        return dt
+    except (ValueError, OverflowError):
+        return None
 
 
 async def handle_message(app_session, update):
@@ -139,12 +175,48 @@ async def handle_message(app_session, update):
             await _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode)
             return
 
-        # --- AWAITING DATES: user enters "15.05.26 18:15-16.05.26 21:45" ---
+        # --- AWAITING DATE A: user enters date+time for point A ---
+        if ma_state.get('step') == 'awaiting_date_a':
+            dt_a = _parse_flexible_datetime(original_text, chat_id)
+            if dt_a is None:
+                await send_response(app_session, chat_id,
+                    "⚠️ Не понял дату. Примеры:\n"
+                    "`10.06.26 04:45` или `10 06 26 04 45`\n"
+                    "или `10,06,26,04,45` или `10.06.26.04.45`",
+                    msg_id, parse_mode="Markdown")
+                return
+            ma_state['dates'] = [dt_a.isoformat()]
+            ma_state['step'] = 'awaiting_date_b'
+            set_manual_alert_state(chat_id, ma_state)
+            tz_off = get_user_tz_offset(chat_id)
+            tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
+            await send_response(app_session, chat_id,
+                f"✅ Точка A: `{dt_a.strftime('%d.%m.%y %H:%M')}` ({tz_label}→UTC)\n\n"
+                f"📍 Точка B — введи дату и время:",
+                msg_id, parse_mode="Markdown")
+            return
+
+        # --- AWAITING DATE B: user enters date+time for point B ---
+        if ma_state.get('step') == 'awaiting_date_b':
+            dt_b = _parse_flexible_datetime(original_text, chat_id)
+            if dt_b is None:
+                await send_response(app_session, chat_id,
+                    "⚠️ Не понял дату. Примеры:\n"
+                    "`10.06.26 04:45` или `10 06 26 04 45`",
+                    msg_id, parse_mode="Markdown")
+                return
+            ma_state['dates'].append(dt_b.isoformat())
+            ma_state['step'] = 'processing_dates'
+            set_manual_alert_state(chat_id, ma_state)
+
+            # Process the date-based alert
+            await _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state)
+            return
+
+        # --- LEGACY: old single-line format still works ---
         if ma_state.get('step') == 'awaiting_dates':
             date_text = original_text.strip()
-            # Normalize all dash types to regular hyphen
             date_text = date_text.replace('–', '-').replace('—', '-').replace('−', '-')
-            # Parse format: "DD.MM.YY HH:MM-DD.MM.YY HH:MM" or with " - "
             import re as _re_date
             m = _re_date.match(
                 r'(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})\s*-\s*(\d{1,2}\.\d{1,2}\.\d{2,4})\s+(\d{1,2}:\d{2})',
@@ -156,6 +228,7 @@ async def handle_message(app_session, update):
                     "⚠️ Формат: `15.05.26 18:15-16.05.26 21:45`", msg_id, parse_mode="Markdown")
                 return
             try:
+                tz_off = get_user_tz_offset(chat_id)
                 def _parse_dt(d, t):
                     parts_d = d.split(".")
                     day, month = int(parts_d[0]), int(parts_d[1])
@@ -163,7 +236,8 @@ async def handle_message(app_session, update):
                     if year < 100:
                         year += 2000
                     hour, minute = [int(x) for x in t.split(":")]
-                    return datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+                    dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+                    return dt - timedelta(hours=tz_off)  # convert user TZ → UTC
                 dt_a = _parse_dt(m.group(1), m.group(2))
                 dt_b = _parse_dt(m.group(3), m.group(4))
             except (ValueError, IndexError):
@@ -175,8 +249,6 @@ async def handle_message(app_session, update):
             ma_state['dates'] = [dt_a.isoformat(), dt_b.isoformat()]
             ma_state['step'] = 'processing_dates'
             set_manual_alert_state(chat_id, ma_state)
-
-            # Process the date-based alert
             await _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state)
             return
 
@@ -187,6 +259,24 @@ async def handle_message(app_session, update):
     _malert_match = next((t_p for t_p in _malert_triggers if text.startswith(t_p)), None)
     if _malert_match:
         remaining_ma = text[len(_malert_match):].strip()
+
+        # Sub-command: timezone
+        if remaining_ma in ("пояс", "timezone", "tz", "часовой пояс"):
+            current_tz = get_user_tz_offset(chat_id)
+            tz_buttons = []
+            for off in range(-2, 13):
+                label = f"UTC{off:+d}" if off != 0 else "UTC±0"
+                if off == current_tz:
+                    label = f"✅ {label}"
+                tz_buttons.append({"text": label, "callback_data": f"malert_tz_{off}"})
+            # 3 buttons per row
+            rows = [tz_buttons[i:i+3] for i in range(0, len(tz_buttons), 3)]
+            await send_response(app_session, chat_id,
+                f"🕐 *Часовой пояс для алертов*\n\n"
+                f"Сейчас: *UTC{current_tz:+d}*\n"
+                f"Выбери свой пояс (МСК = UTC+3):",
+                msg_id, reply_markup={"inline_keyboard": rows}, parse_mode="Markdown")
+            return
 
         # Sub-commands: list / clear
         if remaining_ma in ("список", "list"):
@@ -228,7 +318,8 @@ async def handle_message(app_session, update):
                 "📐 *Ручные алерт-линии:*\n\n"
                 "Создать: `алерт BTC`\n"
                 "Список: `алерт список`\n"
-                "Удалить: `алерт удалить`",
+                "Удалить: `алерт удалить`\n"
+                "Часовой пояс: `алерт пояс`",
                 msg_id, parse_mode="Markdown")
             return
 
@@ -452,7 +543,8 @@ async def handle_message(app_session, update):
             "📐 `алерт BTC` / `alert BTC`\n"
             "    _Ручная линия + алерт касания_\n"
             "📐 `алерт список` — _активные линии_\n"
-            "📐 `алерт удалить` — _удалить все линии_\n\n"
+            "📐 `алерт удалить` — _удалить все линии_\n"
+            "📐 `алерт пояс` — _часовой пояс (МСК и др.)_\n\n"
             "🌐 `/lang en` — English\n"
             "🌐 `/lang ru` — Русский"
         )

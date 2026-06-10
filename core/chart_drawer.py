@@ -1691,11 +1691,16 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
         alines_colors = []
         alines_widths = []
 
+        # Color palette for manual lines (cycle if >5)
+        _line_colors = ['black', '#1a237e', '#1b5e20', '#e65100', '#76ff03']
+        _point_a_colors = ['#1565c0', '#283593', '#2e7d32', '#bf360c', '#64dd17']
+        _point_b_colors = ['#c62828', '#4a148c', '#004d40', '#ff6f00', '#aeea00']
+
         # Recalculate indices based on time (like auto trendline) so lines don't shift
         tf_ms_map = {"15m": 900000, "1H": 3600000, "4H": 14400000, "1D": 86400000}
         curr_last_time = int(plot_df['open_time'].iloc[-1])
 
-        for ml in manual_lines:
+        for li, ml in enumerate(manual_lines):
             idx_a_orig = ml['index_a']
             idx_b_orig = ml['index_b']
             price_a = ml['price_a']
@@ -1727,21 +1732,24 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
                     val = _math.exp(log_slope * i + log_intercept)
                     line_vals.append(val)
 
+                line_color = _line_colors[li % len(_line_colors)]
                 alines_list.append(list(zip(plot_df.index, line_vals)))
-                alines_colors.append('black')
+                alines_colors.append(line_color)
                 alines_widths.append(2)
 
                 # Point A scatter
                 if 0 <= idx_a < view_limit:
                     pa_series = [float('nan')] * view_limit
                     pa_series[idx_a] = price_a
-                    addplots.append(mpf.make_addplot(pa_series, type='scatter', markersize=120, marker='o', color='blue'))
+                    pa_color = _point_a_colors[li % len(_point_a_colors)]
+                    addplots.append(mpf.make_addplot(pa_series, type='scatter', markersize=120, marker='o', color=pa_color))
 
                 # Point B scatter
                 if 0 <= idx_b < view_limit:
                     pb_series = [float('nan')] * view_limit
                     pb_series[idx_b] = price_b
-                    addplots.append(mpf.make_addplot(pb_series, type='scatter', markersize=120, marker='o', color='red'))
+                    pb_color = _point_b_colors[li % len(_point_b_colors)]
+                    addplots.append(mpf.make_addplot(pb_series, type='scatter', markersize=120, marker='o', color=pb_color))
 
         # Auto trendline (gold) if provided
         if auto_line:
