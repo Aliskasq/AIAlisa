@@ -22,6 +22,26 @@ def set_manual_alert_state(chat_id, state):
 def clear_manual_alert_state(chat_id):
     _manual_alert_state.pop(chat_id, None)
 
+# --- ALERT MESSAGE TRACKING (for auto-cleanup) ---
+_alert_msg_tracker = {}  # {chat_id: [msg_id, msg_id, ...]}
+
+def track_alert_msg(chat_id, msg_id):
+    """Track a message_id for later cleanup during alert flow."""
+    if msg_id is None:
+        return
+    if chat_id not in _alert_msg_tracker:
+        _alert_msg_tracker[chat_id] = []
+    if msg_id not in _alert_msg_tracker[chat_id]:
+        _alert_msg_tracker[chat_id].append(msg_id)
+
+def get_tracked_alert_msgs(chat_id):
+    """Get all tracked message_ids for a chat."""
+    return _alert_msg_tracker.get(chat_id, [])
+
+def clear_tracked_alert_msgs(chat_id):
+    """Clear tracked message_ids for a chat."""
+    _alert_msg_tracker.pop(chat_id, None)
+
 # --- OPENROUTER FREE MODELS (dynamic) ---
 _or_free_models_cache = {"models": [], "ts": 0}
 
@@ -168,8 +188,36 @@ async def send_response(session, chat_id, text, reply_to_msg_id=None, reply_mark
         payload["reply_markup"] = reply_markup
     if parse_mode:
         payload["parse_mode"] = parse_mode
-        
-    await session.post(url, json=payload)
+
+    try:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("result", {}).get("message_id")
+    except Exception as e:
+        logging.error(f"❌ send_response error: {e}")
+    return None
+
+
+async def schedule_alert_cleanup(session, chat_id, delay_seconds=60):
+    """Delete all tracked alert messages after a delay."""
+    msg_ids = get_tracked_alert_msgs(chat_id)
+    if not msg_ids:
+        return
+    clear_tracked_alert_msgs(chat_id)
+
+    async def _do_cleanup():
+        await asyncio.sleep(delay_seconds)
+        for mid in msg_ids:
+            try:
+                await session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                    json={"chat_id": chat_id, "message_id": mid},
+                )
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to delete msg {mid}: {e}")
+
+    asyncio.create_task(_do_cleanup())
 
 
 async def send_and_get_msg_id(session, chat_id, text, reply_to_msg_id=None):

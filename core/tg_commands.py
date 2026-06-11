@@ -43,6 +43,8 @@ from core.tg_state import (
     SCAN_SCHEDULE, _save_scan_schedule,
     _fetch_or_free_models,
     get_manual_alert_state, set_manual_alert_state, clear_manual_alert_state,
+    track_alert_msg, get_tracked_alert_msgs, clear_tracked_alert_msgs,
+    schedule_alert_cleanup,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -208,6 +210,7 @@ async def handle_message(app_session, update):
     if ma_state:
         # --- AWAITING PRICES: user enters "69500 67200" or "0.215+2% 0.240-1.5%" ---
         if ma_state.get('step') == 'awaiting_prices':
+            track_alert_msg(chat_id, msg_id)  # track user's price message
             import re as _re_price
             raw_text = original_text.replace(",", ".").strip()
             parts_raw = raw_text.split()
@@ -228,11 +231,12 @@ async def handle_message(app_session, update):
                 if len(prices) < 2:
                     raise ValueError("need 2 prices")
             except (ValueError, IndexError):
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Введи две цены через пробел, например:\n"
                     "`69500 67200`\n"
                     "Или с процентом: `0.215+2% 0.240-1.5%`",
                     msg_id, parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
                 return
             ma_state['prices'] = prices
             ma_state['pct_offsets'] = pct_offsets
@@ -243,33 +247,38 @@ async def handle_message(app_session, update):
 
         # --- AWAITING DATE A: user enters date+time for point A ---
         if ma_state.get('step') == 'awaiting_date_a':
+            track_alert_msg(chat_id, msg_id)  # track user's date A message
             dt_a = _parse_flexible_datetime(original_text, chat_id)
             if dt_a is None:
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Не понял дату. Примеры:\n"
                     "`10.06.26 04:45` или `10 06 26 04 45`\n"
                     "или `10,06,26,04,45` или `10.06.26.04.45`",
                     msg_id, parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
                 return
             ma_state['dates'] = [dt_a.isoformat()]
             ma_state['step'] = 'awaiting_date_b'
             set_manual_alert_state(chat_id, ma_state)
             tz_off = get_user_tz_offset(chat_id)
             tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
-            await send_response(app_session, chat_id,
+            bot_msg = await send_response(app_session, chat_id,
                 f"✅ Точка A: `{dt_a.strftime('%d.%m.%y %H:%M')}` ({tz_label}→UTC)\n\n"
                 f"📍 Точка B — введи дату и время:",
                 msg_id, parse_mode="Markdown")
+            track_alert_msg(chat_id, bot_msg)
             return
 
         # --- AWAITING DATE B: user enters date+time for point B ---
         if ma_state.get('step') == 'awaiting_date_b':
+            track_alert_msg(chat_id, msg_id)  # track user's date B message
             dt_b = _parse_flexible_datetime(original_text, chat_id)
             if dt_b is None:
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Не понял дату. Примеры:\n"
                     "`10.06.26 04:45` или `10 06 26 04 45`",
                     msg_id, parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
                 return
             ma_state['dates'].append(dt_b.isoformat())
             ma_state['step'] = 'processing_dates'
@@ -281,6 +290,7 @@ async def handle_message(app_session, update):
 
         # --- LEGACY: old single-line format still works ---
         if ma_state.get('step') == 'awaiting_dates':
+            track_alert_msg(chat_id, msg_id)  # track user's date message
             date_text = original_text.strip()
             date_text = date_text.replace('–', '-').replace('—', '-').replace('−', '-')
             import re as _re_date
@@ -290,8 +300,9 @@ async def handle_message(app_session, update):
             )
             if not m:
                 logging.warning(f"⚠️ Manual alert date parse FAIL: {repr(date_text)}")
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Формат: `15.05.26 18:15-16.05.26 21:45`", msg_id, parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
                 return
             try:
                 tz_off = get_user_tz_offset(chat_id)
@@ -408,6 +419,8 @@ async def handle_message(app_session, update):
             return
 
         # Show timeframe selection
+        clear_tracked_alert_msgs(chat_id)  # start fresh tracking
+        track_alert_msg(chat_id, msg_id)   # track user's "алерт btc" message
         set_manual_alert_state(chat_id, {'step': 'awaiting_tf', 'symbol': symbol_ma})
         tf_kb = {"inline_keyboard": [
             [{"text": "15m", "callback_data": "malert_tf_15m"},
@@ -416,9 +429,10 @@ async def handle_message(app_session, update):
              {"text": "1D", "callback_data": "malert_tf_1d"}],
         ]}
         short_sym = symbol_ma.replace("USDT", "")
-        await send_response(app_session, chat_id,
+        bot_msg = await send_response(app_session, chat_id,
             f"📐 Ручная линия для *${short_sym}*\n\nВыбери таймфрейм:",
             msg_id, reply_markup=tf_kb, parse_mode="Markdown")
+        track_alert_msg(chat_id, bot_msg)
         return
 
     # ==========================================
@@ -1742,13 +1756,15 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
     binance_interval = tf_map.get(tf, "4h")
     tf_ms = tf_ms_map.get(tf, 14400000)
 
-    await send_response(app_session, chat_id, "⏳ Строю линию...", msg_id)
+    bot_msg = await send_response(app_session, chat_id, "⏳ Строю линию...", msg_id)
+    track_alert_msg(chat_id, bot_msg)
 
     try:
         raw = await fetch_klines(app_session, symbol, binance_interval, 199)
         if not raw:
             await send_response(app_session, chat_id, "❌ Не удалось получить данные.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         df = pd.DataFrame(raw)
@@ -1835,10 +1851,11 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             ma_state['exact_b'] = exact_b
             set_manual_alert_state(chat_id, ma_state)
             title = "точной" if exact_a else "ближайшей"
-            await send_response(app_session, chat_id,
+            pick_msg = await send_response(app_session, chat_id,
                 f"🔍 Для точки A ({price_a_target:.8g}) найдено несколько совпадений {title} цены.\n"
                 f"Выбери свечу:",
                 msg_id, reply_markup={"inline_keyboard": buttons})
+            track_alert_msg(chat_id, pick_msg)
             return
 
         # If multiple matches for point B → ask user to choose
@@ -1856,10 +1873,11 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             ma_state['chosen_a_price'] = actual_price_a
             set_manual_alert_state(chat_id, ma_state)
             title = "точной" if exact_b else "ближайшей"
-            await send_response(app_session, chat_id,
+            pick_msg = await send_response(app_session, chat_id,
                 f"🔍 Для точки B ({price_b_target:.8g}) найдено несколько совпадений {title} цены.\n"
                 f"Выбери свечу:",
                 msg_id, reply_markup={"inline_keyboard": buttons})
+            track_alert_msg(chat_id, pick_msg)
             return
 
         # Single match for both — proceed
@@ -1873,6 +1891,7 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
             await send_response(app_session, chat_id,
                 "⚠️ Обе цены попали на одну свечу. Попробуй другие цены.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         # Ensure A is before B (left to right)
@@ -1975,10 +1994,14 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
         else:
             await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
 
+        # Schedule cleanup of intermediate messages after 60 seconds
+        await schedule_alert_cleanup(app_session, chat_id, delay_seconds=60)
+
     except Exception as e:
         logging.error(f"❌ Manual alert error: {repr(e)}")
         await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
         clear_manual_alert_state(chat_id)
+        clear_tracked_alert_msgs(chat_id)
 
 
 async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_state):
@@ -1999,13 +2022,15 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
     binance_interval = tf_map.get(tf, "4h")
     tf_ms = tf_ms_map.get(tf, 14400000)
 
-    await send_response(app_session, chat_id, "⏳ Строю линию...", msg_id)
+    bot_msg = await send_response(app_session, chat_id, "⏳ Строю линию...", msg_id)
+    track_alert_msg(chat_id, bot_msg)
 
     try:
         raw = await fetch_klines(app_session, symbol, binance_interval, 199)
         if not raw:
             await send_response(app_session, chat_id, "❌ Не удалось получить данные.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         df = pd.DataFrame(raw)
@@ -2016,6 +2041,7 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
         if idx_a == idx_b:
             await send_response(app_session, chat_id, "⚠️ Обе точки на одной свече.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         swapped = False
@@ -2103,10 +2129,14 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
         else:
             await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
 
+        # Schedule cleanup of intermediate messages after 60 seconds
+        await schedule_alert_cleanup(app_session, chat_id, delay_seconds=60)
+
     except Exception as e:
         logging.error(f"❌ Manual alert with indices error: {repr(e)}")
         await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
         clear_manual_alert_state(chat_id)
+        clear_tracked_alert_msgs(chat_id)
 
 
 async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
@@ -2128,13 +2158,15 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
     binance_interval = tf_map.get(tf, "4h")
     tf_ms = tf_ms_map.get(tf, 14400000)
 
-    await send_response(app_session, chat_id, "⏳ Строю линию по датам...", msg_id)
+    bot_msg = await send_response(app_session, chat_id, "⏳ Строю линию по датам...", msg_id)
+    track_alert_msg(chat_id, bot_msg)
 
     try:
         raw = await fetch_klines(app_session, symbol, binance_interval, 199)
         if not raw:
             await send_response(app_session, chat_id, "❌ Не удалось получить данные.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         df = pd.DataFrame(raw)
@@ -2166,6 +2198,7 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
             await send_response(app_session, chat_id,
                 "⚠️ Обе даты попали на одну свечу. Попробуй другие даты.", msg_id)
             clear_manual_alert_state(chat_id)
+            clear_tracked_alert_msgs(chat_id)
             return
 
         # Ensure A before B
@@ -2268,7 +2301,11 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         else:
             await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
 
+        # Schedule cleanup of intermediate messages after 60 seconds
+        await schedule_alert_cleanup(app_session, chat_id, delay_seconds=60)
+
     except Exception as e:
         logging.error(f"❌ Manual alert dates error: {repr(e)}")
         await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
         clear_manual_alert_state(chat_id)
+        clear_tracked_alert_msgs(chat_id)

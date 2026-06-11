@@ -10,6 +10,7 @@ from config import BOT_TOKEN
 from core.tg_state import (
     send_response, is_allowed_chat, ADMIN_ID, _load_langs,
     square_cache_get, square_cache_delete, _fetch_or_free_models,
+    track_alert_msg,
 )
 from agent.skills import (
     post_to_binance_square,
@@ -559,6 +560,7 @@ async def handle_callback_query(app_session, update):
         from core.tg_state import get_manual_alert_state, set_manual_alert_state, clear_manual_alert_state
 
         msg_id = cq.get("message", {}).get("message_id")
+        track_alert_msg(chat_id, msg_id)  # track the callback message for cleanup
         ma_state = get_manual_alert_state(chat_id)
 
         # Answer callback immediately
@@ -585,8 +587,9 @@ async def handle_callback_query(app_session, update):
                 mode = ma_state.get('mode', 'high')
                 ma_state['step'] = 'awaiting_prices'
                 set_manual_alert_state(chat_id, ma_state)
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "⬅️ Введи две цены заново:", parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
             else:
                 await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
             return
@@ -610,9 +613,10 @@ async def handle_callback_query(app_session, update):
                 [{"text": "📈 High", "callback_data": "malert_mode_high"},
                  {"text": "📉 Low", "callback_data": "malert_mode_low"}],
             ]}
-            await send_response(app_session, chat_id,
+            bot_msg = await send_response(app_session, chat_id,
                 f"⏱ *${short_sym}* — {tf_label}\n\nКак строить линию?",
                 reply_markup=mode_kb, parse_mode="Markdown")
+            track_alert_msg(chat_id, bot_msg)
             return
 
         # --- Mode selection ---
@@ -630,9 +634,10 @@ async def handle_callback_query(app_session, update):
                     [{"text": "⬆️ Верх тела", "callback_data": "malert_date_top"},
                      {"text": "⬇️ Низ тела", "callback_data": "malert_date_bottom"}],
                 ]}
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     "📅 *По датам*\n\nОт какой части тела свечи строить?",
                     reply_markup=date_kb, parse_mode="Markdown")
+                track_alert_msg(chat_id, bot_msg)
                 return
 
             # high / low / body_top / body_bot → ask for prices
@@ -646,11 +651,12 @@ async def handle_callback_query(app_session, update):
                 "body_top": "🕯 Верх тел (max O/C)",
                 "body_bot": "🕯 Низ тел (min O/C)",
             }
-            await send_response(app_session, chat_id,
+            bot_msg = await send_response(app_session, chat_id,
                 f"✅ Режим: *{mode_names.get(mode, mode)}*\n\n"
                 f"Введи две цены через пробел:\n"
                 f"Например: `69500 67200`",
                 parse_mode="Markdown")
+            track_alert_msg(chat_id, bot_msg)
             return
 
         # --- Date sub-mode (top/bottom body) → ask for dates ---
@@ -666,11 +672,12 @@ async def handle_callback_query(app_session, update):
             from config import get_user_tz_offset
             tz_off = get_user_tz_offset(chat_id)
             tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
-            await send_response(app_session, chat_id,
+            bot_msg = await send_response(app_session, chat_id,
                 f"📅 Режим: *{body_label}* ({tz_label})\n\n"
                 f"📍 Точка A — введи дату и время:\n"
                 f"Примеры: `10.06.26 04:45` или `10 06 26 04 45`",
                 parse_mode="Markdown")
+            track_alert_msg(chat_id, bot_msg)
             return
 
         # --- Pick point A (duplicate price resolution) ---
@@ -700,10 +707,11 @@ async def handle_callback_query(app_session, update):
                 set_manual_alert_state(chat_id, ma_state)
                 exact_b = ma_state.get('exact_b', True)
                 title = "точной" if exact_b else "ближайшей"
-                await send_response(app_session, chat_id,
+                bot_msg = await send_response(app_session, chat_id,
                     f"✅ Точка A выбрана.\n\n"
                     f"🔍 Для точки B найдено несколько совпадений {title} цены.\nВыбери свечу:",
                     reply_markup={"inline_keyboard": buttons})
+                track_alert_msg(chat_id, bot_msg)
                 return
             else:
                 # B is single — finalize
