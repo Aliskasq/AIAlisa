@@ -22,6 +22,18 @@ def set_manual_alert_state(chat_id, state):
 def clear_manual_alert_state(chat_id):
     _manual_alert_state.pop(chat_id, None)
 
+# --- LINE 4H SETTINGS INPUT STATE ---
+_line4h_input_state = {}  # {chat_id: "awaiting_range_pct" | "awaiting_point_b_pct"}
+
+def get_line4h_input_state(chat_id):
+    return _line4h_input_state.get(chat_id)
+
+def set_line4h_input_state(chat_id, state):
+    _line4h_input_state[chat_id] = state
+
+def clear_line4h_input_state(chat_id):
+    _line4h_input_state.pop(chat_id, None)
+
 # --- ALERT MESSAGE TRACKING (for auto-cleanup) ---
 _alert_msg_tracker = {}  # {chat_id: [msg_id, msg_id, ...]}
 

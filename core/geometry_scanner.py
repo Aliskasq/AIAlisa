@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 try:
-    from config import load_alerts, save_alerts, load_trend_above_pct
+    from config import load_alerts, save_alerts, load_trend_above_pct, load_line_4h_settings
 except ImportError:
     pass
 
@@ -218,24 +218,65 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF", save_alert=True):
             best_clean = min(valid_length_cands, key=lambda x: x['line_price_now'])
         else:
             # 4H Logic with >80 candles rule
-            anchor_clean = min(clean_candidates, key=lambda x: x['line_price_now'])
-            ceiling_price_20 = anchor_clean['line_price_now'] * 1.20
-            
-            valid_roofs = [c for c in clean_candidates if c['line_price_now'] <= ceiling_price_20]
-            if valid_roofs:
-                longest_roof = max(valid_roofs, key=lambda x: (x['dist'], x['line_price_now']))
-                
-                # Check if Point B of the longest line is more than 80 candles away
-                dist_B_to_end = last_idx - longest_roof['idx_B']
-                if dist_B_to_end > 80:
-                    ceiling_price_10 = anchor_clean['line_price_now'] * 1.10
-                    valid_roofs_10 =[c for c in clean_candidates if c['line_price_now'] <= ceiling_price_10]
-                    if valid_roofs_10:
-                        best_clean = max(valid_roofs_10, key=lambda x: (x['dist'], x['line_price_now']))
+            _l4h = load_line_4h_settings()
+
+            if _l4h["mode"] == "custom":
+                # --- CUSTOM MODE ---
+                # Anchor selection
+                if _l4h["anchor"] == "candle_top":
+                    anchor_price = current_price  # body max of last candle ≈ current_price
+                else:  # "nearest_line"
+                    anchor_price = min(c['line_price_now'] for c in clean_candidates)
+
+                # Range filter
+                _range_pct = float(_l4h.get("range_pct", 20.0))
+                ceiling_price = anchor_price * (1 + _range_pct / 100)
+                valid_roofs = [c for c in clean_candidates if c['line_price_now'] <= ceiling_price]
+
+                if valid_roofs:
+                    longest_roof = max(valid_roofs, key=lambda x: (x['dist'], x['line_price_now']))
+
+                    # Point B rule: check if longest line's B is >80 candles from end
+                    dist_B_to_end = last_idx - longest_roof['idx_B']
+                    if dist_B_to_end > 80:
+                        _pb_rule = _l4h.get("point_b_rule", "narrow_pct")
+
+                        if _pb_rule == "no_change":
+                            # Take the longest line as-is
+                            best_clean = longest_roof
+                        elif _pb_rule == "nearest":
+                            # Fall back to nearest line (lowest price)
+                            best_clean = min(clean_candidates, key=lambda x: x['line_price_now'])
+                        else:  # "narrow_pct"
+                            _pb_pct = float(_l4h.get("point_b_pct", 10.0))
+                            ceiling_narrow = anchor_price * (1 + _pb_pct / 100)
+                            valid_narrow = [c for c in clean_candidates if c['line_price_now'] <= ceiling_narrow]
+                            if valid_narrow:
+                                best_clean = max(valid_narrow, key=lambda x: (x['dist'], x['line_price_now']))
+                            else:
+                                best_clean = min(clean_candidates, key=lambda x: x['line_price_now'])
                     else:
-                        best_clean = anchor_clean # Fallback to nearest if 10% fails
-                else:
-                    best_clean = longest_roof
+                        best_clean = longest_roof
+            else:
+                # --- STANDARD MODE (original logic, unchanged) ---
+                anchor_clean = min(clean_candidates, key=lambda x: x['line_price_now'])
+                ceiling_price_20 = anchor_clean['line_price_now'] * 1.20
+
+                valid_roofs = [c for c in clean_candidates if c['line_price_now'] <= ceiling_price_20]
+                if valid_roofs:
+                    longest_roof = max(valid_roofs, key=lambda x: (x['dist'], x['line_price_now']))
+
+                    # Check if Point B of the longest line is more than 80 candles away
+                    dist_B_to_end = last_idx - longest_roof['idx_B']
+                    if dist_B_to_end > 80:
+                        ceiling_price_10 = anchor_clean['line_price_now'] * 1.10
+                        valid_roofs_10 = [c for c in clean_candidates if c['line_price_now'] <= ceiling_price_10]
+                        if valid_roofs_10:
+                            best_clean = max(valid_roofs_10, key=lambda x: (x['dist'], x['line_price_now']))
+                        else:
+                            best_clean = anchor_clean  # Fallback to nearest if 10% fails
+                    else:
+                        best_clean = longest_roof
 
     best_dirty = None
     if dirty_candidates:

@@ -594,6 +594,38 @@ def save_trend_above_pct(pct):
         logging.error(f"Error writing trend_above_pct: {e}")
 
 
+LINE_4H_SETTINGS_FILE = "data/line_4h_settings.json"
+
+def load_line_4h_settings():
+    """Load 4H line selection settings.
+    Returns dict with keys: mode, anchor, range_pct, point_b_rule, point_b_pct.
+    mode='standard' means use current hardcoded logic unchanged.
+    """
+    defaults = {
+        "mode": "standard",
+        "anchor": "nearest_line",
+        "range_pct": 20.0,
+        "point_b_rule": "narrow_pct",
+        "point_b_pct": 10.0,
+    }
+    if os.path.exists(LINE_4H_SETTINGS_FILE):
+        try:
+            with open(LINE_4H_SETTINGS_FILE, "r") as f:
+                data = json.load(f)
+                defaults.update(data)
+        except Exception:
+            pass
+    return defaults
+
+def save_line_4h_settings(settings):
+    try:
+        os.makedirs(os.path.dirname(LINE_4H_SETTINGS_FILE), exist_ok=True)
+        with open(LINE_4H_SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        logging.error(f"Error writing line_4h_settings: {e}")
+
+
 USER_SETTINGS_FILE = "data/user_settings.json"
 
 def load_user_settings():

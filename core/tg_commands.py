@@ -16,6 +16,7 @@ from config import (
     load_manual_alerts, save_manual_alerts,
     get_user_tz_offset, set_user_tz_offset,
     load_trend_above_pct, save_trend_above_pct,
+    load_line_4h_settings, save_line_4h_settings,
 )
 import config as _cfg
 import agent.analyzer
@@ -203,6 +204,39 @@ async def handle_message(app_session, update):
     saved_lang = get_chat_lang(chat_id)
     has_cyrillic = any('\u0400' <= char <= '\u04FF' for char in text)
     lang_pref = "ru" if has_cyrillic else saved_lang
+
+    # ==========================================
+    # LINE 4H SETTINGS INPUT (awaiting % from user)
+    # ==========================================
+    from core.tg_state import get_line4h_input_state, clear_line4h_input_state
+    _l4h_state = get_line4h_input_state(chat_id)
+    if _l4h_state:
+        try:
+            val = float(text.replace("%", "").replace(",", "."))
+            if val < 0 or val > 100:
+                await send_response(app_session, chat_id, "❌ Допустимый диапазон: 0–100%", msg_id)
+                clear_line4h_input_state(chat_id)
+                return
+
+            s = load_line_4h_settings()
+            if _l4h_state == "awaiting_range_pct":
+                s["range_pct"] = val
+                s["mode"] = "custom"
+                save_line_4h_settings(s)
+                await send_response(app_session, chat_id,
+                    f"✅ Допуск поиска линий: `{val}%`", msg_id, parse_mode="Markdown")
+            elif _l4h_state == "awaiting_point_b_pct":
+                s["point_b_pct"] = val
+                s["point_b_rule"] = "narrow_pct"
+                s["mode"] = "custom"
+                save_line_4h_settings(s)
+                await send_response(app_session, chat_id,
+                    f"✅ Допуск точки Б: `{val}%`", msg_id, parse_mode="Markdown")
+        except ValueError:
+            await send_response(app_session, chat_id,
+                "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
+        clear_line4h_input_state(chat_id)
+        return
 
     # ==========================================
     # MANUAL ALERT STATE MACHINE (multi-step flow)
@@ -640,6 +674,7 @@ async def handle_message(app_session, update):
                 "🔒 `/signals close` — snapshot: close all open now\n"
                 "🔄 `/signals clear` — reset bank to $10k\n"
                 "📐 `порог 5%` — порог пробития трендлайна\n"
+                "📐 `расширенные настройки линии 4ч`\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
                 "📐 `/smc` — настройки SMC: режим, OB блоки\n"
 
@@ -1074,6 +1109,85 @@ async def handle_message(app_session, update):
     # ==========================================
     # STOPLOSS MODE (/stoploss)
     # ==========================================
+    # ==========================================
+    # LINE 4H SETTINGS COMMAND
+    # ==========================================
+    if text.startswith("расширенные настройки линии 4ч") or text.startswith("расширенные настройки линий 4ч"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Только для админа", msg_id)
+            return
+
+        s = load_line_4h_settings()
+        _mode = s["mode"]
+
+        if _mode == "standard":
+            text_resp = (
+                "📐 *Настройки линий 4Ч*\n\n"
+                "Режим: ✅ Стандарт\n"
+                "_Якорь: ближняя линия, допуск 20%, "
+                "точка Б >80 свечей → сужение до 10%_"
+            )
+            kb = {"inline_keyboard": [
+                [{"text": "✅ Стандарт", "callback_data": "l4h_standard"},
+                 {"text": "Пользовательский", "callback_data": "l4h_custom"}],
+            ]}
+        else:
+            _anc = s.get("anchor", "nearest_line")
+            _rpct = s.get("range_pct", 20.0)
+            _pb = s.get("point_b_rule", "narrow_pct")
+            _pb_pct = s.get("point_b_pct", 10.0)
+
+            _anc_label = "Ближняя линия" if _anc == "nearest_line" else "Верх тела свечи"
+            _pb_labels = {
+                "no_change": "Без изменений",
+                "nearest": "Ближняя к цене",
+                "narrow_pct": f"Сужение до {_pb_pct}%",
+            }
+            _pb_label = _pb_labels.get(_pb, f"Сужение до {_pb_pct}%")
+
+            text_resp = (
+                f"📐 *Настройки линий 4Ч*\n\n"
+                f"Режим: ✅ Пользовательский\n\n"
+                f"1️⃣ Якорь: `{_anc_label}`\n"
+                f"2️⃣ Допуск: `{_rpct}%`\n"
+                f"3️⃣ Точка Б >80 свечей: `{_pb_label}`"
+            )
+
+            _anc_row = [
+                {"text": ("✅ " if _anc == "nearest_line" else "") + "Ближняя линия",
+                 "callback_data": "l4h_anc_line"},
+                {"text": ("✅ " if _anc == "candle_top" else "") + "Верх тела свечи",
+                 "callback_data": "l4h_anc_candle"},
+            ]
+
+            _pb_row = [
+                {"text": ("✅ " if _pb == "no_change" else "") + "Без изменений",
+                 "callback_data": "l4h_pb_nochange"},
+                {"text": ("✅ " if _pb == "nearest" else "") + "Ближняя к цене",
+                 "callback_data": "l4h_pb_nearest"},
+                {"text": ("✅ " if _pb == "narrow_pct" else "") + f"Ввести % ({_pb_pct}%)",
+                 "callback_data": "l4h_pb_pct"},
+            ]
+
+            kb = {"inline_keyboard": [
+                [{"text": "Стандарт", "callback_data": "l4h_standard"},
+                 {"text": "✅ Пользовательский", "callback_data": "l4h_custom"}],
+                [{"text": "── Якорь ──", "callback_data": "l4h_noop"}],
+                _anc_row,
+                [{"text": "── Допуск ──", "callback_data": "l4h_noop"}],
+                [{"text": f"📏 Изменить ({_rpct}%)", "callback_data": "l4h_range"}],
+                [{"text": "── Точка Б (>80 свечей) ──", "callback_data": "l4h_noop"}],
+                _pb_row,
+            ]}
+
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        await app_session.post(url, json={
+            "chat_id": chat_id, "text": text_resp,
+            "parse_mode": "Markdown", "reply_markup": kb,
+            "reply_to_message_id": msg_id,
+        })
+        return
+
     # ==========================================
     # TREND ABOVE THRESHOLD: порог N%
     # ==========================================

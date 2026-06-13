@@ -441,6 +441,143 @@ async def handle_callback_query(app_session, update):
         return
 
     # ------------------------------------------------------------------ #
+    # 0c. Line 4H Settings (l4h_ prefix)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("l4h_"):
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True},
+            )
+            return
+
+        if cb_data == "l4h_noop":
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id},
+            )
+            return
+
+        from config import load_line_4h_settings, save_line_4h_settings
+        from core.tg_state import set_line4h_input_state
+
+        s = load_line_4h_settings()
+
+        # --- Mode switches ---
+        if cb_data == "l4h_standard":
+            s["mode"] = "standard"
+            save_line_4h_settings(s)
+        elif cb_data == "l4h_custom":
+            s["mode"] = "custom"
+            save_line_4h_settings(s)
+
+        # --- Anchor switches ---
+        elif cb_data == "l4h_anc_line":
+            s["anchor"] = "nearest_line"
+            s["mode"] = "custom"
+            save_line_4h_settings(s)
+        elif cb_data == "l4h_anc_candle":
+            s["anchor"] = "candle_top"
+            s["mode"] = "custom"
+            save_line_4h_settings(s)
+
+        # --- Range input ---
+        elif cb_data == "l4h_range":
+            set_line4h_input_state(chat_id, "awaiting_range_pct")
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "📐 *Допуск поиска линий от якоря*\n\n"
+                "Введите процент (например: `10`, `20`, `23.55`):",
+                {"inline_keyboard": []}, cq_id, toast="✏️ Введите %")
+            return
+
+        # --- Point B rules ---
+        elif cb_data == "l4h_pb_nochange":
+            s["point_b_rule"] = "no_change"
+            s["mode"] = "custom"
+            save_line_4h_settings(s)
+        elif cb_data == "l4h_pb_nearest":
+            s["point_b_rule"] = "nearest"
+            s["mode"] = "custom"
+            save_line_4h_settings(s)
+        elif cb_data == "l4h_pb_pct":
+            set_line4h_input_state(chat_id, "awaiting_point_b_pct")
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "📐 *Допуск для точки Б (>80 свечей)*\n\n"
+                "Введите процент (например: `5`, `10`, `15.5`):",
+                {"inline_keyboard": []}, cq_id, toast="✏️ Введите %")
+            return
+
+        # --- Render current state ---
+        s = load_line_4h_settings()  # reload after changes
+        _mode = s["mode"]
+        if _mode == "standard":
+            text = (
+                "📐 *Настройки линий 4Ч*\n\n"
+                "Режим: ✅ Стандарт\n"
+                "_Якорь: ближняя линия, допуск 20%, "
+                "точка Б >80 свечей → сужение до 10%_"
+            )
+            kb = {"inline_keyboard": [
+                [{"text": "✅ Стандарт", "callback_data": "l4h_standard"},
+                 {"text": "Пользовательский", "callback_data": "l4h_custom"}],
+            ]}
+        else:
+            _anc = s.get("anchor", "nearest_line")
+            _rpct = s.get("range_pct", 20.0)
+            _pb = s.get("point_b_rule", "narrow_pct")
+            _pb_pct = s.get("point_b_pct", 10.0)
+
+            _anc_label = "Ближняя линия" if _anc == "nearest_line" else "Верх тела свечи"
+            _pb_labels = {
+                "no_change": "Без изменений",
+                "nearest": "Ближняя к цене",
+                "narrow_pct": f"Сужение до {_pb_pct}%",
+            }
+            _pb_label = _pb_labels.get(_pb, f"Сужение до {_pb_pct}%")
+
+            text = (
+                f"📐 *Настройки линий 4Ч*\n\n"
+                f"Режим: ✅ Пользовательский\n\n"
+                f"1️⃣ Якорь: `{_anc_label}`\n"
+                f"2️⃣ Допуск: `{_rpct}%`\n"
+                f"3️⃣ Точка Б >80 свечей: `{_pb_label}`"
+            )
+
+            # Anchor buttons
+            _anc_row = [
+                {"text": ("✅ " if _anc == "nearest_line" else "") + "Ближняя линия",
+                 "callback_data": "l4h_anc_line"},
+                {"text": ("✅ " if _anc == "candle_top" else "") + "Верх тела свечи",
+                 "callback_data": "l4h_anc_candle"},
+            ]
+
+            # Point B buttons
+            _pb_row1_text = "Строим самую длинную линию.\nЕсли точка Б >80 свечей от текущей:"
+            _pb_row = [
+                {"text": ("✅ " if _pb == "no_change" else "") + "Без изменений",
+                 "callback_data": "l4h_pb_nochange"},
+                {"text": ("✅ " if _pb == "nearest" else "") + "Ближняя к цене",
+                 "callback_data": "l4h_pb_nearest"},
+                {"text": ("✅ " if _pb == "narrow_pct" else "") + f"Ввести % ({_pb_pct}%)",
+                 "callback_data": "l4h_pb_pct"},
+            ]
+
+            kb = {"inline_keyboard": [
+                [{"text": "Стандарт", "callback_data": "l4h_standard"},
+                 {"text": "✅ Пользовательский", "callback_data": "l4h_custom"}],
+                [{"text": "── Якорь ──", "callback_data": "l4h_noop"}],
+                _anc_row,
+                [{"text": "── Допуск ──", "callback_data": "l4h_noop"}],
+                [{"text": f"📏 Изменить ({_rpct}%)", "callback_data": "l4h_range"}],
+                [{"text": "── Точка Б (>80 свечей) ──", "callback_data": "l4h_noop"}],
+                _pb_row,
+            ]}
+
+        await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+        return
+
+    # ------------------------------------------------------------------ #
     # 0b. SMC Settings (smc_ prefix)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("smc_"):
