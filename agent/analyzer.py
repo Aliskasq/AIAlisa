@@ -37,7 +37,11 @@ def _save_and_cache_settings(settings):
 def get_active_provider_info():
     """Return (provider, model, key_index) for external use (e.g. tg_listener)."""
     s = _get_ai_settings()
+    if s.get("ai_disabled"):
+        return "disabled", "disabled", 0
     provider = s["active_provider"]
+    if provider == "disabled":
+        return "disabled", "disabled", 0
     if provider == "openrouter":
         return provider, s["openrouter_model"], 0
     elif provider == "gemini":
@@ -179,6 +183,9 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
     Returns (response_text, provider_used, model_used) or (None, None, None).
     """
     s = _get_ai_settings()
+    if s.get("ai_disabled") or s.get("active_provider") == "disabled":
+        logging.info("🚫 AI disabled by user — skipping inference")
+        return None, None, None
     provider = s.get("active_provider", "gemini")
     key_idx = s.get("active_key_index", 0)
 
@@ -262,6 +269,9 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
         logging.warning(f"⚠️ OpenRouter {or_model} failed, trying fallbacks...")
 
     # === Fallback: Groq → OpenRouter (NO Gemini here — Gemini only from daily reset) ===
+    if s.get("fallback_disabled"):
+        logging.warning("❌ Fallback disabled — no further attempts")
+        return None, None, None
     if GROQ_API_KEYS and provider != "groq":
         groq_model = "llama-3.3-70b-versatile"
         for i, key in enumerate(GROQ_API_KEYS):
@@ -298,12 +308,16 @@ def daily_reset_to_gemini_1():
     Configurable via daily_reset_provider / daily_reset_model / daily_reset_key_index.
     Legacy name kept for backward compatibility with main.py import."""
     s = _get_ai_settings()
+    if s.get("daily_reset_disabled"):
+        logging.info("🔄 Daily reset skipped (disabled by user)")
+        return
     reset_provider = s.get("daily_reset_provider", "gemini")
     reset_model = s.get("daily_reset_model", "")
     reset_key_index = s.get("daily_reset_key_index", 0)
 
     s["active_provider"] = reset_provider
     s["active_key_index"] = reset_key_index
+    s["ai_disabled"] = False  # Re-enable AI on daily reset
 
     # If reset_model is set, override the model for that provider
     if reset_model:

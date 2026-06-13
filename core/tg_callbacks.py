@@ -966,9 +966,9 @@ async def handle_callback_query(app_session, update):
         return
 
     # ------------------------------------------------------------------ #
-    # 3. Model / Provider Selection Buttons (Admin only)
+    # 3. Unified Model Menu (mdm_*) + Legacy Provider Buttons (Admin only)
     # ------------------------------------------------------------------ #
-    if cb_data.startswith(("md_", "prov_", "or_md_", "gm_", "gq_", "test_", "back_")):
+    if cb_data.startswith(("mdm_", "md_", "prov_", "or_md_", "gm_", "gq_", "test_", "back_")):
         if cb_data in ("md_noop", "noop"):
             await app_session.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
@@ -985,224 +985,463 @@ async def handle_callback_query(app_session, update):
             return
 
         from agent.analyzer import get_active_provider_info, set_active_provider, test_provider_key
-        from config import GROQ_API_KEYS, GEMINI_API_KEYS, KEY_ACCOUNT_LABELS
+        from config import GROQ_API_KEYS, GEMINI_API_KEYS, KEY_ACCOUNT_LABELS, load_ai_settings, save_ai_settings
+        from core.tg_state import get_model_menu_state, set_model_menu_state, clear_model_menu_state
 
-        # --- Back to provider menu ---
-        if cb_data == "back_models":
+        msg_id_cb = cq.get("message", {}).get("message_id")
+
+        # === Gemini model map (shared) ===
+        _gm_model_map = {
+            "3.1pro": "gemini-3.1-pro-preview",
+            "3pro": "gemini-3-pro-preview",
+            "2.5pro": "gemini-2.5-pro",
+            "2.5flash": "gemini-2.5-flash",
+            "2.5flashlite": "gemini-2.5-flash-lite",
+            "2.0flash": "gemini-2.0-flash",
+        }
+        _groq_model_map = {
+            "l3.3-70b": "llama-3.3-70b-versatile",
+            "l3.1-70b": "llama-3.1-70b-versatile",
+            "gemma2-27b": "gemma2-27b-it",
+            "qwq32b": "qwen-qwq-32b",
+        }
+
+        # ----------------------------------------------------------
+        # Helper: build main /model menu text + keyboard
+        # ----------------------------------------------------------
+        def _build_main_menu():
+            s = load_ai_settings()
             prov, mdl, ki = get_active_provider_info()
-            txt = f"🧠 *AI Provider Selection*\nActive: `{prov}` / `{mdl}`"
+            # Current model
+            if s.get("ai_disabled"):
+                model_line = "🚫 AI отключён"
+            elif prov == "gemini":
+                model_line = f"💎 Gemini #{ki+1} / `{mdl}`"
+            elif prov == "groq":
+                model_line = f"⚡ Groq #{ki+1} / `{mdl}`"
+            else:
+                model_line = f"🌐 OpenRouter / `{mdl}`"
+            # Fallback
+            chain = s.get("openrouter_fallback_chain", ["openai/gpt-oss-120b:free", "openrouter/free"])
+            if s.get("fallback_disabled"):
+                fb_line = "🚫 Без фоллбэка"
+            elif chain:
+                fb_line = " → ".join([f"`{m}`" for m in chain])
+            else:
+                fb_line = "🚫 Без фоллбэка"
+            # Start of day
+            rp = s.get("daily_reset_provider", "gemini")
+            rm = s.get("daily_reset_model", "")
+            rk = s.get("daily_reset_key_index", 0)
+            if s.get("daily_reset_disabled"):
+                sd_line = "🚫 Без сброса"
+            elif rp == "gemini":
+                sd_line = f"💎 Gemini #{rk+1} / `{rm or s.get('gemini_model', 'gemini-2.5-flash')}`"
+            elif rp == "groq":
+                sd_line = f"⚡ Groq #{rk+1} / `{rm or s.get('groq_model', 'llama-3.3-70b-versatile')}`"
+            else:
+                sd_line = f"🌐 OpenRouter / `{rm or s.get('openrouter_model', 'openrouter/free')}`"
+            txt = (
+                f"🧠 *AI Settings*\n\n"
+                f"*Текущая модель:* {model_line}\n"
+                f"*Фоллбэк:* {fb_line}\n"
+                f"*Старт дня (00:00 UTC):* {sd_line}"
+            )
             kb = {"inline_keyboard": [
-                [{"text": "🌐 OpenRouter", "callback_data": "prov_or"},
-                 {"text": "💎 Gemini", "callback_data": "prov_gm"},
-                 {"text": "⚡ Groq", "callback_data": "prov_gq"}]
+                [{"text": "🔄 Изменить модель", "callback_data": "mdm_model"},
+                 {"text": "🔗 Изменить фоллбэк", "callback_data": "mdm_fallback"}],
+                [{"text": "🌅 Изменить старт дня", "callback_data": "mdm_startday"},
+                 {"text": "📋 Все модели", "callback_data": "mdm_all"}],
             ]}
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": cq.get("message", {}).get("message_id"),
-                      "text": txt, "parse_mode": "Markdown", "reply_markup": kb},
-            )
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id},
-            )
-            return
+            return txt, kb
 
-        # --- Provider selection: OpenRouter ---
-        if cb_data == "prov_or":
-            prov, mdl, _ = get_active_provider_info()
-            cur = mdl if prov == "openrouter" else agent.analyzer._get_ai_settings().get("openrouter_model", "")
-            free_models = await _fetch_or_free_models()
-            txt = f"🌐 *OpenRouter Free Models* ({len(free_models)})\nCurrent: `{cur}`"
-            rows = [[{"text": "── FREE MODELS ──", "callback_data": "noop"}]]
-            row = []
-            for fm in free_models:
-                short = fm.split("/")[-1].replace(":free", "")
-                cb = f"or_md_{fm}" if len(f"or_md_{fm}") <= 64 else f"or_md_{fm[:58]}"
-                row.append({"text": short[:30], "callback_data": cb})
-                if len(row) == 2:
-                    rows.append(row)
-                    row = []
-            if row:
-                rows.append(row)
-            rows.append([{"text": "🧪 Test All Free Models", "callback_data": "test_or"}])
-            rows.append([{"text": "⬅️ Back", "callback_data": "back_models"}])
-            kb = {"inline_keyboard": rows}
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": cq.get("message", {}).get("message_id"),
-                      "text": txt, "parse_mode": "Markdown", "reply_markup": kb},
-            )
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id},
-            )
-            return
+        # ----------------------------------------------------------
+        # Helper: build category selection header + keyboard
+        # ----------------------------------------------------------
+        def _build_category_kb(mode, fallback_chain=None):
+            if mode == "fallback":
+                chain_text = " → ".join([f"`{m}`" for m in fallback_chain]) if fallback_chain else "_(пусто)_"
+                header = f"🔗 *Фоллбэк цепочка:* {chain_text}\nВыбирай модели по очереди:"
+            elif mode == "startday":
+                header = "🌅 *Старт дня (00:00 UTC)*\nВыбери модель:"
+            else:
+                header = "🔄 *Изменить текущую модель*\nВыбери модель:"
+            from core.tg_state import build_model_category_kb
+            kb = build_model_category_kb(mode, fallback_chain)
+            return header, kb
 
-        # --- Provider selection: Gemini ---
-        if cb_data == "prov_gm":
-            s = agent.analyzer._get_ai_settings()
+        # ----------------------------------------------------------
+        # Helper: build Gemini model list keyboard
+        # ----------------------------------------------------------
+        def _build_gemini_kb(mode):
+            s = load_ai_settings()
             ki = s.get("active_key_index", 0) if s.get("active_provider") == "gemini" else 0
             gm_model = s.get("gemini_model", "gemini-2.5-flash")
-            lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
-            txt = f"💎 *Gemini* (8 keys)\nActive key: #{ki+1} ({lbl})\nModel: `{gm_model}`"
-
-            # Build key buttons (2 per row)
             key_rows = []
             for i in range(0, min(8, len(GEMINI_API_KEYS)), 2):
                 row = []
-                for j in [i, i+1]:
+                for j in [i, i + 1]:
                     if j < len(GEMINI_API_KEYS):
-                        marker = "✅ " if j == ki else ""
-                        row.append({"text": f"{marker}🔑 {KEY_ACCOUNT_LABELS.get(j, f'#{j+1}')}", "callback_data": f"gm_k{j}"})
+                        marker = "✅ " if j == ki and mode == "model" else ""
+                        lbl = KEY_ACCOUNT_LABELS.get(j, f"#{j+1}")
+                        row.append({"text": f"{marker}🔑 {lbl}", "callback_data": f"mdm_{mode}_gm_k{j}"})
                 key_rows.append(row)
+            model_rows = [
+                [{"text": "── Модели ──", "callback_data": "noop"}],
+                [{"text": "⭐ Gemini 3.1 Pro", "callback_data": f"mdm_{mode}_gm_m_3.1pro"},
+                 {"text": "Gemini 3 Pro", "callback_data": f"mdm_{mode}_gm_m_3pro"}],
+                [{"text": "Gemini 2.5 Pro", "callback_data": f"mdm_{mode}_gm_m_2.5pro"},
+                 {"text": "Gemini 2.5 Flash", "callback_data": f"mdm_{mode}_gm_m_2.5flash"}],
+                [{"text": "Gemini 2.5 Flash Lite", "callback_data": f"mdm_{mode}_gm_m_2.5flashlite"},
+                 {"text": "Gemini 2.0 Flash", "callback_data": f"mdm_{mode}_gm_m_2.0flash"}],
+                [{"text": "🧪 Тест всех ключей", "callback_data": "test_gm"}],
+                [{"text": "⬅️ Назад", "callback_data": f"mdm_{mode}"}],
+            ]
+            txt = f"💎 *Gemini*\nАктивный ключ: #{ki+1}\nМодель: `{gm_model}`"
+            return txt, {"inline_keyboard": key_rows + model_rows}
 
-            kb = {"inline_keyboard": key_rows + [
-                [{"text": "── Models ──", "callback_data": "noop"}],
-                [{"text": "⭐ Gemini 3.1 Pro", "callback_data": "gm_md_3.1pro"},
-                 {"text": "Gemini 3 Pro", "callback_data": "gm_md_3pro"}],
-                [{"text": "Gemini 2.5 Pro", "callback_data": "gm_md_2.5pro"},
-                 {"text": "Gemini 2.5 Flash", "callback_data": "gm_md_2.5flash"}],
-                [{"text": "Gemini 2.5 Flash Lite", "callback_data": "gm_md_2.5flashlite"},
-                 {"text": "Gemini 2.0 Flash", "callback_data": "gm_md_2.0flash"}],
-                [{"text": "🧪 Test All Keys", "callback_data": "test_gm"}],
-                [{"text": "⬅️ Back", "callback_data": "back_models"}]
-            ]}
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": cq.get("message", {}).get("message_id"),
-                      "text": txt, "parse_mode": "Markdown", "reply_markup": kb},
-            )
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id},
-            )
-            return
-
-        # --- Provider selection: Groq ---
-        if cb_data == "prov_gq":
-            s = agent.analyzer._get_ai_settings()
+        # ----------------------------------------------------------
+        # Helper: build Groq model list keyboard
+        # ----------------------------------------------------------
+        def _build_groq_kb(mode):
+            s = load_ai_settings()
             ki = s.get("active_key_index", 0) if s.get("active_provider") == "groq" else 0
             gq_model = s.get("groq_model", "llama-3.3-70b-versatile")
-            lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
-            txt = f"⚡ *Groq*\nActive key: #{ki+1} ({lbl})\nModel: `{gq_model}`"
             key_row = []
             for i in range(min(3, len(GROQ_API_KEYS))):
-                marker = "✅ " if i == ki else ""
-                key_row.append({"text": f"{marker}🔑 {KEY_ACCOUNT_LABELS.get(i, f'#{i+1}')}", "callback_data": f"gq_k{i}"})
+                marker = "✅ " if i == ki and mode == "model" else ""
+                lbl = KEY_ACCOUNT_LABELS.get(i, f"#{i+1}")
+                key_row.append({"text": f"{marker}🔑 {lbl}", "callback_data": f"mdm_{mode}_gq_k{i}"})
             kb = {"inline_keyboard": [
                 key_row,
-                [{"text": "── Models ──", "callback_data": "noop"}],
-                [{"text": "🦙 Llama 3.3 70B", "callback_data": "gq_md_l3.3-70b"},
-                 {"text": "🦙 Llama 3.1 70B", "callback_data": "gq_md_l3.1-70b"}],
-                [{"text": "💎 Gemma2 27B", "callback_data": "gq_md_gemma2-27b"},
-                 {"text": "🔮 Qwen QWQ 32B", "callback_data": "gq_md_qwq32b"}],
-                [{"text": "🧪 Test All Keys", "callback_data": "test_gq"}],
-                [{"text": "⬅️ Back", "callback_data": "back_models"}]
+                [{"text": "── Модели ──", "callback_data": "noop"}],
+                [{"text": "🦙 Llama 3.3 70B", "callback_data": f"mdm_{mode}_gq_m_l3.3-70b"},
+                 {"text": "🦙 Llama 3.1 70B", "callback_data": f"mdm_{mode}_gq_m_l3.1-70b"}],
+                [{"text": "💎 Gemma2 27B", "callback_data": f"mdm_{mode}_gq_m_gemma2-27b"},
+                 {"text": "🔮 Qwen QWQ 32B", "callback_data": f"mdm_{mode}_gq_m_qwq32b"}],
+                [{"text": "🧪 Тест ключей", "callback_data": "test_gq"}],
+                [{"text": "⬅️ Назад", "callback_data": f"mdm_{mode}"}],
             ]}
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-                json={"chat_id": chat_id, "message_id": cq.get("message", {}).get("message_id"),
-                      "text": txt, "parse_mode": "Markdown", "reply_markup": kb},
-            )
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id},
-            )
+            txt = f"⚡ *Groq*\nАктивный ключ: #{ki+1}\nМодель: `{gq_model}`"
+            return txt, kb
+
+        # ----------------------------------------------------------
+        # Helper: apply model selection based on mode
+        # ----------------------------------------------------------
+        def _apply_model(mode, provider, model, key_index=0):
+            """Apply selected model. Returns confirmation text."""
+            s = load_ai_settings()
+            if mode == "model":
+                set_active_provider(provider, model=model, key_index=key_index)
+                if provider == "openrouter":
+                    _cfg.OPENROUTER_MODEL = model
+                    agent.analyzer.OPENROUTER_MODEL = model
+                return f"✅ Модель → `{provider}` / `{model}`"
+            elif mode == "startday":
+                s["daily_reset_provider"] = provider
+                s["daily_reset_model"] = model
+                s["daily_reset_key_index"] = key_index
+                s["daily_reset_disabled"] = False
+                save_ai_settings(s)
+                return f"✅ Старт дня → `{provider}` / `{model}`"
+            elif mode == "fallback":
+                # For fallback, we add to chain (handled separately)
+                return ""
+
+        # ----------------------------------------------------------
+        # Helper: add model to fallback chain
+        # ----------------------------------------------------------
+        def _add_to_fallback(chat_id, provider, model):
+            st = get_model_menu_state(chat_id) or {"mode": "fallback", "fallback_chain": []}
+            chain = st.get("fallback_chain", [])
+            # Store as provider-qualified identifier
+            if provider == "gemini":
+                chain.append(f"gemini:{model}")
+            elif provider == "groq":
+                chain.append(f"groq:{model}")
+            else:
+                chain.append(model)  # OpenRouter models already have provider/ prefix
+            st["fallback_chain"] = chain
+            st["awaiting_text"] = False
+            set_model_menu_state(chat_id, st)
+            return chain
+
+        # ==========================================================
+        # BACK TO MAIN MENU
+        # ==========================================================
+        if cb_data == "mdm_back":
+            clear_model_menu_state(chat_id)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
             return
 
-        # --- OpenRouter model select ---
-        if cb_data.startswith("or_md_"):
-            new_model = cb_data[6:]
-            set_active_provider("openrouter", model=new_model)
-            agent.analyzer.OPENROUTER_MODEL = new_model
-            _cfg.OPENROUTER_MODEL = new_model
-            short = new_model.split("/")[-1] if "/" in new_model else new_model
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": f"✅ OpenRouter → {short}"},
-            )
-            await send_response(app_session, chat_id, f"✅ Provider: *OpenRouter*\nModel: `{new_model}`", parse_mode="Markdown")
+        # ==========================================================
+        # MAIN MENU BUTTONS: model / fallback / startday / all
+        # ==========================================================
+        if cb_data in ("mdm_model", "mdm_fallback", "mdm_startday"):
+            mode = cb_data.replace("mdm_", "")
+            if mode == "fallback":
+                st = get_model_menu_state(chat_id) or {}
+                st["mode"] = "fallback"
+                st["fallback_chain"] = st.get("fallback_chain", [])
+                st["awaiting_text"] = False
+                set_model_menu_state(chat_id, st)
+                header, kb = _build_category_kb("fallback", st["fallback_chain"])
+            else:
+                set_model_menu_state(chat_id, {"mode": mode})
+                header, kb = _build_category_kb(mode)
+            await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id)
             return
 
-        # --- Gemini key select (indices 0-7) ---
-        if cb_data.startswith("gm_k"):
+        # --- 📋 All models button ---
+        if cb_data == "mdm_all":
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⏳ Загружаю..."},
+            )
             try:
-                ki = int(cb_data[3:])  # Support multi-digit indices (gm_k0 .. gm_k20)
-                if 0 <= ki < len(GEMINI_API_KEYS):
-                    s = agent.analyzer._get_ai_settings()
-                    gm_model = s.get("gemini_model", "gemini-2.5-flash")
-                    set_active_provider("gemini", model=gm_model, key_index=ki)
-                    lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
+                async with app_session.get("https://openrouter.ai/api/v1/models", timeout=15) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        models = data.get("data", [])
+                        models.sort(key=lambda m: m.get("id", ""))
+                        lines = [f"🧠 *Все модели OpenRouter ({len(models)}):*\n"]
+                        for m in models:
+                            mid = m.get("id", "?")
+                            pricing = m.get("pricing", {})
+                            is_free = str(pricing.get("prompt", "?")) == "0"
+                            free_tag = " 🆓" if is_free else ""
+                            lines.append(f"`{mid}`{free_tag}")
+                        chunks = []
+                        current_chunk = ""
+                        for line in lines:
+                            if len(current_chunk) + len(line) + 2 > 3900:
+                                chunks.append(current_chunk)
+                                current_chunk = line
+                            else:
+                                current_chunk += "\n" + line
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        for chunk in chunks:
+                            await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+                        await send_response(app_session, chat_id,
+                            "💡 Скопируй model-id и вставь через кнопку 💰 OpenRouter $$$")
+            except Exception as e:
+                await send_response(app_session, chat_id, f"❌ Ошибка: {e}")
+            return
+
+        # ==========================================================
+        # CATEGORY BUTTONS: cat_gm / cat_gq / cat_or / paid / none
+        # ==========================================================
+        # Parse mode from callback: mdm_{mode}_cat_gm, mdm_{mode}_paid, etc.
+        for _mode in ("model", "fallback", "startday"):
+            prefix = f"mdm_{_mode}_"
+            if cb_data.startswith(prefix):
+                sub = cb_data[len(prefix):]
+
+                # --- Gemini category ---
+                if sub == "cat_gm":
+                    txt, kb = _build_gemini_kb(_mode)
+                    await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
+                    return
+
+                # --- Groq category ---
+                if sub == "cat_gq":
+                    txt, kb = _build_groq_kb(_mode)
+                    await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
+                    return
+
+                # --- OpenRouter Free category ---
+                if sub == "cat_or":
+                    free_models = await _fetch_or_free_models()
+                    txt = f"🌐 *OpenRouter Free* ({len(free_models)})"
+                    rows = []
+                    row = []
+                    for fm in free_models:
+                        short = fm.split("/")[-1].replace(":free", "")
+                        cb_val = f"mdm_{_mode}_or_{fm}"
+                        if len(cb_val) > 64:
+                            cb_val = f"mdm_{_mode}_or_{fm[:64-len(f'mdm_{_mode}_or_')]}"
+                        row.append({"text": short[:30], "callback_data": cb_val})
+                        if len(row) == 2:
+                            rows.append(row)
+                            row = []
+                    if row:
+                        rows.append(row)
+                    rows.append([{"text": "🧪 Тест Free моделей", "callback_data": "test_or"}])
+                    rows.append([{"text": "⬅️ Назад", "callback_data": f"mdm_{_mode}"}])
+                    await _slm_edit(app_session, chat_id, msg_id_cb, txt, {"inline_keyboard": rows}, cq_id)
+                    return
+
+                # --- OpenRouter $$$ (paid / custom input) ---
+                if sub == "paid":
+                    st = get_model_menu_state(chat_id) or {"mode": _mode}
+                    st["awaiting_text"] = True
+                    st["mode"] = _mode
+                    set_model_menu_state(chat_id, st)
                     await app_session.post(
                         f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                        json={"callback_query_id": cq_id, "text": f"✅ Gemini key #{ki+1} ({lbl})"},
+                        json={"callback_query_id": cq_id, "text": "✏️ Введи model-id"},
                     )
-                    await send_response(app_session, chat_id, f"✅ Provider: *Gemini*\nKey: #{ki+1} ({lbl})\nModel: `{gm_model}`", parse_mode="Markdown")
-            except (ValueError, IndexError):
-                pass
+                    await send_response(app_session, chat_id,
+                        "✏️ Введи model-id OpenRouter (например: `anthropic/claude-3.5-sonnet`).\n"
+                        "Используй 📋 Все модели, чтобы найти нужный id.",
+                        parse_mode="Markdown")
+                    return
+
+                # --- 🚫 Без модели ---
+                if sub == "none":
+                    s = load_ai_settings()
+                    if _mode == "model":
+                        s["ai_disabled"] = True
+                        s["active_provider"] = "disabled"
+                        save_ai_settings(s)
+                        toast = "🚫 AI отключён"
+                    elif _mode == "startday":
+                        s["daily_reset_disabled"] = True
+                        save_ai_settings(s)
+                        toast = "🚫 Сброс на старт дня отключён"
+                    elif _mode == "fallback":
+                        s["fallback_disabled"] = True
+                        s["openrouter_fallback_chain"] = []
+                        save_ai_settings(s)
+                        clear_model_menu_state(chat_id)
+                        toast = "🚫 Фоллбэк отключён"
+                    txt, kb = _build_main_menu()
+                    await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, toast)
+                    return
+
+                # --- Gemini key select: gm_k{N} ---
+                if sub.startswith("gm_k"):
+                    try:
+                        ki = int(sub[4:])
+                        if 0 <= ki < len(GEMINI_API_KEYS):
+                            s = load_ai_settings()
+                            gm_model = s.get("gemini_model", "gemini-2.5-flash")
+                            if _mode == "fallback":
+                                chain = _add_to_fallback(chat_id, "gemini", gm_model)
+                                chain_disp = " → ".join([f"`{m}`" for m in chain])
+                                header, kb = _build_category_kb("fallback", chain)
+                                await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, f"➕ Gemini #{ki+1}")
+                            else:
+                                confirm = _apply_model(_mode, "gemini", gm_model, ki)
+                                s["ai_disabled"] = False
+                                save_ai_settings(s)
+                                txt, kb = _build_main_menu()
+                                await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, confirm)
+                    except (ValueError, IndexError):
+                        pass
+                    return
+
+                # --- Gemini model select: gm_m_{key} ---
+                if sub.startswith("gm_m_"):
+                    model_key = sub[5:]
+                    if model_key in _gm_model_map:
+                        new_model = _gm_model_map[model_key]
+                        s = load_ai_settings()
+                        ki = s.get("active_key_index", 0)
+                        if _mode == "fallback":
+                            chain = _add_to_fallback(chat_id, "gemini", new_model)
+                            header, kb = _build_category_kb("fallback", chain)
+                            await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, f"➕ {new_model}")
+                        else:
+                            confirm = _apply_model(_mode, "gemini", new_model, ki)
+                            s["ai_disabled"] = False
+                            save_ai_settings(s)
+                            txt, kb = _build_main_menu()
+                            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, confirm)
+                    return
+
+                # --- Groq key select: gq_k{N} ---
+                if sub.startswith("gq_k"):
+                    try:
+                        ki = int(sub[4:])
+                        if 0 <= ki < len(GROQ_API_KEYS):
+                            s = load_ai_settings()
+                            gq_model = s.get("groq_model", "llama-3.3-70b-versatile")
+                            if _mode == "fallback":
+                                chain = _add_to_fallback(chat_id, "groq", gq_model)
+                                header, kb = _build_category_kb("fallback", chain)
+                                await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, f"➕ Groq #{ki+1}")
+                            else:
+                                confirm = _apply_model(_mode, "groq", gq_model, ki)
+                                s["ai_disabled"] = False
+                                save_ai_settings(s)
+                                txt, kb = _build_main_menu()
+                                await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, confirm)
+                    except (ValueError, IndexError):
+                        pass
+                    return
+
+                # --- Groq model select: gq_m_{key} ---
+                if sub.startswith("gq_m_"):
+                    model_key = sub[5:]
+                    if model_key in _groq_model_map:
+                        new_model = _groq_model_map[model_key]
+                        s = load_ai_settings()
+                        ki = s.get("active_key_index", 0)
+                        if _mode == "fallback":
+                            chain = _add_to_fallback(chat_id, "groq", new_model)
+                            header, kb = _build_category_kb("fallback", chain)
+                            await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, f"➕ {new_model}")
+                        else:
+                            confirm = _apply_model(_mode, "groq", new_model, ki)
+                            s["ai_disabled"] = False
+                            save_ai_settings(s)
+                            txt, kb = _build_main_menu()
+                            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, confirm)
+                    return
+
+                # --- OpenRouter Free model select: or_{model_id} ---
+                if sub.startswith("or_"):
+                    new_model = sub[3:]
+                    if _mode == "fallback":
+                        chain = _add_to_fallback(chat_id, "openrouter", new_model)
+                        header, kb = _build_category_kb("fallback", chain)
+                        short = new_model.split("/")[-1] if "/" in new_model else new_model
+                        await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, f"➕ {short}")
+                    else:
+                        confirm = _apply_model(_mode, "openrouter", new_model)
+                        s = load_ai_settings()
+                        s["ai_disabled"] = False
+                        save_ai_settings(s)
+                        txt, kb = _build_main_menu()
+                        await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, confirm)
+                    return
+
+        # ==========================================================
+        # FALLBACK: Done / Clear
+        # ==========================================================
+        if cb_data == "mdm_fb_done":
+            st = get_model_menu_state(chat_id) or {}
+            chain = st.get("fallback_chain", [])
+            s = load_ai_settings()
+            s["openrouter_fallback_chain"] = chain
+            s["fallback_disabled"] = False
+            save_ai_settings(s)
+            clear_model_menu_state(chat_id)
+            txt, kb = _build_main_menu()
+            chain_disp = " → ".join(chain) if chain else "пусто"
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ Фоллбэк: {chain_disp}")
             return
 
-        # --- Gemini model select ---
-        _gm_model_map = {
-            "gm_md_3.1pro": "gemini-3.1-pro-preview",
-            "gm_md_3pro": "gemini-3-pro-preview",
-            "gm_md_2.5pro": "gemini-2.5-pro",
-            "gm_md_2.5flash": "gemini-2.5-flash",
-            "gm_md_2.5flashlite": "gemini-2.5-flash-lite",
-            "gm_md_2.0flash": "gemini-2.0-flash",
-        }
-        if cb_data in _gm_model_map:
-            new_model = _gm_model_map[cb_data]
-            s = agent.analyzer._get_ai_settings()
-            ki = s.get("active_key_index", 0)
-            set_active_provider("gemini", model=new_model, key_index=ki)
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": f"✅ Gemini → {new_model}"},
-            )
-            await send_response(app_session, chat_id, f"✅ Provider: *Gemini*\nModel: `{new_model}`", parse_mode="Markdown")
+        if cb_data == "mdm_fb_clear":
+            st = get_model_menu_state(chat_id) or {"mode": "fallback"}
+            st["fallback_chain"] = []
+            set_model_menu_state(chat_id, st)
+            header, kb = _build_category_kb("fallback", [])
+            await _slm_edit(app_session, chat_id, msg_id_cb, header, kb, cq_id, "🗑 Цепочка очищена")
             return
 
-        # --- Groq key select ---
-        if cb_data.startswith("gq_k") and len(cb_data) == 4:
-            ki = int(cb_data[3])
-            s = agent.analyzer._get_ai_settings()
-            gq_model = s.get("groq_model", "llama-3.3-70b-versatile")
-            set_active_provider("groq", model=gq_model, key_index=ki)
-            lbl = KEY_ACCOUNT_LABELS.get(ki, f"#{ki+1}")
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": f"✅ Groq key #{ki+1} ({lbl})"},
-            )
-            await send_response(app_session, chat_id, f"✅ Provider: *Groq*\nKey: #{ki+1} ({lbl})\nModel: `{gq_model}`", parse_mode="Markdown")
-            return
-
-        # --- Groq model select ---
-        _gq_model_map = {
-            "gq_md_l3.3-70b": "llama-3.3-70b-versatile",
-            "gq_md_l3.1-70b": "llama-3.1-70b-versatile",
-            "gq_md_gemma2-27b": "gemma2-27b-it",
-            "gq_md_qwq32b": "qwen-qwq-32b",
-        }
-        if cb_data in _gq_model_map:
-            new_model = _gq_model_map[cb_data]
-            s = agent.analyzer._get_ai_settings()
-            ki = s.get("active_key_index", 0)
-            set_active_provider("groq", model=new_model, key_index=ki)
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": f"✅ Groq → {new_model}"},
-            )
-            await send_response(app_session, chat_id, f"✅ Provider: *Groq*\nModel: `{new_model}`", parse_mode="Markdown")
-            return
-
-        # --- Test buttons ---
+        # ==========================================================
+        # TEST BUTTONS (shared, mode-independent)
+        # ==========================================================
         if cb_data == "test_or":
             await app_session.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": "🧪 Testing free models..."},
+                json={"callback_query_id": cq_id, "text": "🧪 Тестирую..."},
             )
-            await send_response(app_session, chat_id, "🧪 Testing OpenRouter free models...")
+            await send_response(app_session, chat_id, "🧪 Тестирую OpenRouter Free модели...")
             free_models = await _fetch_or_free_models()
             results = []
             for fm in free_models:
@@ -1210,19 +1449,18 @@ async def handle_callback_query(app_session, update):
                 status = "✅" if ok else "❌"
                 short = fm.split("/")[-1] if "/" in fm else fm
                 results.append(f"{status} `{short}`")
-            await send_response(app_session, chat_id, "🧪 *OpenRouter Test Results:*\n\n" + "\n".join(results), parse_mode="Markdown")
+            await send_response(app_session, chat_id, "🧪 *OpenRouter результаты:*\n\n" + "\n".join(results), parse_mode="Markdown")
             return
 
         if cb_data == "test_gm":
             await app_session.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": "🧪 Testing all 8 Gemini keys..."},
+                json={"callback_query_id": cq_id, "text": "🧪 Тестирую Gemini ключи..."},
             )
-            s = agent.analyzer._get_ai_settings()
+            s = load_ai_settings()
             gm_model = s.get("gemini_model", "gemini-2.5-flash")
             active_ki = s.get("active_key_index", 0) if s.get("active_provider") == "gemini" else -1
-            await send_response(app_session, chat_id, f"🧪 Testing {len(GEMINI_API_KEYS)} Gemini keys (model: `{gm_model}`)...", parse_mode="Markdown")
-
+            await send_response(app_session, chat_id, f"🧪 Тестирую {len(GEMINI_API_KEYS)} Gemini ключей (`{gm_model}`)...", parse_mode="Markdown")
             results = []
             for i in range(len(GEMINI_API_KEYS)):
                 ok = await test_provider_key("gemini", GEMINI_API_KEYS[i], gm_model)
@@ -1230,38 +1468,132 @@ async def handle_callback_query(app_session, update):
                 lbl = KEY_ACCOUNT_LABELS.get(i, f"#{i+1}")
                 active_mark = " 👈" if i == active_ki else ""
                 results.append(f"{status} #{i+1} ({lbl}){active_mark}")
-
-            await send_response(app_session, chat_id, "🧪 *Gemini Test Results:*\n\n" + "\n".join(results), parse_mode="Markdown")
+            await send_response(app_session, chat_id, "🧪 *Gemini результаты:*\n\n" + "\n".join(results), parse_mode="Markdown")
             return
 
         if cb_data == "test_gq":
             await app_session.post(
                 f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": "🧪 Testing Groq keys..."},
+                json={"callback_query_id": cq_id, "text": "🧪 Тестирую Groq..."},
             )
-            s = agent.analyzer._get_ai_settings()
+            s = load_ai_settings()
             gq_model = s.get("groq_model", "llama-3.3-70b-versatile")
-            await send_response(app_session, chat_id, f"🧪 Testing Groq keys (model: `{gq_model}`)...", parse_mode="Markdown")
+            await send_response(app_session, chat_id, f"🧪 Тестирую Groq ключи (`{gq_model}`)...", parse_mode="Markdown")
             results = []
             for i, key in enumerate(GROQ_API_KEYS):
                 ok = await test_provider_key("groq", key, gq_model)
                 status = "✅" if ok else "❌"
                 lbl = KEY_ACCOUNT_LABELS.get(i, f"#{i+1}")
-                results.append(f"{status} Key #{i+1} ({lbl})")
-            await send_response(app_session, chat_id, "🧪 *Groq Test Results:*\n\n" + "\n".join(results), parse_mode="Markdown")
+                results.append(f"{status} #{i+1} ({lbl})")
+            await send_response(app_session, chat_id, "🧪 *Groq результаты:*\n\n" + "\n".join(results), parse_mode="Markdown")
             return
 
-        # --- Legacy md_ prefix (backward compat for OpenRouter) ---
+        # ==========================================================
+        # LEGACY CALLBACKS (backward compat)
+        # ==========================================================
+        if cb_data == "back_models":
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
+            return
+
+        if cb_data == "prov_or":
+            set_model_menu_state(chat_id, {"mode": "model"})
+            free_models = await _fetch_or_free_models()
+            txt = f"🌐 *OpenRouter Free* ({len(free_models)})"
+            rows = []
+            row = []
+            for fm in free_models:
+                short = fm.split("/")[-1].replace(":free", "")
+                cb_val = f"mdm_model_or_{fm}"
+                if len(cb_val) > 64:
+                    cb_val = f"mdm_model_or_{fm[:64-len('mdm_model_or_')]}"
+                row.append({"text": short[:30], "callback_data": cb_val})
+                if len(row) == 2:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": "⬅️ Назад", "callback_data": "mdm_back"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, {"inline_keyboard": rows}, cq_id)
+            return
+
+        if cb_data == "prov_gm":
+            set_model_menu_state(chat_id, {"mode": "model"})
+            txt, kb = _build_gemini_kb("model")
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
+            return
+
+        if cb_data == "prov_gq":
+            set_model_menu_state(chat_id, {"mode": "model"})
+            txt, kb = _build_groq_kb("model")
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id)
+            return
+
+        if cb_data.startswith("or_md_"):
+            new_model = cb_data[6:]
+            _apply_model("model", "openrouter", new_model)
+            s = load_ai_settings(); s["ai_disabled"] = False; save_ai_settings(s)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ → {new_model}")
+            return
+
+        if cb_data.startswith("gm_k"):
+            try:
+                ki = int(cb_data[4:])
+                if 0 <= ki < len(GEMINI_API_KEYS):
+                    s = load_ai_settings()
+                    gm_model = s.get("gemini_model", "gemini-2.5-flash")
+                    _apply_model("model", "gemini", gm_model, ki)
+                    s["ai_disabled"] = False; save_ai_settings(s)
+                    txt, kb = _build_main_menu()
+                    await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ Gemini #{ki+1}")
+            except (ValueError, IndexError):
+                pass
+            return
+
+        _legacy_gm_map = {
+            "gm_md_3.1pro": "gemini-3.1-pro-preview", "gm_md_3pro": "gemini-3-pro-preview",
+            "gm_md_2.5pro": "gemini-2.5-pro", "gm_md_2.5flash": "gemini-2.5-flash",
+            "gm_md_2.5flashlite": "gemini-2.5-flash-lite", "gm_md_2.0flash": "gemini-2.0-flash",
+        }
+        if cb_data in _legacy_gm_map:
+            new_model = _legacy_gm_map[cb_data]
+            s = load_ai_settings(); ki = s.get("active_key_index", 0)
+            _apply_model("model", "gemini", new_model, ki)
+            s["ai_disabled"] = False; save_ai_settings(s)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ {new_model}")
+            return
+
+        if cb_data.startswith("gq_k") and len(cb_data) <= 5:
+            ki = int(cb_data[4:])
+            s = load_ai_settings()
+            gq_model = s.get("groq_model", "llama-3.3-70b-versatile")
+            _apply_model("model", "groq", gq_model, ki)
+            s["ai_disabled"] = False; save_ai_settings(s)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ Groq #{ki+1}")
+            return
+
+        _legacy_gq_map = {
+            "gq_md_l3.3-70b": "llama-3.3-70b-versatile", "gq_md_l3.1-70b": "llama-3.1-70b-versatile",
+            "gq_md_gemma2-27b": "gemma2-27b-it", "gq_md_qwq32b": "qwen-qwq-32b",
+        }
+        if cb_data in _legacy_gq_map:
+            new_model = _legacy_gq_map[cb_data]
+            s = load_ai_settings(); ki = s.get("active_key_index", 0)
+            _apply_model("model", "groq", new_model, ki)
+            s["ai_disabled"] = False; save_ai_settings(s)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ {new_model}")
+            return
+
         if cb_data.startswith("md_"):
             new_model = cb_data[3:]
-            set_active_provider("openrouter", model=new_model)
-            agent.analyzer.OPENROUTER_MODEL = new_model
-            short_name = new_model.split("/")[-1] if "/" in new_model else new_model
-            await app_session.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-                json={"callback_query_id": cq_id, "text": f"✅ Switched to {short_name}"},
-            )
-            await send_response(app_session, chat_id, f"✅ AI Engine changed to:\n`{new_model}`", parse_mode="Markdown")
+            _apply_model("model", "openrouter", new_model)
+            s = load_ai_settings(); s["ai_disabled"] = False; save_ai_settings(s)
+            txt, kb = _build_main_menu()
+            await _slm_edit(app_session, chat_id, msg_id_cb, txt, kb, cq_id, f"✅ {new_model}")
             return
 
         return

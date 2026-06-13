@@ -34,6 +34,39 @@ def set_line4h_input_state(chat_id, state):
 def clear_line4h_input_state(chat_id):
     _line4h_input_state.pop(chat_id, None)
 
+# --- MODEL MENU STATE (for /model multi-step flow) ---
+# {chat_id: {"mode": "model"|"fallback"|"startday", "fallback_chain": [...], "msg_id": int}}
+_model_menu_state = {}
+
+def get_model_menu_state(chat_id):
+    return _model_menu_state.get(chat_id)
+
+def set_model_menu_state(chat_id, state):
+    _model_menu_state[chat_id] = state
+
+def clear_model_menu_state(chat_id):
+    _model_menu_state.pop(chat_id, None)
+
+def build_model_category_kb(mode, fallback_chain=None):
+    """Build category selection keyboard for model/fallback/startday modes.
+    Shared between tg_commands.py and tg_callbacks.py."""
+    rows = [
+        [{"text": "💎 Gemini", "callback_data": f"mdm_{mode}_cat_gm"},
+         {"text": "⚡ Groq", "callback_data": f"mdm_{mode}_cat_gq"}],
+        [{"text": "🌐 OpenRouter Free", "callback_data": f"mdm_{mode}_cat_or"},
+         {"text": "💰 OpenRouter $$$", "callback_data": f"mdm_{mode}_paid"}],
+        [{"text": "🚫 Без модели", "callback_data": f"mdm_{mode}_none"}],
+    ]
+    if mode == "fallback":
+        extra = []
+        if fallback_chain:
+            extra.append({"text": "✅ Готово", "callback_data": "mdm_fb_done"})
+            extra.append({"text": "🗑 Очистить", "callback_data": "mdm_fb_clear"})
+        if extra:
+            rows.append(extra)
+    rows.append([{"text": "⬅️ Назад", "callback_data": "mdm_back"}])
+    return {"inline_keyboard": rows}
+
 # --- ALERT MESSAGE TRACKING (for auto-cleanup) ---
 _alert_msg_tracker = {}  # {chat_id: [msg_id, msg_id, ...]}
 

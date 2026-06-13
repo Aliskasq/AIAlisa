@@ -125,6 +125,10 @@ def load_ai_settings():
         "daily_reset_key_index": 0,              # which key index (for gemini/groq)
         # OpenRouter fallback chain — list of models to try in order
         "openrouter_fallback_chain": ["openai/gpt-oss-120b:free", "openrouter/free"],
+        # Feature toggles
+        "ai_disabled": False,              # True = AI completely off
+        "fallback_disabled": False,        # True = no fallback when main model fails
+        "daily_reset_disabled": False,     # True = no auto-switch at 00:00 UTC
     }
     if os.path.exists(AI_SETTINGS_FILE):
         try:
