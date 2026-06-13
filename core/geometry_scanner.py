@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 try:
-    from config import load_alerts, save_alerts
+    from config import load_alerts, save_alerts, load_trend_above_pct
 except ImportError:
     pass
 
@@ -328,23 +328,27 @@ async def find_trend_line(df, tf_name, symbol, mode="ROOF", save_alert=True):
         curr_is_red = float(df_l['close'].iloc[last_idx]) < float(df_l['open'].iloc[last_idx])
         green_then_red = prev_is_green and curr_is_red
 
+        _trend_pct = load_trend_above_pct()
+        _trend_mult = 1 + _trend_pct / 100
+        _trend_mult_gcm = 1 + (_trend_pct + 1) / 100  # GROWING-CANDLE-MODE: +1% extra
+
         if is_fallback_peak:
             if fb_type == 'CURRENT':
                 line_type = "GROWING-CANDLE-MODE"
-                trigger_price = current_price * 1.02
+                trigger_price = current_price * _trend_mult_gcm
                 status = "WAITING_2_PERCENT"
             else:
                 line_type = "PEAK-TO-PEAK"
-                trigger_price = line_price_now * 1.02
+                trigger_price = line_price_now * _trend_mult
                 status = "WAITING_2_PERCENT"
         else:
             if final_choice.get('is_inter', False) or current_price >= line_price_now:
                 line_type = "GROWING-CANDLE-MODE"
-                trigger_price = current_price * 1.02
+                trigger_price = current_price * _trend_mult_gcm
                 status = "WAITING_2_PERCENT"
             else:
                 line_type = "PEAK-TO-PEAK"
-                trigger_price = line_price_now * 1.02
+                trigger_price = line_price_now * _trend_mult
                 status = "WAITING_2_PERCENT"
 
         if status == "WAITING_2_PERCENT" and current_price >= trigger_price:

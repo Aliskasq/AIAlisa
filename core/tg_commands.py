@@ -15,6 +15,7 @@ from config import (
     VIRTUAL_BANK_POSITION_SIZE,
     load_manual_alerts, save_manual_alerts,
     get_user_tz_offset, set_user_tz_offset,
+    load_trend_above_pct, save_trend_above_pct,
 )
 import config as _cfg
 import agent.analyzer
@@ -638,6 +639,7 @@ async def handle_message(app_session, update):
                 "🏆 `/signals` — signal winrate & bank\n"
                 "🔒 `/signals close` — snapshot: close all open now\n"
                 "🔄 `/signals clear` — reset bank to $10k\n"
+                "📐 `порог 5%` — порог пробития трендлайна\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
                 "📐 `/smc` — настройки SMC: режим, OB блоки\n"
 
@@ -1072,6 +1074,43 @@ async def handle_message(app_session, update):
     # ==========================================
     # STOPLOSS MODE (/stoploss)
     # ==========================================
+    # ==========================================
+    # TREND ABOVE THRESHOLD: порог N%
+    # ==========================================
+    if text.startswith("порог"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Только для админа", msg_id)
+            return
+
+        parts = text.split()
+        if len(parts) >= 2:
+            try:
+                new_pct = float(parts[1].replace("%", "").replace(",", "."))
+                if new_pct < 0 or new_pct > 50:
+                    await send_response(app_session, chat_id, "❌ Допустимый диапазон: 0–50%", msg_id)
+                    return
+                save_trend_above_pct(new_pct)
+                gcm_pct = new_pct + 1
+                resp_text = (
+                    f"✅ *Порог пробития обновлён*\n\n"
+                    f"📐 PEAK-TO-PEAK: `{new_pct}%`\n"
+                    f"📐 GROWING-CANDLE: `{gcm_pct}%` (+1%)"
+                )
+                await send_response(app_session, chat_id, resp_text, msg_id, parse_mode="Markdown")
+            except ValueError:
+                await send_response(app_session, chat_id, "❌ Укажите число, например: `порог 5`", msg_id, parse_mode="Markdown")
+        else:
+            current_pct = load_trend_above_pct()
+            gcm_pct = current_pct + 1
+            resp_text = (
+                f"📐 *Текущий порог пробития*\n\n"
+                f"📐 PEAK-TO-PEAK: `{current_pct}%`\n"
+                f"📐 GROWING-CANDLE: `{gcm_pct}%` (+1%)\n\n"
+                f"💡 Изменить: `порог 5` или `порог 2.53`"
+            )
+            await send_response(app_session, chat_id, resp_text, msg_id, parse_mode="Markdown")
+        return
+
     if text.startswith("/stoploss"):
         if not is_admin(msg):
             deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"

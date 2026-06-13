@@ -571,6 +571,29 @@ def save_manual_alerts(alerts):
 
 
 # ─── User Settings (timezone etc.) ────────────────────────────────────────
+TREND_ABOVE_PCT_FILE = "data/trend_above_pct.json"
+
+def load_trend_above_pct():
+    """Load trendline breakout threshold (default 2.0%)."""
+    if os.path.exists(TREND_ABOVE_PCT_FILE):
+        try:
+            with open(TREND_ABOVE_PCT_FILE, "r") as f:
+                data = json.load(f)
+                return float(data.get("pct", 2.0))
+        except Exception:
+            pass
+    return 2.0
+
+def save_trend_above_pct(pct):
+    """Save trendline breakout threshold."""
+    try:
+        os.makedirs(os.path.dirname(TREND_ABOVE_PCT_FILE), exist_ok=True)
+        with open(TREND_ABOVE_PCT_FILE, "w") as f:
+            json.dump({"pct": pct}, f)
+    except Exception as e:
+        logging.error(f"Error writing trend_above_pct: {e}")
+
+
 USER_SETTINGS_FILE = "data/user_settings.json"
 
 def load_user_settings():

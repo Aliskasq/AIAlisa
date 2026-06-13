@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 # Import configuration and shared functions
 from config import (TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_entry, clear_breakout_log,
                      parse_ai_trade_params, GROUP_CHAT_ID,
-                     SIGNAL_CONFIDENCE_FULL)
+                     SIGNAL_CONFIDENCE_FULL, load_trend_above_pct)
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
@@ -275,16 +275,20 @@ async def main():
 
                         trigger_hit = False
                         
+                        _trend_pct = load_trend_above_pct()
+                        _trend_mult = 1 + _trend_pct / 100
+                        _trend_mult_gcm = 1 + (_trend_pct + 1) / 100
+
                         if alert_type == "GROWING-CANDLE-MODE":
-                            # GROWING-CANDLE-MODE: price is near/at the line, need 3% above to filter noise
+                            # GROWING-CANDLE-MODE: +1% extra above base threshold
                             if dynamic_line_price > 0:
-                                dynamic_trigger = dynamic_line_price * 1.03
+                                dynamic_trigger = dynamic_line_price * _trend_mult_gcm
                             else:
                                 dynamic_trigger = alert['trigger_price']
                         else:
-                            # PEAK-TO-PEAK: 2% above line
+                            # PEAK-TO-PEAK: base threshold above line
                             if dynamic_line_price > 0:
-                                dynamic_trigger = dynamic_line_price * 1.02
+                                dynamic_trigger = dynamic_line_price * _trend_mult
                             else:
                                 dynamic_trigger = alert['trigger_price']
                                 
@@ -294,7 +298,7 @@ async def main():
                                 if current_price >= dynamic_trigger:
                                     trigger_hit = True
                             else:
-                                fallback_trigger = dynamic_line_price * 1.02
+                                fallback_trigger = dynamic_line_price * _trend_mult
                                 if current_price >= fallback_trigger:
                                     trigger_hit = True
                                     
@@ -702,11 +706,12 @@ async def main():
                     line_data = _vp_stored_lines.get(tf, {}).get(sym)
                     line_price = line_data.get("line_price", 0) if line_data else 0
 
+                    _vw_trend_pct = load_trend_above_pct()
                     if cur_price > 0 and line_price > 0:
                         above_pct = ((cur_price / line_price) - 1) * 100
-                        status = "✅" if above_pct >= 2.0 else "⏳"
+                        status = "✅" if above_pct >= _vw_trend_pct else "⏳"
                         _price_log_lines.append(f"{status} {sym} {tf}: {above_pct:+.1f}% (price={cur_price}, line={line_price:.8g})")
-                        if above_pct < 2.0:
+                        if above_pct < _vw_trend_pct:
                             continue
                     elif cur_price == 0:
                         _price_log_lines.append(f"🗑️ {sym} {tf}: no price (delisted?)")
@@ -721,7 +726,7 @@ async def main():
 
                 for line in _price_log_lines:
                     logging.info(f"📊 VOL PRICE: {line}")
-                logging.info(f"📊 Price filter: {len(vol_waitlist)} → {len(price_passed)} coins above 2%")
+                logging.info(f"📊 Price filter: {len(vol_waitlist)} → {len(price_passed)} coins above {_vw_trend_pct}%")
 
                 # ── Phase 1: Check volume only for price-passed coins ──
                 vol_passed = []
@@ -855,10 +860,11 @@ async def main():
                             if _vw_line_price <= 0:
                                 _vw_line_price = _vw_alert.get("line_price", 0)
 
+                            _vw_trend_pct2 = load_trend_above_pct()
                             if _vw_line_price > 0:
                                 _vw_above_pct = ((current_price / _vw_line_price) - 1) * 100
-                                if _vw_above_pct < 2.0:
-                                    logging.info(f"📊❌ VOL PASS REJECTED: {sym} price {current_price:.6f} only {_vw_above_pct:.1f}% above line {_vw_line_price:.6f} (need ≥2%)")
+                                if _vw_above_pct < _vw_trend_pct2:
+                                    logging.info(f"📊❌ VOL PASS REJECTED: {sym} price {current_price:.6f} only {_vw_above_pct:.1f}% above line {_vw_line_price:.6f} (need ≥{_vw_trend_pct2}%)")
                                     add_to_volume_waitlist(
                                         sym, tf, _vw_alert,
                                         vw_item.get("vol_12h", 0), vw_item.get("vol_1h", 0),
