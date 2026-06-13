@@ -522,6 +522,140 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
+    # DAILY RESET SETTINGS (/reset)
+    # ==========================================
+    if text.startswith("/reset"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+            return
+
+        from config import load_ai_settings, save_ai_settings
+        parts = text.split(maxsplit=1)
+        sub_cmd = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub_cmd:
+            s = load_ai_settings()
+            sub_lower = sub_cmd.lower().strip()
+            if sub_lower == "gemini":
+                s["daily_reset_provider"] = "gemini"
+                s["daily_reset_model"] = ""
+                s["daily_reset_key_index"] = 0
+                save_ai_settings(s)
+                model = s.get("gemini_model", "gemini-2.5-flash")
+                await send_response(app_session, chat_id,
+                    f"✅ Daily reset → *Gemini #1* (`{model}`)", msg_id, parse_mode="Markdown")
+            elif sub_lower.startswith("gemini "):
+                # /reset gemini 3 — set key index
+                try:
+                    key_num = int(sub_lower.split()[1])
+                    s["daily_reset_provider"] = "gemini"
+                    s["daily_reset_model"] = ""
+                    s["daily_reset_key_index"] = max(0, key_num - 1)
+                    save_ai_settings(s)
+                    model = s.get("gemini_model", "gemini-2.5-flash")
+                    await send_response(app_session, chat_id,
+                        f"✅ Daily reset → *Gemini #{key_num}* (`{model}`)", msg_id, parse_mode="Markdown")
+                except ValueError:
+                    # /reset gemini gemini-2.5-pro — set model
+                    model_name = sub_lower.split(maxsplit=1)[1]
+                    s["daily_reset_provider"] = "gemini"
+                    s["daily_reset_model"] = model_name
+                    s["daily_reset_key_index"] = 0
+                    save_ai_settings(s)
+                    await send_response(app_session, chat_id,
+                        f"✅ Daily reset → *Gemini #1* (`{model_name}`)", msg_id, parse_mode="Markdown")
+            elif sub_lower == "groq":
+                s["daily_reset_provider"] = "groq"
+                s["daily_reset_model"] = ""
+                s["daily_reset_key_index"] = 0
+                save_ai_settings(s)
+                model = s.get("groq_model", "llama-3.3-70b-versatile")
+                await send_response(app_session, chat_id,
+                    f"✅ Daily reset → *Groq #1* (`{model}`)", msg_id, parse_mode="Markdown")
+            elif "/" in sub_lower:
+                # OpenRouter model: /reset google/gemini-2.5-flash
+                s["daily_reset_provider"] = "openrouter"
+                s["daily_reset_model"] = sub_cmd.strip()
+                s["daily_reset_key_index"] = 0
+                save_ai_settings(s)
+                await send_response(app_session, chat_id,
+                    f"✅ Daily reset → *OpenRouter* (`{sub_cmd.strip()}`)", msg_id, parse_mode="Markdown")
+            else:
+                await send_response(app_session, chat_id,
+                    "⚠️ Usage:\n`/reset gemini` — Gemini #1\n`/reset gemini 3` — Gemini key #3\n"
+                    "`/reset groq` — Groq #1\n`/reset openrouter/model-id` — OpenRouter model",
+                    msg_id, parse_mode="Markdown")
+        else:
+            # Show current reset settings
+            s = load_ai_settings()
+            prov = s.get("daily_reset_provider", "gemini")
+            model = s.get("daily_reset_model", "")
+            key_idx = s.get("daily_reset_key_index", 0)
+            if not model:
+                if prov == "gemini":
+                    model = s.get("gemini_model", "gemini-2.5-flash")
+                elif prov == "groq":
+                    model = s.get("groq_model", "llama-3.3-70b-versatile")
+                else:
+                    model = s.get("openrouter_model", "openrouter/free")
+            await send_response(app_session, chat_id,
+                f"🔄 *Daily Reset (00:00 UTC):*\n"
+                f"Provider: `{prov}`\n"
+                f"Model: `{model}`\n"
+                f"Key: #{key_idx + 1}\n\n"
+                f"💡 `/reset gemini` / `/reset groq` / `/reset openrouter/<model>`",
+                msg_id, parse_mode="Markdown")
+        return
+
+    # ==========================================
+    # OPENROUTER FALLBACK CHAIN (/fallback)
+    # ==========================================
+    if text.startswith("/fallback"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
+            return
+
+        from config import load_ai_settings, save_ai_settings
+        parts = text.split(maxsplit=1)
+        sub_cmd = parts[1].strip() if len(parts) > 1 else ""
+
+        if sub_cmd:
+            if sub_cmd.lower() == "clear":
+                s = load_ai_settings()
+                s["openrouter_fallback_chain"] = []
+                save_ai_settings(s)
+                await send_response(app_session, chat_id,
+                    "✅ OpenRouter fallback chain cleared (no fallbacks).", msg_id)
+            else:
+                # Parse comma or space separated model list
+                models = [m.strip() for m in sub_cmd.replace(",", " ").split() if "/" in m.strip()]
+                if models:
+                    s = load_ai_settings()
+                    s["openrouter_fallback_chain"] = models
+                    save_ai_settings(s)
+                    chain_text = "\n".join([f"  {i+1}. `{m}`" for i, m in enumerate(models)])
+                    await send_response(app_session, chat_id,
+                        f"✅ OpenRouter fallback chain updated:\n{chain_text}", msg_id, parse_mode="Markdown")
+                else:
+                    await send_response(app_session, chat_id,
+                        "⚠️ Usage: `/fallback model1/name, model2/name`\nModels must contain `/`.",
+                        msg_id, parse_mode="Markdown")
+        else:
+            # Show current fallback chain
+            s = load_ai_settings()
+            chain = s.get("openrouter_fallback_chain", ["openai/gpt-oss-120b:free", "openrouter/free"])
+            if chain:
+                chain_text = "\n".join([f"  {i+1}. `{m}`" for i, m in enumerate(chain)])
+            else:
+                chain_text = "  _(empty — no OpenRouter fallbacks)_"
+            await send_response(app_session, chat_id,
+                f"🔗 *OpenRouter Fallback Chain:*\n{chain_text}\n\n"
+                f"💡 `/fallback model1, model2, ...` — set chain\n"
+                f"💡 `/fallback clear` — remove all fallbacks",
+                msg_id, parse_mode="Markdown")
+        return
+
+    # ==========================================
     # AI MODEL COMMANDS (/models)
     # ==========================================
     if text.startswith("/models") or text.startswith("/model"):
@@ -681,6 +815,10 @@ async def handle_message(app_session, update):
                 "🧠 `/models` — AI engine\n"
                 "🧠 `/models all` — all OpenRouter models\n"
                 "🧠 `/models <id>` — switch to any model\n"
+                "🔄 `/reset` — daily reset settings\n"
+                "🔄 `/reset gemini` / `groq` / `openrouter/<model>` — set reset provider\n"
+                "🔗 `/fallback` — OpenRouter fallback chain\n"
+                "🔗 `/fallback model1, model2, ...` — set chain\n"
 
                 "⏰ `/time 18:30` — scan schedule\n"
                 "📢 `/autopost on/off` — auto Square\n"

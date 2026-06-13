@@ -170,9 +170,10 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
     Chain depends on active provider:
     - Gemini active: Gemini keys forward → after #8 try #1 only → Groq → OpenRouter
     - Groq active: Groq keys forward → OpenRouter (NO Gemini fallback)
-    - OpenRouter active: try saved model → openai/gpt-oss-120b:free → openrouter/free
+    - OpenRouter active: try saved model → configurable fallback chain
     
-    Daily reset at 03:05 MSK sets Gemini #1 as active (see main.py).
+    Daily reset at 00:00 UTC sets provider from daily_reset_provider setting.
+    OpenRouter fallback chain is configurable via openrouter_fallback_chain setting.
     Whatever works gets SAVED and used for all subsequent calls.
     
     Returns (response_text, provider_used, model_used) or (None, None, None).
@@ -275,7 +276,8 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
                 return result, "groq", groq_model
 
     if OPENROUTER_API_KEY:
-        for or_model in ["openai/gpt-oss-120b:free", "openrouter/free"]:
+        fallback_chain = s.get("openrouter_fallback_chain", ["openai/gpt-oss-120b:free", "openrouter/free"])
+        for or_model in fallback_chain:
             if provider == "openrouter" and or_model == s.get("openrouter_model"):
                 continue  # already tried above
             logging.info(f"🔄 Fallback: OpenRouter model={or_model}")
@@ -292,15 +294,31 @@ async def call_ai_with_fallback(messages, timeout_sec=240):
 
 
 def daily_reset_to_gemini_1():
-    """Called at 00:05 UTC — reset active provider to Gemini #1.
-    Keeps the last user-chosen Gemini model (e.g. flash-lite)."""
+    """Called at 00:00 UTC — reset active provider based on settings.
+    Configurable via daily_reset_provider / daily_reset_model / daily_reset_key_index.
+    Legacy name kept for backward compatibility with main.py import."""
     s = _get_ai_settings()
-    s["active_provider"] = "gemini"
-    s["active_key_index"] = 0
-    # Keep gemini_model as-is — user's last choice persists
-    model = s.get("gemini_model", "gemini-2.5-flash")
+    reset_provider = s.get("daily_reset_provider", "gemini")
+    reset_model = s.get("daily_reset_model", "")
+    reset_key_index = s.get("daily_reset_key_index", 0)
+
+    s["active_provider"] = reset_provider
+    s["active_key_index"] = reset_key_index
+
+    # If reset_model is set, override the model for that provider
+    if reset_model:
+        s[f"{reset_provider}_model"] = reset_model
+
+    # Determine the actual model that will be used
+    if reset_provider == "gemini":
+        model = s.get("gemini_model", "gemini-2.5-flash")
+    elif reset_provider == "groq":
+        model = s.get("groq_model", "llama-3.3-70b-versatile")
+    else:
+        model = s.get("openrouter_model", "openrouter/free")
+
     _save_and_cache_settings(s)
-    logging.info(f"🔄 Daily reset: active provider → Gemini #1, model={model}")
+    logging.info(f"🔄 Daily reset: active provider → {reset_provider} (key #{reset_key_index+1}), model={model}")
 
 async def test_provider_key(provider, api_key, model):
     """Test a single provider key with a tiny prompt. Returns True/False."""

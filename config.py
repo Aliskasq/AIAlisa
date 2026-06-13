@@ -119,7 +119,12 @@ def load_ai_settings():
         "openrouter_model": OPENROUTER_MODEL or "openrouter/free",
         "gemini_model": "gemini-2.5-flash",
         "groq_model": "llama-3.3-70b-versatile",
-
+        # Daily reset at 00:00 UTC — configurable provider/model
+        "daily_reset_provider": "gemini",       # gemini | groq | openrouter
+        "daily_reset_model": "",                 # empty = keep current model for that provider
+        "daily_reset_key_index": 0,              # which key index (for gemini/groq)
+        # OpenRouter fallback chain — list of models to try in order
+        "openrouter_fallback_chain": ["openai/gpt-oss-120b:free", "openrouter/free"],
     }
     if os.path.exists(AI_SETTINGS_FILE):
         try:
