@@ -101,10 +101,12 @@ def _build_alert_caption(short_sym, tf, current_price, all_alerts_for_sym_tf, ch
         # % to line: how much price needs to move
         if line_now > 0 and current_price > 0:
             if current_price > line_now:
-                pct_to = ((current_price / line_now) - 1) * 100
+                # Line below price: how much % price must FALL (max ~100%)
+                pct_to = ((current_price - line_now) / current_price) * 100
                 pct_str = f"↓ {pct_to:.2f}%"
             else:
-                pct_to = ((line_now / current_price) - 1) * 100
+                # Line above price: how much % price must RISE (no limit)
+                pct_to = ((line_now - current_price) / current_price) * 100
                 pct_str = f"↑ {pct_to:.2f}%"
         else:
             pct_str = "—"
@@ -763,6 +765,17 @@ async def handle_message(app_session, update):
 
                 "🔑 `/testapi AIzaSy...` — test Gemini key\n"
                 "🔑 `/testall` — test all AI keys\n\n"
+
+                "📊 *Индикаторы на графике:*\n"
+                "🟢 OBV — кумулятивный объём\n"
+                "🔴 SMA пунктир — средняя OBV"
+                " (10 для 15m/1h, 20 для 4h/1d)\n"
+                "🔵 CVD — дельта покупок/продаж\n"
+                "🟣 Цена — масштабирована под OBV\n\n"
+                "OBV > SMA = накопление 🟢\n"
+                "OBV < SMA = распределение 🔴\n"
+                "Цена↑ OBV↓ = медвежья дивергенция ⚠️\n"
+                "Цена↓ OBV↑ = бычья дивергенция ⚠️\n"
 
             )
         await send_response(app_session, chat_id, welcome_text, msg_id, parse_mode="Markdown")
@@ -2180,7 +2193,14 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
              'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0), 'color_idx': a.get('color_idx', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
-        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+        # Get SMC data for manual alert chart
+        _alert_smc = None
+        try:
+            from core.smc import analyze_smc
+            _alert_smc = analyze_smc(df, tf, symbol=symbol)
+        except Exception as _smc_e:
+            logging.error(f"❌ SMC error for alert chart: {repr(_smc_e)}")
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf, smc_overlay=_alert_smc)
 
         clear_manual_alert_state(chat_id)
 
@@ -2317,7 +2337,14 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
              'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
-        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+        # Get SMC data for manual alert chart
+        _alert_smc = None
+        try:
+            from core.smc import analyze_smc
+            _alert_smc = analyze_smc(df, tf, symbol=symbol)
+        except Exception as _smc_e:
+            logging.error(f"❌ SMC error for alert chart: {repr(_smc_e)}")
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf, smc_overlay=_alert_smc)
         clear_manual_alert_state(chat_id)
 
         short_sym = symbol.replace("USDT", "")
@@ -2487,7 +2514,14 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
              'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0), 'tf_ms': a.get('tf_ms', 0), 'color_idx': a.get('color_idx', 0)}
             for a in alerts if a['symbol'] == symbol and a['tf'] == tf
         ]
-        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf)
+        # Get SMC data for manual alert chart
+        _alert_smc = None
+        try:
+            from core.smc import analyze_smc
+            _alert_smc = analyze_smc(df, tf, symbol=symbol)
+        except Exception as _smc_e:
+            logging.error(f"❌ SMC error for alert chart: {repr(_smc_e)}")
+        chart_path = await draw_alert_chart(symbol, df, all_lines_for_chart, tf, smc_overlay=_alert_smc)
 
         clear_manual_alert_state(chat_id)
 

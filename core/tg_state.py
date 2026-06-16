@@ -60,6 +60,7 @@ def build_model_category_kb(mode, fallback_chain=None):
     if mode == "fallback":
         extra = []
         if fallback_chain:
+            extra.append({"text": "➕ Добавить ещё", "callback_data": "mdm_fallback"})
             extra.append({"text": "✅ Готово", "callback_data": "mdm_fb_done"})
             extra.append({"text": "🗑 Очистить", "callback_data": "mdm_fb_clear"})
         if extra:

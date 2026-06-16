@@ -519,19 +519,26 @@ def _apply_custom_grid(ax, plot_df, view_limit):
     for i in range(0, view_limit, 20):
         ax.axvline(x=i, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
 
-    # --- Horizontal lines every 10% price ---
+    # --- Horizontal lines every 10% from current price ---
     y_low, y_high = ax.get_ylim()
-    if y_low > 0 and y_high > 0:
-        import math
-        log_low = math.log10(y_low)
-        log_high = math.log10(y_high)
-        base = 10 ** math.floor(log_low)
-        price = base
-        while price < y_low:
-            price *= 1.1
-        while price <= y_high:
-            ax.axhline(y=price, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
-            price *= 1.1
+    current_price = float(plot_df['close'].iloc[-1])
+    if current_price > 0 and y_low > 0 and y_high > 0:
+        # Lines above current price: +10%, +20%, +30%, ...
+        n = 1
+        while True:
+            level = current_price * (1 + n * 0.10)
+            if level > y_high:
+                break
+            ax.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+            n += 1
+        # Lines below current price: -10%, -20%, -30%, ...
+        n = 1
+        while True:
+            level = current_price * (1 - n * 0.10)
+            if level <= 0 or level < y_low:
+                break
+            ax.axhline(y=level, color='#404040', linewidth=0.5, alpha=0.4, zorder=0)
+            n += 1
 
 
 def _apply_date_labels_main(ax_main, fig, plot_df, view_limit, axlist=None):
