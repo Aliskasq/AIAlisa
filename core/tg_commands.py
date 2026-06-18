@@ -200,6 +200,10 @@ async def handle_message(app_session, update):
     if not text:
         return
 
+    # DEBUG: log every incoming text message
+    if "алерт" in text or "alert" in text:
+        logging.info(f"🔍 DEBUG incoming alert-related: text={repr(text[:80])}, chat={chat_id}")
+
     # --- CHAT FILTER ---
     if not is_allowed_chat(chat_id):
         return
@@ -373,8 +377,10 @@ async def handle_message(app_session, update):
     # ==========================================
     _malert_triggers = ["алерт ", "alert "]
     _malert_match = next((t_p for t_p in _malert_triggers if text.startswith(t_p)), None)
+    logging.info(f"🔍 DEBUG malert: text={repr(text[:50])}, match={repr(_malert_match)}, ma_state={get_manual_alert_state(chat_id)}, l4h={get_line4h_input_state(chat_id)}")
     if _malert_match:
         remaining_ma = text[len(_malert_match):].strip()
+        logging.info(f"🔍 DEBUG malert remaining: {repr(remaining_ma)}")
 
         # Sub-command: timezone
         if remaining_ma in ("пояс", "timezone", "tz", "часовой пояс"):
