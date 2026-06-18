@@ -418,8 +418,9 @@ async def handle_message(app_session, update):
                     delete_buttons = []
                     for num, (global_idx, a) in enumerate(user_alerts, 1):
                         short = a["symbol"].replace("USDT", "")
+                        mode_display = a.get('mode', '?').replace('_', ' ')
                         lines_txt.append(
-                            f"{num}. `${short}` {a['tf']} | A={a['price_a']:.8g} B={a['price_b']:.8g} | {a.get('mode', '?')}"
+                            f"{num}. `${short}` {a['tf']} — A=`{a['price_a']:.8g}` B=`{a['price_b']:.8g}` ({mode_display})"
                         )
                         delete_buttons.append(
                             {"text": f"❌ {num}", "callback_data": f"malert_del_{global_idx}"}
