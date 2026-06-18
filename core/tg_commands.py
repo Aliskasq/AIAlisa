@@ -158,6 +158,28 @@ def _parse_flexible_datetime(text, chat_id):
         return None
 
 
+def _parse_date_with_pct(text, chat_id):
+    """Parse date+time with optional percent offset.
+    Accepts: '10.06.26 04:45', '10.06.26 04:45+2%', '10.06.26 04:45 +2%',
+             '10.06.26 04:45-5.06%', '10.06.26 04:45 -9,77%'
+    Returns (datetime_utc, pct_offset) or (None, 0).
+    pct_offset: float, e.g. +2.0 or -5.06. 0 if no percent specified."""
+    import re as _re
+    raw = text.strip()
+    # Try to extract trailing percent: +2% or -5.06% or +2,5%
+    pct = 0.0
+    pct_match = _re.search(r'([+-]\s*[\d.,]+)\s*%\s*$', raw)
+    if pct_match:
+        pct_str = pct_match.group(1).replace(' ', '').replace(',', '.')
+        try:
+            pct = float(pct_str)
+        except ValueError:
+            pct = 0.0
+        raw = raw[:pct_match.start()].strip()
+    dt = _parse_flexible_datetime(raw, chat_id)
+    return dt, pct
+
+
 async def handle_message(app_session, update):
     """Handle a regular message update (commands, text triggers, new members).
 
@@ -291,22 +313,24 @@ async def handle_message(app_session, update):
         # --- AWAITING DATE A: user enters date+time for point A ---
         if ma_state.get('step') == 'awaiting_date_a':
             track_alert_msg(chat_id, msg_id)  # track user's date A message
-            dt_a = _parse_flexible_datetime(original_text, chat_id)
+            dt_a, pct_a = _parse_date_with_pct(original_text, chat_id)
             if dt_a is None:
                 bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Не понял дату. Примеры:\n"
                     "`10.06.26 04:45` или `10 06 26 04 45`\n"
-                    "или `10,06,26,04,45` или `10.06.26.04.45`",
+                    "С процентом: `10.06.26 04:45 +2%`",
                     msg_id, parse_mode="Markdown")
                 track_alert_msg(chat_id, bot_msg)
                 return
             ma_state['dates'] = [dt_a.isoformat()]
+            ma_state['pct_offsets'] = [pct_a]
             ma_state['step'] = 'awaiting_date_b'
             set_manual_alert_state(chat_id, ma_state)
             tz_off = get_user_tz_offset(chat_id)
             tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
+            pct_info = f" ({pct_a:+g}%)" if pct_a != 0 else ""
             bot_msg = await send_response(app_session, chat_id,
-                f"✅ Точка A: `{dt_a.strftime('%d.%m.%y %H:%M')}` ({tz_label}→UTC)\n\n"
+                f"✅ Точка A: `{dt_a.strftime('%d.%m.%y %H:%M')}` ({tz_label}→UTC){pct_info}\n\n"
                 f"📍 Точка B — введи дату и время:",
                 msg_id, parse_mode="Markdown")
             track_alert_msg(chat_id, bot_msg)
@@ -315,15 +339,18 @@ async def handle_message(app_session, update):
         # --- AWAITING DATE B: user enters date+time for point B ---
         if ma_state.get('step') == 'awaiting_date_b':
             track_alert_msg(chat_id, msg_id)  # track user's date B message
-            dt_b = _parse_flexible_datetime(original_text, chat_id)
+            dt_b, pct_b = _parse_date_with_pct(original_text, chat_id)
             if dt_b is None:
                 bot_msg = await send_response(app_session, chat_id,
                     "⚠️ Не понял дату. Примеры:\n"
-                    "`10.06.26 04:45` или `10 06 26 04 45`",
+                    "`10.06.26 04:45` или `10 06 26 04 45`\n"
+                    "С процентом: `10.06.26 04:45 -5%`",
                     msg_id, parse_mode="Markdown")
                 track_alert_msg(chat_id, bot_msg)
                 return
             ma_state['dates'].append(dt_b.isoformat())
+            ma_state.setdefault('pct_offsets', [0])
+            ma_state['pct_offsets'].append(pct_b)
             ma_state['step'] = 'processing_dates'
             set_manual_alert_state(chat_id, ma_state)
 
@@ -2180,10 +2207,14 @@ async def _finalize_manual_alert(app_session, chat_id, msg_id, ma_state, mode):
                 return float(row['low'])
             elif mode_str in ('body', 'body_mid'):
                 return (float(row['open']) + float(row['close'])) / 2
-            elif mode_str in ('body_top', 'date_top'):
+            elif mode_str in ('body_top', 'date_top', 'date_body_top'):
                 return max(float(row['open']), float(row['close']))
-            elif mode_str in ('body_bot', 'date_bottom'):
+            elif mode_str in ('body_bot', 'date_bottom', 'date_body_bot'):
                 return min(float(row['open']), float(row['close']))
+            elif mode_str == 'date_high':
+                return float(row['high'])
+            elif mode_str == 'date_low':
+                return float(row['low'])
             return float(row['high'])
 
         def _find_matches(df_local, target_price, mode_str):
@@ -2616,15 +2647,33 @@ async def _process_manual_alert_dates(app_session, chat_id, msg_id, ma_state):
         if idx_a > idx_b:
             idx_a, idx_b = idx_b, idx_a
 
-        # Get prices from candle body
+        # Get prices from candle based on mode
         row_a = df_l.iloc[idx_a]
         row_b = df_l.iloc[idx_b]
-        if date_mode == 'date_top':
-            actual_price_a = max(float(row_a['open']), float(row_a['close']))
-            actual_price_b = max(float(row_b['open']), float(row_b['close']))
-        else:  # date_bottom
-            actual_price_a = min(float(row_a['open']), float(row_a['close']))
-            actual_price_b = min(float(row_b['open']), float(row_b['close']))
+
+        def _get_candle_price(row, mode):
+            if mode in ('date_top', 'date_body_top'):
+                return max(float(row['open']), float(row['close']))
+            elif mode in ('date_bottom', 'date_body_bot'):
+                return min(float(row['open']), float(row['close']))
+            elif mode == 'date_high':
+                return float(row['high'])
+            elif mode == 'date_low':
+                return float(row['low'])
+            else:  # fallback to body top
+                return max(float(row['open']), float(row['close']))
+
+        actual_price_a = _get_candle_price(row_a, date_mode)
+        actual_price_b = _get_candle_price(row_b, date_mode)
+
+        # Apply percent offsets
+        pct_offsets = ma_state.get('pct_offsets', [0, 0])
+        pct_a = pct_offsets[0] if len(pct_offsets) > 0 else 0
+        pct_b = pct_offsets[1] if len(pct_offsets) > 1 else 0
+        if pct_a != 0:
+            actual_price_a = actual_price_a * (1 + pct_a / 100)
+        if pct_b != 0:
+            actual_price_b = actual_price_b * (1 + pct_b / 100)
 
         # Build state for finalization
         ma_state['prices'] = [actual_price_a, actual_price_b]

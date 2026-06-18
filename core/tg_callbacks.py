@@ -764,16 +764,16 @@ async def handle_callback_query(app_session, update):
             mode = cb_data.replace("malert_mode_", "")
 
             if mode == "date":
-                # По датам → show body sub-buttons
-                ma_state['step'] = 'awaiting_date_mode'
+                # По датам → show body vs wick choice
+                ma_state['step'] = 'awaiting_date_type'
                 set_manual_alert_state(chat_id, ma_state)
-                date_kb = {"inline_keyboard": [
-                    [{"text": "⬆️ Верх тела", "callback_data": "malert_date_top"},
-                     {"text": "⬇️ Низ тела", "callback_data": "malert_date_bottom"}],
+                date_type_kb = {"inline_keyboard": [
+                    [{"text": "🕯 По телам", "callback_data": "malert_datetype_body"},
+                     {"text": "📊 По теням", "callback_data": "malert_datetype_wick"}],
                 ]}
                 bot_msg = await send_response(app_session, chat_id,
-                    "📅 *По датам*\n\nОт какой части тела свечи строить?",
-                    reply_markup=date_kb, parse_mode="Markdown")
+                    "📅 *По датам*\n\nПо телам или теням свечей?",
+                    reply_markup=date_type_kb, parse_mode="Markdown")
                 track_alert_msg(chat_id, bot_msg)
                 return
 
@@ -796,23 +796,59 @@ async def handle_callback_query(app_session, update):
             track_alert_msg(chat_id, bot_msg)
             return
 
-        # --- Date sub-mode (top/bottom body) → ask for dates ---
+        # --- Date type: body vs wick ---
+        if cb_data.startswith("malert_datetype_"):
+            if not ma_state or ma_state.get('step') != 'awaiting_date_type':
+                await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
+                return
+            date_type = cb_data.replace("malert_datetype_", "")  # "body" or "wick"
+            ma_state['step'] = 'awaiting_date_mode'
+            set_manual_alert_state(chat_id, ma_state)
+            if date_type == "body":
+                date_sub_kb = {"inline_keyboard": [
+                    [{"text": "⬆️ Верх тел", "callback_data": "malert_date_body_top"},
+                     {"text": "⬇️ Низ тел", "callback_data": "malert_date_body_bot"}],
+                ]}
+                bot_msg = await send_response(app_session, chat_id,
+                    "🕯 *По телам свечей*\n\nВерх или низ тел?",
+                    reply_markup=date_sub_kb, parse_mode="Markdown")
+            else:  # wick
+                date_sub_kb = {"inline_keyboard": [
+                    [{"text": "📈 High", "callback_data": "malert_date_high"},
+                     {"text": "📉 Low", "callback_data": "malert_date_low"}],
+                ]}
+                bot_msg = await send_response(app_session, chat_id,
+                    "📊 *По теням свечей*\n\nHigh или Low?",
+                    reply_markup=date_sub_kb, parse_mode="Markdown")
+            track_alert_msg(chat_id, bot_msg)
+            return
+
+        # --- Date sub-mode (body top/bot, high, low) → ask for dates ---
         if cb_data.startswith("malert_date_"):
             if not ma_state or ma_state.get('step') != 'awaiting_date_mode':
                 await send_response(app_session, chat_id, "⚠️ Начни заново: `алерт BTC`", parse_mode="Markdown")
                 return
-            date_mode = cb_data.replace("malert_", "")  # "date_top" or "date_bottom"
+            date_mode = cb_data.replace("malert_", "")  # "date_body_top", "date_body_bot", "date_high", "date_low"
             ma_state['date_mode'] = date_mode
             ma_state['step'] = 'awaiting_date_a'
             set_manual_alert_state(chat_id, ma_state)
-            body_label = "верх тела" if date_mode == "date_top" else "низ тела"
+            mode_labels = {
+                "date_body_top": "верх тел",
+                "date_body_bot": "низ тел",
+                "date_high": "High (тени)",
+                "date_low": "Low (тени)",
+                "date_top": "верх тел",       # legacy
+                "date_bottom": "низ тел",     # legacy
+            }
+            body_label = mode_labels.get(date_mode, date_mode)
             from config import get_user_tz_offset
             tz_off = get_user_tz_offset(chat_id)
             tz_label = f"UTC{tz_off:+d}" if tz_off else "UTC"
             bot_msg = await send_response(app_session, chat_id,
                 f"📅 Режим: *{body_label}* ({tz_label})\n\n"
                 f"📍 Точка A — введи дату и время:\n"
-                f"Примеры: `10.06.26 04:45` или `10 06 26 04 45`",
+                f"Примеры: `10.06.26 04:45`\n"
+                f"С процентом: `10.06.26 04:45 +2%` или `10.06.26 04:45+2%`",
                 parse_mode="Markdown")
             track_alert_msg(chat_id, bot_msg)
             return
