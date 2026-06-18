@@ -459,6 +459,100 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, f"✅ Удалено линий: {user_count}", msg_id)
             return
 
+        # Sub-command: view chart (алерт просмотр BTC [tf])
+        if remaining_ma.startswith("просмотр") or remaining_ma.startswith("view"):
+            view_parts = remaining_ma.split()
+            if len(view_parts) < 2:
+                await send_response(app_session, chat_id,
+                    "⚠️ Укажи монету: `алерт просмотр BTC`\nС таймфреймом: `алерт просмотр BTC 4H`",
+                    msg_id, parse_mode="Markdown")
+                return
+            view_coin = view_parts[1].upper().replace("USDT", "").strip()
+            view_symbol = view_coin + "USDT"
+            view_tf_input = view_parts[2].upper() if len(view_parts) >= 3 else None
+
+            alerts = load_manual_alerts()
+            user_sym_alerts = [a for a in alerts if a.get("chat_id") == chat_id and a.get("symbol") == view_symbol]
+            if not user_sym_alerts:
+                await send_response(app_session, chat_id,
+                    f"📭 Нет ручных линий для `${view_coin}`.", msg_id, parse_mode="Markdown")
+                return
+
+            # Determine which timeframes have alerts
+            available_tfs = sorted(set(a['tf'] for a in user_sym_alerts))
+            if view_tf_input:
+                # Normalize: "4h" → "4H", "15m" → "15m" etc.
+                tf_norm = {"15M": "15m", "1H": "1H", "4H": "4H", "1D": "1D"}
+                view_tf = tf_norm.get(view_tf_input, view_tf_input)
+                tfs_to_show = [view_tf] if view_tf in available_tfs else []
+                if not tfs_to_show:
+                    await send_response(app_session, chat_id,
+                        f"📭 Нет линий для `${view_coin}` на `{view_tf_input}`.\nДоступные: {', '.join(available_tfs)}",
+                        msg_id, parse_mode="Markdown")
+                    return
+            else:
+                tfs_to_show = available_tfs
+
+            tf_map = {"15m": "15m", "1H": "1h", "4H": "4h", "1D": "1d"}
+            for tf in tfs_to_show:
+                binance_interval = tf_map.get(tf, "4h")
+                try:
+                    df = await fetch_klines(app_session, view_symbol, binance_interval, limit=199)
+                    if df is None or df.empty:
+                        await send_response(app_session, chat_id,
+                            f"⚠️ Не удалось получить данные для `{view_symbol}` {tf}.", msg_id, parse_mode="Markdown")
+                        continue
+
+                    tf_alerts = [a for a in user_sym_alerts if a['tf'] == tf]
+                    all_lines_for_chart = [
+                        {'price_a': a['price_a'], 'price_b': a['price_b'],
+                         'index_a': a['index_a'], 'index_b': a['index_b'],
+                         'base_open_time': a.get('base_open_time', 0), 'base_idx': a.get('base_idx', 0),
+                         'tf_ms': a.get('tf_ms', 0), 'color_idx': a.get('color_idx', 0)}
+                        for a in tf_alerts
+                    ]
+
+                    # SMC overlay
+                    _alert_smc = None
+                    try:
+                        from core.smc import analyze_smc
+                        _alert_smc = analyze_smc(df, tf, symbol=view_symbol)
+                    except Exception as _smc_e:
+                        logging.error(f"❌ SMC error for view chart: {repr(_smc_e)}")
+
+                    chart_path = await draw_alert_chart(view_symbol, df, all_lines_for_chart, tf, smc_overlay=_alert_smc)
+
+                    # Caption
+                    current_price = float(df['close'].iloc[-1])
+                    all_alerts_sym_tf = [a for a in alerts if a['symbol'] == view_symbol and a['tf'] == tf]
+                    caption = _build_alert_caption(view_coin, tf, current_price, all_alerts_sym_tf, chat_id)
+
+                    if chart_path:
+                        photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+                        try:
+                            with open(chart_path, 'rb') as f:
+                                import aiohttp as _aio
+                                data = _aio.FormData()
+                                data.add_field('chat_id', str(chat_id))
+                                data.add_field('caption', caption)
+                                data.add_field('parse_mode', 'Markdown')
+                                data.add_field('photo', f, filename=f"{view_symbol}_view.png", content_type='image/png')
+                                async with app_session.post(photo_url, data=data, timeout=30) as resp:
+                                    if resp.status != 200:
+                                        resp_text = await resp.text()
+                                        logging.error(f"❌ View chart send error: {resp.status} - {resp_text}")
+                                        await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+                        except Exception as e:
+                            logging.error(f"❌ View chart send error: {repr(e)}")
+                            await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+                    else:
+                        await send_response(app_session, chat_id, caption, msg_id, parse_mode="Markdown")
+                except Exception as e:
+                    logging.error(f"❌ View chart error for {view_symbol} {tf}: {repr(e)}")
+                    await send_response(app_session, chat_id,
+                        f"⚠️ Ошибка построения графика `${view_coin}` {tf}.", msg_id, parse_mode="Markdown")
+            return
+
         # Start new manual alert: parse coin
         coin_raw = remaining_ma.upper().replace("USDT", "").strip()
         if not coin_raw:
@@ -466,6 +560,7 @@ async def handle_message(app_session, update):
                 "📐 *Ручные алерт-линии:*\n\n"
                 "Создать: `алерт BTC`\n"
                 "Список: `алерт список`\n"
+                "Просмотр: `алерт просмотр BTC`\n"
                 "Удалить: `алерт удалить`\n"
                 "Часовой пояс: `алерт пояс`",
                 msg_id, parse_mode="Markdown")
@@ -765,6 +860,7 @@ async def handle_message(app_session, update):
             "📐 `алерт BTC` / `alert BTC`\n"
             "    _Ручная линия + алерт касания_\n"
             "📐 `алерт список` — _активные линии_\n"
+            "📐 `алерт просмотр BTC` — _график с линиями_\n"
             "📐 `алерт удалить` — _удалить все линии_\n"
             "📐 `алерт пояс` — _часовой пояс (МСК и др.)_\n\n"
             "🌐 `/lang en` — English\n"
