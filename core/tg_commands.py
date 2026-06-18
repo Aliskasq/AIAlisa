@@ -448,7 +448,41 @@ async def handle_message(app_session, update):
                 logging.error(traceback.format_exc())
             return
 
-        if remaining_ma in ("удалить", "очистить", "clear"):
+        if remaining_ma.startswith("удалить") or remaining_ma.startswith("delete"):
+            # Parse coins after command: "удалить BTC, ETH" or "удалить SOL"
+            del_cmd_word = "удалить" if remaining_ma.startswith("удалить") else "delete"
+            del_coins_raw = remaining_ma[len(del_cmd_word):].strip()
+            alerts = load_manual_alerts()
+
+            if del_coins_raw:
+                # Delete specific coins
+                coins = [c.strip().upper().replace("USDT", "") for c in del_coins_raw.replace(",", " ").split() if c.strip()]
+                symbols = [c + "USDT" for c in coins]
+                to_delete = [a for a in alerts if a.get("chat_id") == chat_id and a.get("symbol") in symbols]
+                if not to_delete:
+                    coins_str = ", ".join(coins)
+                    await send_response(app_session, chat_id,
+                        f"📭 Нет линий для: {coins_str}", msg_id)
+                    return
+                remaining_alerts = [a for a in alerts if not (a.get("chat_id") == chat_id and a.get("symbol") in symbols)]
+                save_manual_alerts(remaining_alerts)
+                deleted_summary = {}
+                for a in to_delete:
+                    short = a["symbol"].replace("USDT", "")
+                    deleted_summary[short] = deleted_summary.get(short, 0) + 1
+                summary = ", ".join(f"{coin}: {cnt}" for coin, cnt in deleted_summary.items())
+                await send_response(app_session, chat_id, f"✅ Удалено: {summary}", msg_id)
+            else:
+                # No coins specified — show help
+                await send_response(app_session, chat_id,
+                    "📐 *Удаление линий:*\n\n"
+                    "По монете: `алерт удалить BTC`\n"
+                    "Несколько: `алерт удалить BTC, ETH`\n"
+                    "Все сразу: `алерт очистить`",
+                    msg_id, parse_mode="Markdown")
+            return
+
+        if remaining_ma in ("очистить", "clear"):
             alerts = load_manual_alerts()
             user_count = sum(1 for a in alerts if a.get("chat_id") == chat_id)
             if user_count == 0:
@@ -456,7 +490,7 @@ async def handle_message(app_session, update):
                 return
             remaining_alerts = [a for a in alerts if a.get("chat_id") != chat_id]
             save_manual_alerts(remaining_alerts)
-            await send_response(app_session, chat_id, f"✅ Удалено линий: {user_count}", msg_id)
+            await send_response(app_session, chat_id, f"✅ Все линии удалены ({user_count} шт.)", msg_id)
             return
 
         # Sub-command: view chart (алерт просмотр BTC [tf])
@@ -561,7 +595,8 @@ async def handle_message(app_session, update):
                 "Создать: `алерт BTC`\n"
                 "Список: `алерт список`\n"
                 "Просмотр: `алерт просмотр BTC`\n"
-                "Удалить: `алерт удалить`\n"
+                "Удалить: `алерт удалить BTC`\n"
+                "Удалить все: `алерт очистить`\n"
                 "Часовой пояс: `алерт пояс`",
                 msg_id, parse_mode="Markdown")
             return
@@ -861,7 +896,8 @@ async def handle_message(app_session, update):
             "    _Ручная линия + алерт касания_\n"
             "📐 `алерт список` — _активные линии_\n"
             "📐 `алерт просмотр BTC` — _график с линиями_\n"
-            "📐 `алерт удалить` — _удалить все линии_\n"
+            "📐 `алерт удалить BTC` — _удалить линии монеты_\n"
+            "📐 `алерт очистить` — _удалить все линии_\n"
             "📐 `алерт пояс` — _часовой пояс (МСК и др.)_\n\n"
             "🌐 `/lang en` — English\n"
             "🌐 `/lang ru` — Русский"
