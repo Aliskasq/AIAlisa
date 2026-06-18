@@ -240,6 +240,9 @@ async def send_response(session, chat_id, text, reply_to_msg_id=None, reply_mark
             if resp.status == 200:
                 data = await resp.json()
                 return data.get("result", {}).get("message_id")
+            else:
+                resp_text = await resp.text()
+                logging.error(f"❌ send_response non-200: status={resp.status}, body={resp_text[:300]}, payload_text={str(payload.get('text',''))[:100]}")
     except Exception as e:
         logging.error(f"❌ send_response error: {e}")
     return None
