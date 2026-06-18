@@ -419,8 +419,20 @@ async def handle_message(app_session, update):
                     for num, (global_idx, a) in enumerate(user_alerts, 1):
                         short = a["symbol"].replace("USDT", "")
                         mode_display = a.get('mode', '?').replace('_', ' ')
+                        # Created timestamp
+                        created = a.get('created_at', '')
+                        date_str = ""
+                        if created:
+                            try:
+                                from datetime import datetime as _dt
+                                ct = _dt.fromisoformat(created.replace('Z', '+00:00'))
+                                tz_off = get_user_tz_offset(chat_id)
+                                ct = ct + timedelta(hours=tz_off)
+                                date_str = f"\n     📅 {ct.strftime('%d.%m.%y %H:%M')}"
+                            except Exception:
+                                pass
                         lines_txt.append(
-                            f"{num}. `${short}` {a['tf']} — A=`{a['price_a']:.8g}` B=`{a['price_b']:.8g}` ({mode_display})"
+                            f"{num}. `${short}` {a['tf']} — A=`{a['price_a']:.8g}` B=`{a['price_b']:.8g}` ({mode_display}){date_str}"
                         )
                         delete_buttons.append(
                             {"text": f"❌ {num}", "callback_data": f"malert_del_{global_idx}"}
