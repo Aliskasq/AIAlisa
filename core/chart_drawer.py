@@ -1735,13 +1735,17 @@ async def draw_alert_chart(symbol: str, df: pd.DataFrame, manual_lines: list, tf
                 log_slope = (log_b - log_a) / (idx_b - idx_a)
                 log_intercept = log_a - log_slope * idx_a
 
+                # Start line 5 candles before point A (not from chart beginning)
+                trim_start = max(0, idx_a - 5)
                 line_vals = []
-                for i in range(view_limit):
+                line_dates = []
+                for i in range(trim_start, view_limit):
                     val = _math.exp(log_slope * i + log_intercept)
                     line_vals.append(val)
+                    line_dates.append(plot_df.index[i])
 
                 line_color = _line_colors[li % len(_line_colors)]
-                alines_list.append(list(zip(plot_df.index, line_vals)))
+                alines_list.append(list(zip(line_dates, line_vals)))
                 alines_colors.append(line_color)
                 alines_widths.append(2)
 
