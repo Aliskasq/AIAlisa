@@ -177,8 +177,8 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 alert_tf_ms = alert.get("tf_ms", 14400000)  # original TF in ms
 
                 try:
-                    # Fetch 50 candles on 5m (weight = 1)
-                    raw_5m = await fetch_klines(session, sym, "5m", 50)
+                    # Fetch 1000 candles on 5m (temporarily increased from 50 for reliable trigger)
+                    raw_5m = await fetch_klines(session, sym, "5m", 1000)
                     if not raw_5m:
                         remaining.append(alert)
                         continue
