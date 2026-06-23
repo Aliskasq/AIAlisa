@@ -558,11 +558,12 @@ async def handle_message(app_session, update):
             for tf in tfs_to_show:
                 binance_interval = tf_map.get(tf, "4h")
                 try:
-                    df = await fetch_klines(app_session, view_symbol, binance_interval, limit=199)
-                    if df is None or df.empty:
+                    raw = await fetch_klines(app_session, view_symbol, binance_interval, limit=199)
+                    if not raw:
                         await send_response(app_session, chat_id,
                             f"⚠️ Не удалось получить данные для `{view_symbol}` {tf}.", msg_id, parse_mode="Markdown")
                         continue
+                    df = pd.DataFrame(raw)
 
                     tf_alerts = [a for a in user_sym_alerts if a['tf'] == tf]
                     all_lines_for_chart = [
