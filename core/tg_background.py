@@ -252,6 +252,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 tf = alert["tf"]
                 short_sym = sym.replace("USDT", "")
                 diff_pct = ((touch_price / line_price) - 1) * 100
+                logging.info(f"🔔 TRIGGER detected: {sym} ({tf}) touch={touch_price:.8g} line={line_price:.8g} type={touch_type}")
 
                 # Draw chart on original TF with ALL remaining lines for this symbol+tf
                 chart_path = None
@@ -281,6 +282,9 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                             'color_idx': alert.get('color_idx', 0),
                         })
                         chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
+                        logging.info(f"📊 Chart drawn: {chart_path}")
+                    else:
+                        logging.warning(f"⚠️ No kline data for chart: {sym} {binance_interval}")
                 except Exception as e:
                     logging.error(f"❌ Manual alert chart error for {sym}: {repr(e)}")
 
@@ -297,8 +301,9 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                     f"📐 {touch_label} ({diff_pct:+.2f}%)"
                 )
 
-                # Send to admin DM
+                # Send to admin DM — with robust fallback chain
                 target_chat = str(CHAT_ID)
+                sent_ok = False
                 try:
                     if chart_path:
                         photo_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
@@ -309,26 +314,54 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                             data.add_field('parse_mode', 'Markdown')
                             data.add_field('photo', f, filename=f"{sym}_malert.png", content_type='image/png')
                             async with session.post(photo_url, data=data, timeout=30) as resp:
-                                if resp.status != 200:
+                                if resp.status == 200:
+                                    sent_ok = True
+                                else:
                                     resp_text = await resp.text()
                                     logging.error(f"❌ Manual alert photo error: {resp.status} - {resp_text}")
-                                    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                                    await session.post(url, json={
-                                        "chat_id": target_chat, "text": notify_text, "parse_mode": "Markdown"
-                                    })
                         try:
                             if os.path.exists(chart_path):
                                 os.remove(chart_path)
                         except:
                             pass
-                    else:
-                        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-                        await session.post(url, json={
-                            "chat_id": target_chat, "text": notify_text, "parse_mode": "Markdown"
-                        })
-                    logging.info(f"📐 Manual alert sent: {sym} ({tf}) — {touch_label}")
                 except Exception as e:
-                    logging.error(f"❌ Manual alert notification error: {e}")
+                    logging.error(f"❌ Manual alert photo send error: {e}")
+
+                # Fallback 1: text with Markdown
+                if not sent_ok:
+                    try:
+                        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                        async with session.post(url, json={
+                            "chat_id": target_chat, "text": notify_text, "parse_mode": "Markdown"
+                        }, timeout=15) as resp:
+                            if resp.status == 200:
+                                sent_ok = True
+                            else:
+                                resp_text = await resp.text()
+                                logging.error(f"❌ Manual alert text+MD error: {resp.status} - {resp_text}")
+                    except Exception as e:
+                        logging.error(f"❌ Manual alert text+MD send error: {e}")
+
+                # Fallback 2: plain text (no Markdown, no parse_mode)
+                if not sent_ok:
+                    try:
+                        plain = notify_text.replace('*', '').replace('`', '')
+                        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                        async with session.post(url, json={
+                            "chat_id": target_chat, "text": plain
+                        }, timeout=15) as resp:
+                            if resp.status == 200:
+                                sent_ok = True
+                            else:
+                                resp_text = await resp.text()
+                                logging.error(f"❌ Manual alert plain text error: {resp.status} - {resp_text}")
+                    except Exception as e:
+                        logging.error(f"❌ Manual alert plain send error: {e}")
+
+                if sent_ok:
+                    logging.info(f"📐 Manual alert sent: {sym} ({tf}) — {touch_label}")
+                else:
+                    logging.error(f"❌ FAILED to send manual alert for {sym} ({tf}) — all 3 attempts failed!")
 
             if triggered:
                 save_manual_alerts(remaining)
