@@ -217,7 +217,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                         tol = line_price * 0.0001  # 0.01%
                         alert_mode = alert.get("mode", "high")
 
-                        if alert_mode in ("low", "body_bot", "date_bottom"):
+                        if alert_mode in ("low", "body_bot", "date_bottom", "date_body_bot", "date_low"):
                             # SUPPORT line → alert when price breaks DOWN to line
                             near_touch = (line_price - tol <= c_low <= line_price + tol)
                             full_cross = (c_low <= line_price <= c_high)
@@ -227,7 +227,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                                 touch_type = "body" if body_bot <= line_price else "wick"
                                 break
 
-                        elif alert_mode in ("high", "body_top", "date_top"):
+                        elif alert_mode in ("high", "body_top", "date_top", "date_body_top", "date_high"):
                             # RESISTANCE line → alert when price breaks UP to line
                             near_touch = (line_price - tol <= c_high <= line_price + tol)
                             full_cross = (c_low <= line_price <= c_high)
