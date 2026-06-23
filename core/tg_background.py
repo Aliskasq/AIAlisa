@@ -177,8 +177,8 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 alert_tf_ms = alert.get("tf_ms", 14400000)  # original TF in ms
 
                 try:
-                    # Fetch 1000 candles on 5m (temporarily increased from 50 for reliable trigger)
-                    raw_5m = await fetch_klines(session, sym, "5m", 1000)
+                    # Fetch 50 candles on 5m (weight = 1)
+                    raw_5m = await fetch_klines(session, sym, "5m", 50)
                     if not raw_5m:
                         remaining.append(alert)
                         continue
@@ -252,7 +252,7 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                 tf = alert["tf"]
                 short_sym = sym.replace("USDT", "")
                 diff_pct = ((touch_price / line_price) - 1) * 100
-                logging.info(f"🔔 TRIGGER detected: {sym} ({tf}) touch={touch_price:.8g} line={line_price:.8g} type={touch_type}")
+                # logging.info(f"🔔 TRIGGER detected: {sym} ({tf}) touch={touch_price:.8g} line={line_price:.8g} type={touch_type}")
 
                 # Draw chart on original TF with ALL remaining lines for this symbol+tf
                 chart_path = None
@@ -282,9 +282,9 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                             'color_idx': alert.get('color_idx', 0),
                         })
                         chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
-                        logging.info(f"📊 Chart drawn: {chart_path}")
+                        # logging.info(f"📊 Chart drawn: {chart_path}")
                     else:
-                        logging.warning(f"⚠️ No kline data for chart: {sym} {binance_interval}")
+                        pass  # no kline data for chart
                 except Exception as e:
                     logging.error(f"❌ Manual alert chart error for {sym}: {repr(e)}")
 
@@ -358,14 +358,11 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                     except Exception as e:
                         logging.error(f"❌ Manual alert plain send error: {e}")
 
-                if sent_ok:
-                    logging.info(f"📐 Manual alert sent: {sym} ({tf}) — {touch_label}")
-                else:
+                if not sent_ok:
                     logging.error(f"❌ FAILED to send manual alert for {sym} ({tf}) — all 3 attempts failed!")
 
             if triggered:
                 save_manual_alerts(remaining)
-                logging.info(f"📐 {len(triggered)} manual alert(s) triggered, {len(remaining)} remaining.")
 
             await asyncio.sleep(300)  # 5 minutes
         except Exception as e:
