@@ -2445,7 +2445,19 @@ async def _finalize_manual_alert_with_indices(app_session, chat_id, msg_id, ma_s
 
     symbol = ma_state['symbol']
     tf = ma_state['tf']
-    mode = ma_state.get('mode', 'high')
+    # For date mode alerts, map date_mode to correct monitor mode
+    if 'date_mode' in ma_state and not ma_state.get('mode'):
+        _date_mode_map = {
+            'date_body_top': 'date_top',
+            'date_body_bot': 'date_bottom',
+            'date_high': 'date_top',
+            'date_low': 'date_bottom',
+            'date_top': 'date_top',
+            'date_bottom': 'date_bottom',
+        }
+        mode = _date_mode_map.get(ma_state['date_mode'], 'high')
+    else:
+        mode = ma_state.get('mode', 'high')
     idx_a = ma_state['chosen_a_idx']
     actual_price_a = ma_state['chosen_a_price']
     idx_b = ma_state['chosen_b_idx']
