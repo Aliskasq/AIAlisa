@@ -281,7 +281,14 @@ async def manual_alert_monitor(session: aiohttp.ClientSession):
                             'tf_ms': alert.get('tf_ms', 0),
                             'color_idx': alert.get('color_idx', 0),
                         })
-                        chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf)
+                        # Compute SMC overlay for the chart
+                        _alert_smc = None
+                        try:
+                            from core.smc import analyze_smc
+                            _alert_smc = analyze_smc(df, tf, symbol=sym)
+                        except Exception as e:
+                            logging.error(f"❌ SMC for manual alert {sym}: {repr(e)}")
+                        chart_path = await draw_alert_chart(sym, df, all_lines_for_chart, tf, smc_overlay=_alert_smc)
                         # logging.info(f"📊 Chart drawn: {chart_path}")
                     else:
                         pass  # no kline data for chart
