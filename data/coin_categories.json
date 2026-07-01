@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-01T02:15:00Z",
+  "_updated": "2026-07-01T03:15:00Z",
   "_sectors": ["🤖 AI", "🏦 DeFi", "🏗 L1", "🔗 L2", "💎 Meme", "🎮 Gaming", "🖼 NFT", "💰 RWA", "🔮 Oracle", "💾 Infra", "📊 Stocks", "🥇 Metals", "👑 Blue Chip", "📦 Other"],
   "0GUSDT": ["🤖 AI"],
   "1000000BOBUSDT": ["💎 Meme"],
@@ -55,5 +55,25 @@
   "ARUSDT": ["💾 Infra"],
   "ARXUSDT": ["💾 Infra"],
   "ASRUSDT": ["📦 Other"],
-  "ASTERUSDT": ["🏗 L1"]
+  "ASTERUSDT": ["🏗 L1"],
+  "ASTRUSDT": ["🏗 L1"],
+  "ATHUSDT": ["🤖 AI"],
+  "ATOMUSDT": ["🏗 L1"],
+  "AUCTIONUSDT": ["🏦 DeFi"],
+  "AVAXUSDT": ["🏗 L1"],
+  "AVNTUSDT": ["🏦 DeFi"],
+  "AXLUSDT": ["💾 Infra"],
+  "AXSUSDT": ["🎮 Gaming"],
+  "AZTECUSDT": ["🔗 L2"],
+  "BABYUSDT": ["💾 Infra"],
+  "BANANAS31USDT": ["💎 Meme"],
+  "BANANAUSDT": ["🏦 DeFi"],
+  "BANDUSDT": ["🔮 Oracle"],
+  "BASEDUSDT": ["💎 Meme"],
+  "BATUSDT": ["💾 Infra"],
+  "BBUSDT": ["💾 Infra"],
+  "BCHUSDT": ["🏗 L1"],
+  "BEAMXUSDT": ["🎮 Gaming"],
+  "BEATUSDT": ["🎮 Gaming"],
+  "BELUSDT": ["🏦 DeFi"]
 }
