@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-01T21:32:16Z",
+  "_updated": "2026-07-02T13:04:40.623589",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -397,5 +397,102 @@
   "CARVUSDT": [
     "🎮 Gaming",
     "🤖 AI"
+  ],
+  "CATIUSDT": [
+    "Gaming"
+  ],
+  "CCUSDT": [
+    "L1",
+    "RWA"
+  ],
+  "CELOUSDT": [
+    "L1"
+  ],
+  "CELRUSDT": [
+    "Infra"
+  ],
+  "CETUSUSDT": [
+    "DeFi"
+  ],
+  "CFGUSDT": [
+    "RWA"
+  ],
+  "CFXUSDT": [
+    "L1"
+  ],
+  "CGPTUSDT": [
+    "AI"
+  ],
+  "CHILLGUYUSDT": [
+    "Meme"
+  ],
+  "CHIPUSDT": [
+    "AI",
+    "DeFi"
+  ],
+  "CHRUSDT": [
+    "L1",
+    "AI"
+  ],
+  "CHZUSDT": [
+    "Fan Token"
+  ],
+  "CKBUSDT": [
+    "L1"
+  ],
+  "CLANKERUSDT": [
+    "AI",
+    "Meme"
+  ],
+  "CLOUSDT": [
+    "L1"
+  ],
+  "COAIUSDT": [
+    "AI"
+  ],
+  "COLLECTUSDT": [
+    "Other"
+  ],
+  "COMPUSDT": [
+    "DeFi"
+  ],
+  "COOKIEUSDT": [
+    "AI"
+  ],
+  "COTIUSDT": [
+    "L2",
+    "DeFi"
+  ],
+  "COWUSDT": [
+    "DeFi"
+  ],
+  "CROSSUSDT": [
+    "Gaming"
+  ],
+  "CRVUSDT": [
+    "DeFi"
+  ],
+  "CTKUSDT": [
+    "Infra"
+  ],
+  "CTRUSDT": [
+    "L2"
+  ],
+  "CTSIUSDT": [
+    "L2"
+  ],
+  "CUSDT": [
+    "AI",
+    "Infra"
+  ],
+  "CVCUSDT": [
+    "Infra"
+  ],
+  "CVXUSDT": [
+    "DeFi"
+  ],
+  "CYBERUSDT": [
+    "Infra",
+    "AI"
   ]
 }
