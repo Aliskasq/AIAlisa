@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-02T17:14:38.958702+00:00",
+  "_updated": "2026-07-02T22:27:56.442932+00:00",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -681,5 +681,100 @@
   ],
   "GOATUSDT": [
     "Meme"
+  ],
+  "GPSUSDT": [
+    "Infra"
+  ],
+  "GRASSUSDT": [
+    "Infra",
+    "AI"
+  ],
+  "GRIFFAINUSDT": [
+    "AI"
+  ],
+  "GRTUSDT": [
+    "Infra"
+  ],
+  "GTCUSDT": [
+    "Infra"
+  ],
+  "GUAUSDT": [
+    "Meme",
+    "AI"
+  ],
+  "GUNUSDT": [
+    "Gaming"
+  ],
+  "GUSDT": [
+    "L1"
+  ],
+  "GWEIUSDT": [
+    "DeFi"
+  ],
+  "HAEDALUSDT": [
+    "DeFi"
+  ],
+  "HANAUSDT": [
+    "Gaming"
+  ],
+  "HBARUSDT": [
+    "L1"
+  ],
+  "HEIUSDT": [
+    "Infra"
+  ],
+  "HEMIUSDT": [
+    "L2"
+  ],
+  "HFTUSDT": [
+    "DeFi"
+  ],
+  "HIVEUSDT": [
+    "L1"
+  ],
+  "HMSTRUSDT": [
+    "Gaming"
+  ],
+  "HOLOUSDT": [
+    "AI"
+  ],
+  "HOMEUSDT": [
+    "DeFi"
+  ],
+  "HOTUSDT": [
+    "Infra"
+  ],
+  "HUMAUSDT": [
+    "RWA",
+    "DeFi"
+  ],
+  "HUSDT": [
+    "Infra"
+  ],
+  "HYPERUSDT": [
+    "Infra"
+  ],
+  "HYPEUSDT": [
+    "L1",
+    "DeFi"
+  ],
+  "ICNTUSDT": [
+    "Infra"
+  ],
+  "ICPUSDT": [
+    "L1",
+    "AI"
+  ],
+  "ICXUSDT": [
+    "L1"
+  ],
+  "IDOLUSDT": [
+    "AI"
+  ],
+  "IDUSDT": [
+    "Infra"
+  ],
+  "ILVUSDT": [
+    "Gaming"
   ]
 }
