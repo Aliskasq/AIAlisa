@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-02T14:17:42.886427",
+  "_updated": "2026-07-02T14:28:57.210612",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -572,5 +572,22 @@
   ],
   "DYMUSDT": [
     "L1"
+  ],
+  "EDENUSDT": [
+    "RWA",
+    "DeFi"
+  ],
+  "EDGEUSDT": [
+    "Infra"
+  ],
+  "EIGENUSDT": [
+    "Infra",
+    "AI"
+  ],
+  "ENSOUSDT": [
+    "Infra"
+  ],
+  "ESPUSDT": [
+    "Infra"
   ]
 }
