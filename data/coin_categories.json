@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-02T14:09:52.551097",
+  "_updated": "2026-07-02T14:17:42.886427",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -559,5 +559,18 @@
   ],
   "ESPORTSUSDT": [
     "Gaming"
+  ],
+  "CYSUSDT": [
+    "Infra",
+    "AI"
+  ],
+  "DOLOUSDT": [
+    "DeFi"
+  ],
+  "DOTUSDT": [
+    "L1"
+  ],
+  "DYMUSDT": [
+    "L1"
   ]
 }
