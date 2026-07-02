@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-02T13:04:40.623589",
+  "_updated": "2026-07-02T14:09:52.551097",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -15,7 +15,8 @@
     "🥇 Metals",
     "👑 Blue Chip",
     "📦 Other",
-    "⚽ Fan Token"
+    "⚽ Fan Token",
+    "Payments"
   ],
   "0GUSDT": [
     "⚽ Fan Token"
@@ -494,5 +495,69 @@
   "CYBERUSDT": [
     "Infra",
     "AI"
+  ],
+  "DASHUSDT": [
+    "Payments"
+  ],
+  "DEEPUSDT": [
+    "DeFi",
+    "Infra"
+  ],
+  "DEXEUSDT": [
+    "DeFi"
+  ],
+  "DIAUSDT": [
+    "Oracle"
+  ],
+  "DODOXUSDT": [
+    "DeFi"
+  ],
+  "DOGEUSDT": [
+    "Meme"
+  ],
+  "DOGSUSDT": [
+    "Meme"
+  ],
+  "DOODUSDT": [
+    "NFT",
+    "Meme"
+  ],
+  "DRIFTUSDT": [
+    "DeFi"
+  ],
+  "DUSKUSDT": [
+    "L1",
+    "RWA"
+  ],
+  "DYDXUSDT": [
+    "DeFi"
+  ],
+  "EDUUSDT": [
+    "Other"
+  ],
+  "EGLDUSDT": [
+    "L1",
+    "AI"
+  ],
+  "ELSAUSDT": [
+    "AI"
+  ],
+  "ENAUSDT": [
+    "DeFi"
+  ],
+  "ENJUSDT": [
+    "Gaming"
+  ],
+  "ENSUSDT": [
+    "Infra"
+  ],
+  "EPICUSDT": [
+    "Gaming"
+  ],
+  "ERAUSDT": [
+    "L2"
+  ],
+  "ESPORTSUSDT": [
+    "Gaming"
   ]
 }
