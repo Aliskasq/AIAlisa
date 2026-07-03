@@ -882,5 +882,98 @@
   "LAUSDT": [
     "💾 Infra",
     "🤖 AI"
+  ],
+  "LAYERUSDT": [
+    "🏗 L1"
+  ],
+  "LDOUSDT": [
+    "🏦 DeFi"
+  ],
+  "LIGHTUSDT": [
+    "💾 Infra"
+  ],
+  "LINEAUSDT": [
+    "🔗 L2"
+  ],
+  "LINKUSDT": [
+    "🔮 Oracle",
+    "💾 Infra"
+  ],
+  "LISTAUSDT": [
+    "🏦 DeFi"
+  ],
+  "LITUSDT": [
+    "🏦 DeFi"
+  ],
+  "LPTUSDT": [
+    "💾 Infra",
+    "🤖 AI"
+  ],
+  "LQTYUSDT": [
+    "🏦 DeFi"
+  ],
+  "LSKUSDT": [
+    "🔗 L2"
+  ],
+  "LTCUSDT": [
+    "🏗 L1",
+    "💳 Payments"
+  ],
+  "LUMIAUSDT": [
+    "🔗 L2",
+    "💰 RWA"
+  ],
+  "LUNA2USDT": [
+    "🏗 L1"
+  ],
+  "LYNUSDT": [
+    "🤖 AI"
+  ],
+  "MAGICUSDT": [
+    "🎮 Gaming",
+    "🤖 AI"
+  ],
+  "MAGMAUSDT": [
+    "🏦 DeFi"
+  ],
+  "MANAUSDT": [
+    "🎮 Gaming"
+  ],
+  "MANTAUSDT": [
+    "🔗 L2"
+  ],
+  "MANTRAUSDT": [
+    "💰 RWA",
+    "🏗 L1"
+  ],
+  "MASKUSDT": [
+    "💾 Infra"
+  ],
+  "MAVIAUSDT": [
+    "🎮 Gaming"
+  ],
+  "MAVUSDT": [
+    "🏦 DeFi"
+  ],
+  "MEGAUSDT": [
+    "🔗 L2"
+  ],
+  "MELANIAUSDT": [
+    "💎 Meme"
+  ],
+  "MEMEUSDT": [
+    "💎 Meme"
+  ],
+  "MERLUSDT": [
+    "🔗 L2"
+  ],
+  "METISUSDT": [
+    "🔗 L2"
+  ],
+  "METUSDT": [
+    "🏦 DeFi"
+  ],
+  "MEUSDT": [
+    "🖼 NFT"
   ]
 }
