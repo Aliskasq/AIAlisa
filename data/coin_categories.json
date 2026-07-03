@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-02T22:27:56.442932+00:00",
+  "_updated": "2026-07-03T20:26:54.285749+00:00",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -776,5 +776,111 @@
   ],
   "ILVUSDT": [
     "Gaming"
+  ],
+  "IMXUSDT": [
+    "🎮 Gaming",
+    "🔗 L2"
+  ],
+  "INITUSDT": [
+    "🏗 L1"
+  ],
+  "INJUSDT": [
+    "🏗 L1",
+    "🏦 DeFi"
+  ],
+  "INUSDT": [
+    "🤖 AI",
+    "🏦 DeFi"
+  ],
+  "INXUSDT": [
+    "🏦 DeFi"
+  ],
+  "IOSTUSDT": [
+    "🏗 L1"
+  ],
+  "IOTAUSDT": [
+    "🏗 L1",
+    "💾 Infra"
+  ],
+  "IOTXUSDT": [
+    "💾 Infra",
+    "🤖 AI"
+  ],
+  "IOUSDT": [
+    "🤖 AI",
+    "💾 Infra"
+  ],
+  "IRYSUSDT": [
+    "💾 Infra"
+  ],
+  "JASMYUSDT": [
+    "💾 Infra"
+  ],
+  "JCTUSDT": [
+    "🤖 AI",
+    "💾 Infra"
+  ],
+  "JELLYJELLYUSDT": [
+    "💎 Meme"
+  ],
+  "JOEUSDT": [
+    "🏦 DeFi"
+  ],
+  "JSTUSDT": [
+    "🏦 DeFi"
+  ],
+  "JTOUSDT": [
+    "🏦 DeFi"
+  ],
+  "JUPUSDT": [
+    "🏦 DeFi"
+  ],
+  "KAIAUSDT": [
+    "🏗 L1"
+  ],
+  "KAITOUSDT": [
+    "🤖 AI"
+  ],
+  "KASUSDT": [
+    "🏗 L1"
+  ],
+  "KATUSDT": [
+    "🔗 L2",
+    "🏦 DeFi"
+  ],
+  "KAVAUSDT": [
+    "🏗 L1",
+    "🏦 DeFi"
+  ],
+  "KERNELUSDT": [
+    "💾 Infra"
+  ],
+  "KGENUSDT": [
+    "💾 Infra",
+    "🤖 AI"
+  ],
+  "KITEUSDT": [
+    "🤖 AI",
+    "💾 Infra"
+  ],
+  "KMNOUSDT": [
+    "🏦 DeFi"
+  ],
+  "KNCUSDT": [
+    "🏦 DeFi"
+  ],
+  "KOMAUSDT": [
+    "💎 Meme"
+  ],
+  "KSMUSDT": [
+    "🏗 L1"
+  ],
+  "LABUSDT": [
+    "🏦 DeFi",
+    "🤖 AI"
+  ],
+  "LAUSDT": [
+    "💾 Infra",
+    "🤖 AI"
   ]
 }
