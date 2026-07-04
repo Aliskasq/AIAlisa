@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-04T12:26:09.363Z",
+  "_updated": "2026-07-04T14:41:28.064Z",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -1303,5 +1303,318 @@
   ],
   "SCRUSDT": [
     "🔗 L2"
+  ],
+  "SEIUSDT": [
+    "🏗 L1"
+  ],
+  "SENTUSDT": [
+    "🤖 AI"
+  ],
+  "SFPUSDT": [
+    "💾 Infra"
+  ],
+  "SHELLUSDT": [
+    "🤖 AI"
+  ],
+  "SIGNUSDT": [
+    "💾 Infra"
+  ],
+  "SIRENUSDT": [
+    "💎 Meme",
+    "🤖 AI"
+  ],
+  "SKLUSDT": [
+    "🏗 L1"
+  ],
+  "SKRUSDT": [
+    "💾 Infra"
+  ],
+  "SKYAIUSDT": [
+    "🤖 AI"
+  ],
+  "SKYUSDT": [
+    "🏦 DeFi"
+  ],
+  "SLPUSDT": [
+    "🎮 Gaming"
+  ],
+  "SLXUSDT": [
+    "🏦 DeFi"
+  ],
+  "SNXUSDT": [
+    "🏦 DeFi"
+  ],
+  "SOLUSDT": [
+    "🏗 L1"
+  ],
+  "SOLVUSDT": [
+    "🏦 DeFi"
+  ],
+  "SOMIUSDT": [
+    "🏗 L1",
+    "🤖 AI"
+  ],
+  "SONICUSDT": [
+    "🔗 L2"
+  ],
+  "SOONUSDT": [
+    "🔗 L2"
+  ],
+  "SOPHUSDT": [
+    "🏦 DeFi",
+    "🤖 AI"
+  ],
+  "SPACEUSDT": [
+    "💾 Infra"
+  ],
+  "SPELLUSDT": [
+    "🏦 DeFi"
+  ],
+  "SPKUSDT": [
+    "🏦 DeFi"
+  ],
+  "SPORTFUNUSDT": [
+    "🎮 Gaming"
+  ],
+  "SPXUSDT": [
+    "💎 Meme"
+  ],
+  "SQDUSDT": [
+    "💾 Infra"
+  ],
+  "SSVUSDT": [
+    "💾 Infra"
+  ],
+  "STABLEUSDT": [
+    "🏗 L1",
+    "💳 Payments"
+  ],
+  "STARUSDT": [
+    "💾 Infra"
+  ],
+  "STBLUSDT": [
+    "🏦 DeFi"
+  ],
+  "STEEMUSDT": [
+    "📦 Other"
+  ],
+  "STGUSDT": [
+    "🏦 DeFi"
+  ],
+  "STORJUSDT": [
+    "💾 Infra"
+  ],
+  "STOUSDT": [
+    "🏦 DeFi"
+  ],
+  "STRKUSDT": [
+    "🔗 L2"
+  ],
+  "STXUSDT": [
+    "🔗 L2"
+  ],
+  "SUIUSDT": [
+    "🏗 L1"
+  ],
+  "SUNUSDT": [
+    "🏦 DeFi"
+  ],
+  "SUPERUSDT": [
+    "🎮 Gaming"
+  ],
+  "SUSDT": [
+    "🏗 L1"
+  ],
+  "SUSHIUSDT": [
+    "🏦 DeFi"
+  ],
+  "SWARMSUSDT": [
+    "🤖 AI"
+  ],
+  "SXTUSDT": [
+    "💾 Infra"
+  ],
+  "SYNUSDT": [
+    "💾 Infra"
+  ],
+  "SYRUPUSDT": [
+    "🏦 DeFi",
+    "💰 RWA"
+  ],
+  "TACUSDT": [
+    "💾 Infra"
+  ],
+  "TAGUSDT": [
+    "🤖 AI"
+  ],
+  "TAIKOUSDT": [
+    "🔗 L2"
+  ],
+  "TAKEUSDT": [
+    "🎮 Gaming"
+  ],
+  "TAOUSDT": [
+    "🤖 AI"
+  ],
+  "TAUSDT": [
+    "🤖 AI"
+  ],
+  "THETAUSDT": [
+    "💾 Infra",
+    "🤖 AI"
+  ],
+  "THEUSDT": [
+    "🏦 DeFi"
+  ],
+  "TIAUSDT": [
+    "🏗 L1"
+  ],
+  "TLMUSDT": [
+    "🎮 Gaming"
+  ],
+  "TNSRUSDT": [
+    "🖼 NFT"
+  ],
+  "TOSHIUSDT": [
+    "💎 Meme"
+  ],
+  "TOWNSUSDT": [
+    "📦 Other"
+  ],
+  "TRADOORUSDT": [
+    "🏦 DeFi",
+    "🤖 AI"
+  ],
+  "TRBUSDT": [
+    "🔮 Oracle"
+  ],
+  "TREEUSDT": [
+    "🏦 DeFi"
+  ],
+  "TRIAUSDT": [
+    "💾 Infra"
+  ],
+  "TRUMPUSDT": [
+    "💎 Meme"
+  ],
+  "TRUSTUSDT": [
+    "💾 Infra",
+    "🤖 AI"
+  ],
+  "TRUTHUSDT": [
+    "🤖 AI"
+  ],
+  "TRXUSDT": [
+    "🏗 L1"
+  ],
+  "TSTUSDT": [
+    "💎 Meme"
+  ],
+  "TURBOUSDT": [
+    "💎 Meme",
+    "🤖 AI"
+  ],
+  "TURTLEUSDT": [
+    "🏦 DeFi"
+  ],
+  "TUSDT": [
+    "💾 Infra"
+  ],
+  "TUTUSDT": [
+    "💎 Meme",
+    "🤖 AI"
+  ],
+  "TWTUSDT": [
+    "💾 Infra"
+  ],
+  "UAIUSDT": [
+    "🤖 AI"
+  ],
+  "UBUSDT": [
+    "🤖 AI"
+  ],
+  "UMAUSDT": [
+    "🔮 Oracle"
+  ],
+  "UNIUSDT": [
+    "🏦 DeFi"
+  ],
+  "USDCUSDT": [
+    "💳 Payments"
+  ],
+  "USELESSUSDT": [
+    "💎 Meme"
+  ],
+  "USTCUSDT": [
+    "📦 Other"
+  ],
+  "USUALUSDT": [
+    "🏦 DeFi",
+    "💰 RWA"
+  ],
+  "USUSDT": [
+    "🤖 AI"
+  ],
+  "VANAUSDT": [
+    "🤖 AI",
+    "🏗 L1"
+  ],
+  "VANRYUSDT": [
+    "🏗 L1"
+  ],
+  "VELODROMEUSDT": [
+    "🏦 DeFi"
+  ],
+  "VELVETUSDT": [
+    "🏦 DeFi",
+    "🤖 AI"
+  ],
+  "VETUSDT": [
+    "🏗 L1"
+  ],
+  "VICUSDT": [
+    "🏗 L1"
+  ],
+  "VIRTUALUSDT": [
+    "🤖 AI"
+  ],
+  "VTHOUSDT": [
+    "💾 Infra"
+  ],
+  "VVVUSDT": [
+    "🤖 AI"
+  ],
+  "WALUSDT": [
+    "💾 Infra"
+  ],
+  "WAXPUSDT": [
+    "🎮 Gaming"
+  ],
+  "WCTUSDT": [
+    "💾 Infra"
+  ],
+  "WETUSDT": [
+    "🏦 DeFi"
+  ],
+  "WIFUSDT": [
+    "💎 Meme"
+  ],
+  "WLDUSDT": [
+    "💾 Infra"
+  ],
+  "WLFIUSDT": [
+    "🏦 DeFi"
+  ],
+  "WOOUSDT": [
+    "🏦 DeFi"
+  ],
+  "WUSDT": [
+    "💾 Infra"
+  ],
+  "XAIUSDT": [
+    "🎮 Gaming"
+  ],
+  "XANUSDT": [
+    "💾 Infra"
   ]
 }
