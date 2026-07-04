@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-04T14:41:28.064Z",
+  "_updated": "2026-07-04T16:46:12.035Z",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -1616,5 +1616,103 @@
   ],
   "XANUSDT": [
     "💾 Infra"
+  ],
+  "XAUTUSDT": [
+    "💰 RWA",
+    "🥇 Metals"
+  ],
+  "XLMUSDT": [
+    "🏗 L1",
+    "💳 Payments"
+  ],
+  "XMRUSDT": [
+    "🏗 L1"
+  ],
+  "XNYUSDT": [
+    "🤖 AI",
+    "💾 Infra"
+  ],
+  "XPINUSDT": [
+    "💾 Infra"
+  ],
+  "XPLUSDT": [
+    "🏗 L1",
+    "💳 Payments"
+  ],
+  "XRPUSDT": [
+    "🏗 L1",
+    "💳 Payments"
+  ],
+  "XTZUSDT": [
+    "🏗 L1"
+  ],
+  "XVGUSDT": [
+    "🏗 L1"
+  ],
+  "XVSUSDT": [
+    "🏦 DeFi"
+  ],
+  "YBUSDT": [
+    "🏦 DeFi"
+  ],
+  "YFIUSDT": [
+    "🏦 DeFi"
+  ],
+  "YGGUSDT": [
+    "🎮 Gaming"
+  ],
+  "ZAMAUSDT": [
+    "💾 Infra"
+  ],
+  "ZBTUSDT": [
+    "💾 Infra"
+  ],
+  "ZECUSDT": [
+    "🏗 L1"
+  ],
+  "ZENUSDT": [
+    "💾 Infra"
+  ],
+  "ZEREBROUSDT": [
+    "🤖 AI",
+    "💎 Meme"
+  ],
+  "ZESTUSDT": [
+    "🏦 DeFi"
+  ],
+  "ZETAUSDT": [
+    "🏗 L1",
+    "🤖 AI"
+  ],
+  "ZILUSDT": [
+    "🏗 L1"
+  ],
+  "ZKCUSDT": [
+    "💾 Infra"
+  ],
+  "ZKPUSDT": [
+    "💾 Infra"
+  ],
+  "ZKUSDT": [
+    "🔗 L2"
+  ],
+  "ZORAUSDT": [
+    "🔗 L2",
+    "🖼 NFT"
+  ],
+  "ZROUSDT": [
+    "💾 Infra"
+  ],
+  "ZRXUSDT": [
+    "🏦 DeFi"
+  ],
+  "币安人生USDT": [
+    "💎 Meme"
+  ],
+  "我踏马来了USDT": [
+    "💎 Meme"
+  ],
+  "龙虾USDT": [
+    "💎 Meme"
   ]
 }
