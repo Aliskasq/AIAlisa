@@ -1,5 +1,5 @@
 {
-  "_updated": "2026-07-04T16:46:12.035Z",
+  "_updated": "2026-07-04T17:09:21.430Z",
   "_sectors": [
     "🤖 AI",
     "🏦 DeFi",
@@ -12,11 +12,12 @@
     "🔮 Oracle",
     "💾 Infra",
     "📊 Stocks",
-    "🥇 Metals",
+    "🥇 Metals/Commodities",
     "👑 Blue Chip",
     "📦 Other",
     "⚽ Fan Token",
-    "Payments"
+    "💳 Payments",
+    "📈 ETFs"
   ],
   "0GUSDT": [
     "⚽ Fan Token"
@@ -400,382 +401,382 @@
     "🤖 AI"
   ],
   "CATIUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "CCUSDT": [
-    "L1",
-    "RWA"
+    "🏗 L1",
+    "💰 RWA"
   ],
   "CELOUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "CELRUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "CETUSUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "CFGUSDT": [
-    "RWA"
+    "💰 RWA"
   ],
   "CFXUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "CGPTUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "CHILLGUYUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "CHIPUSDT": [
-    "AI",
-    "DeFi"
+    "🤖 AI",
+    "🏦 DeFi"
   ],
   "CHRUSDT": [
-    "L1",
-    "AI"
+    "🏗 L1",
+    "🤖 AI"
   ],
   "CHZUSDT": [
-    "Fan Token"
+    "⚽ Fan Token"
   ],
   "CKBUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "CLANKERUSDT": [
-    "AI",
-    "Meme"
+    "🤖 AI",
+    "💎 Meme"
   ],
   "CLOUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "COAIUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "COLLECTUSDT": [
-    "Other"
+    "📦 Other"
   ],
   "COMPUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "COOKIEUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "COTIUSDT": [
-    "L2",
-    "DeFi"
+    "🔗 L2",
+    "🏦 DeFi"
   ],
   "COWUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "CROSSUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "CRVUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "CTKUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "CTRUSDT": [
-    "L2"
+    "🔗 L2"
   ],
   "CTSIUSDT": [
-    "L2"
+    "🔗 L2"
   ],
   "CUSDT": [
-    "AI",
-    "Infra"
+    "🤖 AI",
+    "💾 Infra"
   ],
   "CVCUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "CVXUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "CYBERUSDT": [
-    "Infra",
-    "AI"
+    "💾 Infra",
+    "🤖 AI"
   ],
   "DASHUSDT": [
-    "Payments"
+    "💳 Payments"
   ],
   "DEEPUSDT": [
-    "DeFi",
-    "Infra"
+    "🏦 DeFi",
+    "💾 Infra"
   ],
   "DEXEUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "DIAUSDT": [
-    "Oracle"
+    "🔮 Oracle"
   ],
   "DODOXUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "DOGEUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "DOGSUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "DOODUSDT": [
-    "NFT",
-    "Meme"
+    "🖼 NFT",
+    "💎 Meme"
   ],
   "DRIFTUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "DUSKUSDT": [
-    "L1",
-    "RWA"
+    "🏗 L1",
+    "💰 RWA"
   ],
   "DYDXUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "EDUUSDT": [
-    "Other"
+    "📦 Other"
   ],
   "EGLDUSDT": [
-    "L1",
-    "AI"
+    "🏗 L1",
+    "🤖 AI"
   ],
   "ELSAUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "ENAUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "ENJUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "ENSUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "EPICUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "ERAUSDT": [
-    "L2"
+    "🔗 L2"
   ],
   "ESPORTSUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "CYSUSDT": [
-    "Infra",
-    "AI"
+    "💾 Infra",
+    "🤖 AI"
   ],
   "DOLOUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "DOTUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "DYMUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "EDENUSDT": [
-    "RWA",
-    "DeFi"
+    "💰 RWA",
+    "🏦 DeFi"
   ],
   "EDGEUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "EIGENUSDT": [
-    "Infra",
-    "AI"
+    "💾 Infra",
+    "🤖 AI"
   ],
   "ENSOUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "ESPUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "ETCUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "ETHFIUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "ETHUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "ETHWUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "EULUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "EVAAUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "FARTCOINUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "FETUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "FFUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "FHEUSDT": [
-    "AI",
-    "Infra"
+    "🤖 AI",
+    "💾 Infra"
   ],
   "FIDAUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "FIGHTUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "FILUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "FLOCKUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "FLOWUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "FLUIDUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "FLUXUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "FOGOUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "FOLKSUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "FORMUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "FRAXUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "FUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "GALAUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "GASUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "GENIUSUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "GIGGLEUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "GLMUSDT": [
-    "Infra",
-    "AI"
+    "💾 Infra",
+    "🤖 AI"
   ],
   "GMTUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "GMXUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "GOATUSDT": [
-    "Meme"
+    "💎 Meme"
   ],
   "GPSUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "GRASSUSDT": [
-    "Infra",
-    "AI"
+    "💾 Infra",
+    "🤖 AI"
   ],
   "GRIFFAINUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "GRTUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "GTCUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "GUAUSDT": [
-    "Meme",
-    "AI"
+    "💎 Meme",
+    "🤖 AI"
   ],
   "GUNUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "GUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "GWEIUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "HAEDALUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "HANAUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "HBARUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "HEIUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "HEMIUSDT": [
-    "L2"
+    "🔗 L2"
   ],
   "HFTUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "HIVEUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "HMSTRUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "HOLOUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "HOMEUSDT": [
-    "DeFi"
+    "🏦 DeFi"
   ],
   "HOTUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "HUMAUSDT": [
-    "RWA",
-    "DeFi"
+    "💰 RWA",
+    "🏦 DeFi"
   ],
   "HUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "HYPERUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "HYPEUSDT": [
-    "L1",
-    "DeFi"
+    "🏗 L1",
+    "🏦 DeFi"
   ],
   "ICNTUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "ICPUSDT": [
-    "L1",
-    "AI"
+    "🏗 L1",
+    "🤖 AI"
   ],
   "ICXUSDT": [
-    "L1"
+    "🏗 L1"
   ],
   "IDOLUSDT": [
-    "AI"
+    "🤖 AI"
   ],
   "IDUSDT": [
-    "Infra"
+    "💾 Infra"
   ],
   "ILVUSDT": [
-    "Gaming"
+    "🎮 Gaming"
   ],
   "IMXUSDT": [
     "🎮 Gaming",
@@ -1116,7 +1117,7 @@
   ],
   "PAXGUSDT": [
     "💰 RWA",
-    "🥇 Metals"
+    "🥇 Metals/Commodities"
   ],
   "PENDLEUSDT": [
     "🏦 DeFi"
@@ -1619,7 +1620,7 @@
   ],
   "XAUTUSDT": [
     "💰 RWA",
-    "🥇 Metals"
+    "🥇 Metals/Commodities"
   ],
   "XLMUSDT": [
     "🏗 L1",
@@ -1714,5 +1715,365 @@
   ],
   "龙虾USDT": [
     "💎 Meme"
+  ],
+  "AAOIUSDT": [
+    "📊 Stocks"
+  ],
+  "AAPLUSDT": [
+    "📊 Stocks"
+  ],
+  "ADBEUSDT": [
+    "📊 Stocks"
+  ],
+  "ALABUSDT": [
+    "📊 Stocks"
+  ],
+  "AMATUSDT": [
+    "📊 Stocks"
+  ],
+  "AMDUSDT": [
+    "📊 Stocks"
+  ],
+  "AMZNUSDT": [
+    "📊 Stocks"
+  ],
+  "ANTHROPICUSDT": [
+    "📊 Stocks"
+  ],
+  "ARMUSDT": [
+    "📊 Stocks"
+  ],
+  "ASMLUSDT": [
+    "📊 Stocks"
+  ],
+  "ASTSUSDT": [
+    "📊 Stocks"
+  ],
+  "AVGOUSDT": [
+    "📊 Stocks"
+  ],
+  "AXTIUSDT": [
+    "📊 Stocks"
+  ],
+  "BABAUSDT": [
+    "📊 Stocks"
+  ],
+  "BBXUSDT": [
+    "📊 Stocks"
+  ],
+  "BEUSDT": [
+    "📊 Stocks"
+  ],
+  "BMNRUSDT": [
+    "📊 Stocks"
+  ],
+  "BRKBUSDT": [
+    "📊 Stocks"
+  ],
+  "BSPUSDT": [
+    "📊 Stocks"
+  ],
+  "BXUSDT": [
+    "📊 Stocks"
+  ],
+  "BZUSDT": [
+    "📊 Stocks"
+  ],
+  "CATUSDT": [
+    "📊 Stocks"
+  ],
+  "CBRSUSDT": [
+    "📊 Stocks"
+  ],
+  "CIENUSDT": [
+    "📊 Stocks"
+  ],
+  "COHRUSDT": [
+    "📊 Stocks"
+  ],
+  "COINUSDT": [
+    "📊 Stocks"
+  ],
+  "COSTUSDT": [
+    "📊 Stocks"
+  ],
+  "CRDOUSDT": [
+    "📊 Stocks"
+  ],
+  "CRMUSDT": [
+    "📊 Stocks"
+  ],
+  "CRWDUSDT": [
+    "📊 Stocks"
+  ],
+  "CRWVUSDT": [
+    "📊 Stocks"
+  ],
+  "CSCOUSDT": [
+    "📊 Stocks"
+  ],
+  "DELLUSDT": [
+    "📊 Stocks"
+  ],
+  "DISUSDT": [
+    "📊 Stocks"
+  ],
+  "DKNGUSDT": [
+    "📊 Stocks"
+  ],
+  "EBAYUSDT": [
+    "📊 Stocks"
+  ],
+  "FLEXUSDT": [
+    "📊 Stocks"
+  ],
+  "FLNCUSDT": [
+    "📊 Stocks"
+  ],
+  "GLWUSDT": [
+    "📊 Stocks"
+  ],
+  "GMEUSDT": [
+    "📊 Stocks"
+  ],
+  "GOOGLUSDT": [
+    "📊 Stocks"
+  ],
+  "HDUSDT": [
+    "📊 Stocks"
+  ],
+  "HIMSUSDT": [
+    "📊 Stocks"
+  ],
+  "HOODUSDT": [
+    "📊 Stocks"
+  ],
+  "HPEUSDT": [
+    "📊 Stocks"
+  ],
+  "HYUNDAIUSDT": [
+    "📊 Stocks"
+  ],
+  "IBMUSDT": [
+    "📊 Stocks"
+  ],
+  "INTCUSDT": [
+    "📊 Stocks"
+  ],
+  "IRENUSDT": [
+    "📊 Stocks"
+  ],
+  "JPMUSDT": [
+    "📊 Stocks"
+  ],
+  "KLACUSDT": [
+    "📊 Stocks"
+  ],
+  "LITEUSDT": [
+    "📊 Stocks"
+  ],
+  "LLYUSDT": [
+    "📊 Stocks"
+  ],
+  "LRCXUSDT": [
+    "📊 Stocks"
+  ],
+  "METAUSDT": [
+    "📊 Stocks"
+  ],
+  "MRVLUSDT": [
+    "📊 Stocks"
+  ],
+  "MSFTUSDT": [
+    "📊 Stocks"
+  ],
+  "MSTRUSDT": [
+    "📊 Stocks"
+  ],
+  "MUUSDT": [
+    "📊 Stocks"
+  ],
+  "NBISUSDT": [
+    "📊 Stocks"
+  ],
+  "NFLXUSDT": [
+    "📊 Stocks"
+  ],
+  "NOKUSDT": [
+    "📊 Stocks"
+  ],
+  "NOWUSDT": [
+    "📊 Stocks"
+  ],
+  "NVOUSDT": [
+    "📊 Stocks"
+  ],
+  "NVDAUSDT": [
+    "📊 Stocks"
+  ],
+  "ONDSUSDT": [
+    "📊 Stocks"
+  ],
+  "OPENAIUSDT": [
+    "📊 Stocks"
+  ],
+  "ORCLUSDT": [
+    "📊 Stocks"
+  ],
+  "PAYPUSDT": [
+    "📊 Stocks"
+  ],
+  "PLTRUSDT": [
+    "📊 Stocks"
+  ],
+  "QCOMUSDT": [
+    "📊 Stocks"
+  ],
+  "QNTXUSDT": [
+    "📊 Stocks"
+  ],
+  "RIVNUSDT": [
+    "📊 Stocks"
+  ],
+  "RKLBUSDT": [
+    "📊 Stocks"
+  ],
+  "SAMSUNGUSDT": [
+    "📊 Stocks"
+  ],
+  "SKHYNIXUSDT": [
+    "📊 Stocks"
+  ],
+  "SMCIUSDT": [
+    "📊 Stocks"
+  ],
+  "SNDKUSDT": [
+    "📊 Stocks"
+  ],
+  "SONYUSDT": [
+    "📊 Stocks"
+  ],
+  "STRCUSDT": [
+    "📊 Stocks"
+  ],
+  "TERUSDT": [
+    "📊 Stocks"
+  ],
+  "TSLAUSDT": [
+    "📊 Stocks"
+  ],
+  "TSMUSDT": [
+    "📊 Stocks"
+  ],
+  "TTWOUSDT": [
+    "📊 Stocks"
+  ],
+  "TXNUSDT": [
+    "📊 Stocks"
+  ],
+  "UBERUSDT": [
+    "📊 Stocks"
+  ],
+  "VUSDT": [
+    "📊 Stocks"
+  ],
+  "WDCUSDT": [
+    "📊 Stocks"
+  ],
+  "WMTUSDT": [
+    "📊 Stocks"
+  ],
+  "ZMUSDT": [
+    "📊 Stocks"
+  ],
+  "CRCLUSDT": [
+    "📊 Stocks"
+  ],
+  "DRAMUSDT": [
+    "📈 ETFs"
+  ],
+  "EWJUSDT": [
+    "📈 ETFs"
+  ],
+  "EWTUSDT": [
+    "📈 ETFs"
+  ],
+  "EWYUSDT": [
+    "📈 ETFs"
+  ],
+  "EWZUSDT": [
+    "📈 ETFs"
+  ],
+  "IWMUSDT": [
+    "📈 ETFs"
+  ],
+  "KORUUSDT": [
+    "📈 ETFs"
+  ],
+  "KSTRUSDT": [
+    "📈 ETFs"
+  ],
+  "MVLLUSDT": [
+    "📈 ETFs"
+  ],
+  "QQQUSDT": [
+    "📈 ETFs"
+  ],
+  "SOXLUSDT": [
+    "📈 ETFs"
+  ],
+  "SPCXUSDT": [
+    "📈 ETFs"
+  ],
+  "SPYUSDT": [
+    "📈 ETFs"
+  ],
+  "STXXUSDT": [
+    "📈 ETFs"
+  ],
+  "TQQQUSDT": [
+    "📈 ETFs"
+  ],
+  "URNMUSDT": [
+    "📈 ETFs"
+  ],
+  "USARUSDT": [
+    "📈 ETFs"
+  ],
+  "UVXYUSDT": [
+    "📈 ETFs"
+  ],
+  "XLEUSDT": [
+    "📈 ETFs"
+  ],
+  "SQQQUSDT": [
+    "📈 ETFs"
+  ],
+  "COPPERUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "NATGASUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "XAGUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "XAUUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "XPDUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "XPTUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "CLUSDT": [
+    "🥇 Metals/Commodities"
+  ],
+  "GRAMUSDT": [
+    "🏗 L1"
+  ],
+  "DATAIPUSDT": [
+    "💾 Infra"
   ]
 }
