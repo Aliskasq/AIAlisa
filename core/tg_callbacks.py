@@ -11,6 +11,7 @@ from core.tg_state import (
     send_response, is_allowed_chat, ADMIN_ID, _load_langs,
     square_cache_get, square_cache_delete, _fetch_or_free_models,
     track_alert_msg,
+    set_sector_state, clear_sector_state,
 )
 from core.categories import (
     ALL_SECTORS, SECTOR_SHORT, SECTOR_EMOJI,
@@ -938,16 +939,55 @@ async def handle_callback_query(app_session, update):
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #
-    # 0d. SECTOR CALLBACKS (sec_, asec_, msec_, sflt_)
+    # 0d. SECTOR CALLBACKS (sec_, sflt_)
     # ------------------------------------------------------------------ #
-    if cb_data.startswith(("sec_", "asec_", "msec_", "sflt_")):
+    if cb_data.startswith(("sec_", "sflt_")):
         msg_id_cb = cq.get("message", {}).get("message_id")
+
+        # --- Helper: build main menu keyboard ---
+        async def _sec_main_kb():
+            counts = get_sector_counts()
+            try:
+                from core.binance_api import get_usdt_futures_symbols
+                _all_syms = await get_usdt_futures_symbols()
+                _unk_cnt = len(get_unknown_symbols(_all_syms))
+            except Exception:
+                _unk_cnt = 0
+            rows = []
+            row = []
+            for i, sector in enumerate(ALL_SECTORS):
+                cnt = counts.get(sector, 0)
+                short = SECTOR_SHORT.get(sector, sector)
+                row.append({"text": f"{short} ({cnt})", "callback_data": f"sec_view_{i}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": f"❓ Без сектора ({_unk_cnt})", "callback_data": "sec_view_unknown"}])
+            rows.append([
+                {"text": "➕ Добавить", "callback_data": "sec_btn_add"},
+                {"text": "🔄 Переместить", "callback_data": "sec_btn_move"},
+            ])
+            rows.append([
+                {"text": "🔍 Найти", "callback_data": "sec_btn_find"},
+                {"text": "🔄 Сверить", "callback_data": "sec_btn_verify"},
+            ])
+            return rows
+
+        # --- sec_main: back to main menu ---
+        if cb_data == "sec_main" or cb_data == "sec_back":
+            clear_sector_state(chat_id)
+            rows = await _sec_main_kb()
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🏷 *Секторы монет*\n\nНажми на сектор — список монет:",
+                {"inline_keyboard": rows}, cq_id)
+            return
 
         # --- sec_view_X: view sector contents ---
         if cb_data.startswith("sec_view_"):
             sub = cb_data.replace("sec_view_", "")
             if sub == "unknown":
-                # Show unknown coins
                 try:
                     from core.binance_api import get_usdt_futures_symbols
                     _all_syms = await get_usdt_futures_symbols()
@@ -963,11 +1003,7 @@ async def handle_callback_query(app_session, update):
                     text = "\n".join(_lines)
                 else:
                     text = "✅ Все монеты категоризированы!"
-                await _slm_edit(app_session, chat_id, msg_id_cb,
-                    text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_back"}]]},
-                    cq_id)
             else:
-                # View specific sector
                 try:
                     idx = int(sub)
                     sector = ALL_SECTORS[idx]
@@ -984,45 +1020,99 @@ async def handle_callback_query(app_session, update):
                     text = "\n".join(_lines)
                 else:
                     text = f"🏷 *{sector}*\n\n📭 Пусто"
-                await _slm_edit(app_session, chat_id, msg_id_cb,
-                    text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_back"}]]},
-                    cq_id)
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]},
+                cq_id)
             return
 
-        # --- sec_back: back to sector list ---
-        if cb_data == "sec_back":
-            counts = get_sector_counts()
+        # --- sec_btn_add: ask user for coin name to add sector ---
+        if cb_data == "sec_btn_add":
+            set_sector_state(chat_id, {"action": "add", "step": "awaiting_coin"})
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "➕ *Добавить монету в сектор*\n\nВведите тикер монеты (например `BTC`):",
+                {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]},
+                cq_id)
+            return
+
+        # --- sec_btn_move: ask user for coin name to move ---
+        if cb_data == "sec_btn_move":
+            set_sector_state(chat_id, {"action": "move", "step": "awaiting_coin"})
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🔄 *Переместить монету*\n\nВведите тикер монеты (например `BTC`):",
+                {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]},
+                cq_id)
+            return
+
+        # --- sec_btn_find: ask user for coin name to find ---
+        if cb_data == "sec_btn_find":
+            set_sector_state(chat_id, {"action": "find", "step": "awaiting_coin"})
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🔍 *Найти монету*\n\nВведите тикер монеты (например `SOL`):",
+                {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]},
+                cq_id)
+            return
+
+        # --- sec_btn_verify: verify sectors against Binance ---
+        if cb_data == "sec_btn_verify":
             try:
                 from core.binance_api import get_usdt_futures_symbols
                 _all_syms = await get_usdt_futures_symbols()
-                _unknown_count = len(get_unknown_symbols(_all_syms))
+                unknown = get_unknown_symbols(_all_syms)
             except Exception:
-                _unknown_count = 0
+                unknown = []
+                _all_syms = []
+
+            categorized = len(_all_syms) - len(unknown) if _all_syms else 0
+            if unknown:
+                _lines = [f"🔄 *Сверка секторов:*\n"]
+                _lines.append(f"⚠️ *Монеты без сектора ({len(unknown)}):*\n")
+                for s in unknown[:60]:
+                    _lines.append(f"`{s.replace('USDT', '')}`")
+                if len(unknown) > 60:
+                    _lines.append(f"\n_...и ещё {len(unknown) - 60}_")
+                _lines.append(f"\n\n✅ Остальные {categorized} монет в секторах")
+                _lines.append("\n_(Монеты в секторах, но не на Binance — не трогаем)_")
+                text = "\n".join(_lines)
+            else:
+                text = f"🔄 *Сверка секторов:*\n\n✅ Все {categorized} монет категоризированы!\n\n_(Монеты в секторах, но не на Binance — не трогаем)_"
+
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]},
+                cq_id)
+            return
+
+        # --- sec_add_pick_COIN: redirect from find → add (when coin has no sectors) ---
+        if cb_data.startswith("sec_add_pick_"):
+            coin_short = cb_data.replace("sec_add_pick_", "")
+            symbol = coin_short + "USDT"
+            current = get_sectors(symbol)
             rows = []
             row = []
             for i, sector in enumerate(ALL_SECTORS):
-                cnt = counts.get(sector, 0)
-                short = SECTOR_SHORT.get(sector, sector)
-                row.append({"text": f"{short} ({cnt})", "callback_data": f"sec_view_{i}"})
+                if sector in current:
+                    continue
+                short_s = SECTOR_SHORT.get(sector, sector)
+                row.append({"text": short_s, "callback_data": f"sec_add_{coin_short}_{i}"})
                 if len(row) == 3:
                     rows.append(row)
                     row = []
             if row:
                 rows.append(row)
-            rows.append([{"text": f"❓ Без сектора ({_unknown_count})", "callback_data": "sec_view_unknown"}])
+            rows.append([{"text": "⬅️ Назад", "callback_data": "sec_main"}])
+            current_text = " / ".join(current) if current else "❓ нет"
             await _slm_edit(app_session, chat_id, msg_id_cb,
-                "🏷 *Секторы монет*\n\nНажми на сектор — список монет:",
+                f"➕ *Добавить сектор для {coin_short}*\n\nТекущие: {current_text}\n\nВыбери сектор:",
                 {"inline_keyboard": rows}, cq_id)
             return
 
-        # --- asec_SHORT_IDX: add sector to coin ---
-        if cb_data.startswith("asec_"):
+        # --- sec_add_COIN_IDX: pick sector for coin (add flow) ---
+        if cb_data.startswith("sec_add_"):
             parts = cb_data.split("_")
-            # asec_SHORT_IDX
-            if len(parts) >= 3:
-                coin_short = parts[1]
+            # sec_add_COIN_IDX
+            if len(parts) >= 4:
+                coin_short = parts[2]
                 try:
-                    sector_idx = int(parts[2])
+                    sector_idx = int(parts[3])
                     sector = ALL_SECTORS[sector_idx]
                 except (ValueError, IndexError):
                     await app_session.post(
@@ -1031,19 +1121,19 @@ async def handle_callback_query(app_session, update):
                     return
                 symbol = coin_short + "USDT"
                 added = add_sector(symbol, sector)
-                toast = f"✅ {coin_short} → {sector}" if added else f"ℹ️ Уже есть"
+                toast = f"✅ {coin_short} → {sector}" if added else "ℹ️ Уже есть"
 
-                # Show updated state with option to add more
                 current = get_sectors(symbol)
                 current_text = " / ".join(current) if current else "❓ нет"
 
+                # Show "add more" or "done"
                 rows = []
                 row = []
                 for i, s in enumerate(ALL_SECTORS):
                     if s in current:
                         continue
                     short_s = SECTOR_SHORT.get(s, s)
-                    row.append({"text": short_s, "callback_data": f"asec_{coin_short}_{i}"})
+                    row.append({"text": short_s, "callback_data": f"sec_add_{coin_short}_{i}"})
                     if len(row) == 3:
                         rows.append(row)
                         row = []
@@ -1051,33 +1141,33 @@ async def handle_callback_query(app_session, update):
                     rows.append(row)
 
                 if rows:
-                    rows.append([{"text": "✅ Готово", "callback_data": f"asec_done_{coin_short}"}])
-                    text = f"➕ *${coin_short}*\n\nТекущие: {current_text}\n\nДобавить ещё?"
+                    rows.append([{"text": "✅ Готово", "callback_data": "sec_done"}])
+                    text = f"✅ *{coin_short}* → {sector}\n\nТекущие: {current_text}\n\nДобавить ещё сектор?"
                 else:
-                    text = f"✅ *${coin_short}*\n\nСекторы: {current_text}"
+                    text = f"✅ *{coin_short}*\n\nСекторы: {current_text}"
+                    rows = [[{"text": "⬅️ В меню", "callback_data": "sec_main"}]]
 
                 await _slm_edit(app_session, chat_id, msg_id_cb,
                     text, {"inline_keyboard": rows}, cq_id, toast)
             return
 
-        # --- asec_done_SHORT: done adding ---
-        if cb_data.startswith("asec_done_"):
-            coin_short = cb_data.replace("asec_done_", "")
-            current = get_sectors(coin_short + "USDT")
-            current_text = " / ".join(current) if current else "❓"
+        # --- sec_done: done adding/moving ---
+        if cb_data == "sec_done":
+            clear_sector_state(chat_id)
+            rows = await _sec_main_kb()
             await _slm_edit(app_session, chat_id, msg_id_cb,
-                f"✅ *${coin_short}*\n\nСекторы: {current_text}",
-                {"inline_keyboard": []}, cq_id, f"✅ {coin_short} готово")
+                "🏷 *Секторы монет*\n\nНажми на сектор — список монет:",
+                {"inline_keyboard": rows}, cq_id, "✅ Готово")
             return
 
-        # --- msec_rm_SHORT_IDX: remove sector from coin ---
-        if cb_data.startswith("msec_rm_"):
+        # --- sec_mv_rm_COIN_IDX: remove sector from coin (move flow) ---
+        if cb_data.startswith("sec_mv_rm_"):
             parts = cb_data.split("_")
-            # msec_rm_SHORT_IDX
-            if len(parts) >= 4:
-                coin_short = parts[2]
+            # sec_mv_rm_COIN_IDX
+            if len(parts) >= 5:
+                coin_short = parts[3]
                 try:
-                    sector_idx = int(parts[3])
+                    sector_idx = int(parts[4])
                     sector = ALL_SECTORS[sector_idx]
                 except (ValueError, IndexError):
                     await app_session.post(
@@ -1088,26 +1178,28 @@ async def handle_callback_query(app_session, update):
                 removed = remove_sector(symbol, sector)
                 toast = f"❌ {sector} удалён" if removed else "ℹ️"
 
-                # Refresh move menu
                 current = get_sectors(symbol)
                 if current:
                     rows = []
                     for sec in current:
-                        rows.append([{"text": f"❌ {sec}",
-                                      "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
-                    rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
-                    rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
-                    text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+                        idx = ALL_SECTORS.index(sec) if sec in ALL_SECTORS else 0
+                        rows.append([{"text": f"❌ {sec}", "callback_data": f"sec_mv_rm_{coin_short}_{idx}"}])
+                    rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"sec_mv_add_{coin_short}"}])
+                    rows.append([{"text": "✅ Готово", "callback_data": "sec_done"}])
+                    text = f"🔄 *{coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
                 else:
-                    rows = [[{"text": "➕ Добавить сектор", "callback_data": f"msec_add_{coin_short}"}]]
-                    text = f"🔄 *${coin_short}:*\n\n❓ Нет секторов"
+                    rows = [
+                        [{"text": "➕ Добавить сектор", "callback_data": f"sec_mv_add_{coin_short}"}],
+                        [{"text": "✅ Готово", "callback_data": "sec_done"}],
+                    ]
+                    text = f"🔄 *{coin_short}:*\n\n❓ Нет секторов"
                 await _slm_edit(app_session, chat_id, msg_id_cb,
                     text, {"inline_keyboard": rows}, cq_id, toast)
             return
 
-        # --- msec_add_SHORT: show add-sector buttons from movesector ---
-        if cb_data.startswith("msec_add_"):
-            coin_short = cb_data.replace("msec_add_", "")
+        # --- sec_mv_add_COIN: show sectors to add (move flow) ---
+        if cb_data.startswith("sec_mv_add_"):
+            coin_short = cb_data.replace("sec_mv_add_", "")
             symbol = coin_short + "USDT"
             current = get_sectors(symbol)
             rows = []
@@ -1116,26 +1208,26 @@ async def handle_callback_query(app_session, update):
                 if s in current:
                     continue
                 short_s = SECTOR_SHORT.get(s, s)
-                row.append({"text": short_s, "callback_data": f"msec_addpick_{coin_short}_{i}"})
+                row.append({"text": short_s, "callback_data": f"sec_mv_pick_{coin_short}_{i}"})
                 if len(row) == 3:
                     rows.append(row)
                     row = []
             if row:
                 rows.append(row)
-            rows.append([{"text": "⬅️ Назад", "callback_data": f"msec_back_{coin_short}"}])
+            rows.append([{"text": "⬅️ Назад", "callback_data": f"sec_mv_back_{coin_short}"}])
             await _slm_edit(app_session, chat_id, msg_id_cb,
-                f"➕ *Добавить сектор для ${coin_short}:*",
+                f"➕ *Добавить сектор для {coin_short}:*",
                 {"inline_keyboard": rows}, cq_id)
             return
 
-        # --- msec_addpick_SHORT_IDX: pick sector to add from movesector ---
-        if cb_data.startswith("msec_addpick_"):
+        # --- sec_mv_pick_COIN_IDX: pick sector to add (move flow) ---
+        if cb_data.startswith("sec_mv_pick_"):
             parts = cb_data.split("_")
-            # msec_addpick_SHORT_IDX
-            if len(parts) >= 4:
-                coin_short = parts[2]
+            # sec_mv_pick_COIN_IDX
+            if len(parts) >= 5:
+                coin_short = parts[3]
                 try:
-                    sector_idx = int(parts[3])
+                    sector_idx = int(parts[4])
                     sector = ALL_SECTORS[sector_idx]
                 except (ValueError, IndexError):
                     await app_session.post(
@@ -1144,50 +1236,42 @@ async def handle_callback_query(app_session, update):
                     return
                 symbol = coin_short + "USDT"
                 add_sector(symbol, sector)
-                # Fall through to msec_back to show updated move menu
-                cb_data = f"msec_back_{coin_short}"
                 toast = f"✅ {sector}"
-                # Refresh move menu
+
+                # Show updated move menu with add-more/done
                 current = get_sectors(symbol)
                 rows = []
                 for sec in current:
-                    rows.append([{"text": f"❌ {sec}",
-                                  "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
-                rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
-                rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
-                text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+                    idx = ALL_SECTORS.index(sec) if sec in ALL_SECTORS else 0
+                    rows.append([{"text": f"❌ {sec}", "callback_data": f"sec_mv_rm_{coin_short}_{idx}"}])
+                rows.append([{"text": "➕ Добавить ещё сектор", "callback_data": f"sec_mv_add_{coin_short}"}])
+                rows.append([{"text": "✅ Готово", "callback_data": "sec_done"}])
+                text = f"🔄 *{coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
                 await _slm_edit(app_session, chat_id, msg_id_cb,
                     text, {"inline_keyboard": rows}, cq_id, toast)
             return
 
-        # --- msec_back_SHORT: back to move menu ---
-        if cb_data.startswith("msec_back_"):
-            coin_short = cb_data.replace("msec_back_", "")
+        # --- sec_mv_back_COIN: back to move menu ---
+        if cb_data.startswith("sec_mv_back_"):
+            coin_short = cb_data.replace("sec_mv_back_", "")
             symbol = coin_short + "USDT"
             current = get_sectors(symbol)
             if current:
                 rows = []
                 for sec in current:
-                    rows.append([{"text": f"❌ {sec}",
-                                  "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
-                rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
-                rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
-                text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+                    idx = ALL_SECTORS.index(sec) if sec in ALL_SECTORS else 0
+                    rows.append([{"text": f"❌ {sec}", "callback_data": f"sec_mv_rm_{coin_short}_{idx}"}])
+                rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"sec_mv_add_{coin_short}"}])
+                rows.append([{"text": "✅ Готово", "callback_data": "sec_done"}])
+                text = f"🔄 *{coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
             else:
-                rows = [[{"text": "➕ Добавить сектор", "callback_data": f"msec_add_{coin_short}"}]]
-                text = f"🔄 *${coin_short}:*\n\n❓ Нет секторов"
+                rows = [
+                    [{"text": "➕ Добавить сектор", "callback_data": f"sec_mv_add_{coin_short}"}],
+                    [{"text": "✅ Готово", "callback_data": "sec_done"}],
+                ]
+                text = f"🔄 *{coin_short}:*\n\n❓ Нет секторов"
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 text, {"inline_keyboard": rows}, cq_id)
-            return
-
-        # --- msec_done_SHORT: done editing ---
-        if cb_data.startswith("msec_done_"):
-            coin_short = cb_data.replace("msec_done_", "")
-            current = get_sectors(coin_short + "USDT")
-            current_text = " / ".join(current) if current else "❓"
-            await _slm_edit(app_session, chat_id, msg_id_cb,
-                f"✅ *${coin_short}*\n\nСекторы: {current_text}",
-                {"inline_keyboard": []}, cq_id, f"✅ Готово")
             return
 
         # --- sflt_t_IDX: toggle sector in scan filter ---
@@ -1203,7 +1287,6 @@ async def handle_callback_query(app_session, update):
             now_enabled = toggle_scan_sector(sector)
             toast = f"{'✅' if now_enabled else '❌'} {SECTOR_SHORT.get(sector, sector)}"
 
-            # Rebuild filter menu
             settings = load_scan_settings()
             enabled = set(settings.get("enabled_sectors", []))
             scan_unknown = settings.get("scan_unknown", True)

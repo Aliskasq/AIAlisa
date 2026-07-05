@@ -47,6 +47,20 @@ def set_model_menu_state(chat_id, state):
 def clear_model_menu_state(chat_id):
     _model_menu_state.pop(chat_id, None)
 
+# --- SECTOR STATE (for /sec multi-step flow) ---
+# {chat_id: {"action": "add"|"move"|"find"|"verify", "step": str, "symbol": str|None, "msg_id": int|None}}
+_sector_state = {}
+
+def get_sector_state(chat_id):
+    return _sector_state.get(chat_id)
+
+def set_sector_state(chat_id, state):
+    _sector_state[chat_id] = state
+
+def clear_sector_state(chat_id):
+    _sector_state.pop(chat_id, None)
+
+
 def build_model_category_kb(mode, fallback_chain=None):
     """Build category selection keyboard for model/fallback/startday modes.
     Shared between tg_commands.py and tg_callbacks.py."""

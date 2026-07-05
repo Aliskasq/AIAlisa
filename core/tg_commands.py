@@ -27,7 +27,7 @@ from core.binance_api import fetch_klines, fetch_funding_rate, fetch_funding_his
 from core.indicators import calculate_binance_indicators
 from core.categories import (get_sector_emoji, get_sector_label, get_sectors,
                               get_sector_counts, get_symbols_by_sector, get_unknown_symbols,
-                              add_sector, remove_sector, set_sectors,
+                              add_sector, remove_sector,
                               toggle_scan_sector, toggle_scan_unknown,
                               load_scan_settings, ALL_SECTORS, SECTOR_SHORT, SECTOR_EMOJI)
 from agent.analyzer import ask_ai_analysis
@@ -54,6 +54,7 @@ from core.tg_state import (
     schedule_alert_cleanup,
     get_model_menu_state, set_model_menu_state, clear_model_menu_state,
     build_model_category_kb,
+    get_sector_state, set_sector_state, clear_sector_state,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -272,6 +273,102 @@ async def handle_message(app_session, update):
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
         return
+
+    # ==========================================
+    # SECTOR STATE MACHINE (awaiting coin name from user)
+    # ==========================================
+    _sec_state = get_sector_state(chat_id)
+    if _sec_state and _sec_state.get("step") == "awaiting_coin":
+        coin_raw = text.upper().strip().replace("$", "").replace("/", "")
+        if coin_raw.endswith("USDT"):
+            coin_raw = coin_raw[:-4]
+        symbol = coin_raw + "USDT"
+        action = _sec_state.get("action")  # "add" | "move" | "find"
+
+        if action == "find":
+            # 🔍 Find: show sectors for this coin
+            current = get_sectors(symbol)
+            if current:
+                txt = f"🔍 *{coin_raw}* найдена в:\n" + "\n".join([f"• {s}" for s in current])
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_main"}]]}
+            else:
+                kb = {"inline_keyboard": [
+                    [{"text": "➕ Добавить в сектор", "callback_data": f"sec_add_pick_{coin_raw}"}],
+                    [{"text": "⬅️ Назад", "callback_data": "sec_main"}],
+                ]}
+                txt = f"❓ *{coin_raw}* не найдена ни в одном секторе"
+            clear_sector_state(chat_id)
+            await send_response(app_session, chat_id, txt, msg_id,
+                                parse_mode="Markdown", reply_markup=kb)
+            return
+
+        elif action == "add":
+            # ➕ Add: show sector picker (exclude already assigned)
+            current = get_sectors(symbol)
+            rows = []
+            row = []
+            for i, sector in enumerate(ALL_SECTORS):
+                if sector in current:
+                    continue
+                short_s = SECTOR_SHORT.get(sector, sector)
+                row.append({"text": short_s, "callback_data": f"sec_add_{coin_raw}_{i}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            if not rows:
+                clear_sector_state(chat_id)
+                await send_response(app_session, chat_id,
+                    f"✅ `{coin_raw}` уже во всех секторах!", msg_id, parse_mode="Markdown")
+                return
+            current_text = " / ".join(current) if current else "❓ нет"
+            rows.append([{"text": "⬅️ Назад", "callback_data": "sec_main"}])
+            kb = {"inline_keyboard": rows}
+            set_sector_state(chat_id, {"action": "add", "step": "picking", "symbol": coin_raw})
+            await send_response(app_session, chat_id,
+                f"➕ *Добавить сектор для {coin_raw}*\n\nТекущие: {current_text}\n\nВыбери сектор:",
+                msg_id, parse_mode="Markdown", reply_markup=kb)
+            return
+
+        elif action == "move":
+            # 🔄 Move: show current sectors with remove buttons
+            current = get_sectors(symbol)
+            if not current:
+                # No sectors — offer to add
+                set_sector_state(chat_id, {"action": "add", "step": "picking", "symbol": coin_raw})
+                rows = []
+                row = []
+                for i, sector in enumerate(ALL_SECTORS):
+                    short_s = SECTOR_SHORT.get(sector, sector)
+                    row.append({"text": short_s, "callback_data": f"sec_add_{coin_raw}_{i}"})
+                    if len(row) == 3:
+                        rows.append(row)
+                        row = []
+                if row:
+                    rows.append(row)
+                rows.append([{"text": "⬅️ Назад", "callback_data": "sec_main"}])
+                kb = {"inline_keyboard": rows}
+                await send_response(app_session, chat_id,
+                    f"❓ *{coin_raw}* не имеет секторов\n\nВыбери сектор:",
+                    msg_id, parse_mode="Markdown", reply_markup=kb)
+                return
+
+            rows = []
+            for sec in current:
+                idx = ALL_SECTORS.index(sec) if sec in ALL_SECTORS else 0
+                rows.append([{"text": f"❌ {sec}", "callback_data": f"sec_mv_rm_{coin_raw}_{idx}"}])
+            rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"sec_mv_add_{coin_raw}"}])
+            rows.append([{"text": "✅ Готово", "callback_data": "sec_done"}])
+            kb = {"inline_keyboard": rows}
+            set_sector_state(chat_id, {"action": "move", "step": "editing", "symbol": coin_raw})
+            await send_response(app_session, chat_id,
+                f"🔄 *Секторы {coin_raw}:*\n\n" + "\n".join([f"• {s}" for s in current]) +
+                "\n\nУбери ненужные или добавь новые:",
+                msg_id, parse_mode="Markdown", reply_markup=kb)
+            return
+
+        clear_sector_state(chat_id)
 
     # ==========================================
     # MANUAL ALERT STATE MACHINE (multi-step flow)
@@ -948,9 +1045,7 @@ async def handle_message(app_session, update):
 
                 "🧠 `/model` — AI модель, фоллбэк, старт дня\n"
 
-                "🏷 `/sector BTC` — секторы монеты\n"
-                "🏷 `/addsector BTC AI` — добавить сектор\n"
-                "🏷 `/movesector BTC AI Meme` — переместить в другой\n"
+                "🏷 `/sec` — секторы монет (меню)\n"
                 "🏷 `/scanfilter` — вкл/выкл секторы в скане\n\n"
 
                 "⏰ `/time 18:30` — scan schedule\n"
@@ -1786,11 +1881,10 @@ async def handle_message(app_session, update):
 
 
     # ==========================================
-    # /sector — View sectors
+    # /sec — Unified sector management menu
     # ==========================================
-    if text == "/sector" or text == "секторы":
+    if text == "/sec" or text == "/sector" or text == "секторы":
         counts = get_sector_counts()
-        # Count unknown coins
         try:
             from core.binance_api import get_usdt_futures_symbols
             _all_syms = await get_usdt_futures_symbols()
@@ -1800,99 +1894,29 @@ async def handle_message(app_session, update):
 
         rows = []
         row = []
-        for sector in ALL_SECTORS:
+        for i, sector in enumerate(ALL_SECTORS):
             cnt = counts.get(sector, 0)
             short = SECTOR_SHORT.get(sector, sector)
-            btn_text = f"{short} ({cnt})"
-            cb_data = f"sec_view_{ALL_SECTORS.index(sector)}"
-            row.append({"text": btn_text, "callback_data": cb_data})
+            row.append({"text": f"{short} ({cnt})", "callback_data": f"sec_view_{i}"})
             if len(row) == 3:
                 rows.append(row)
                 row = []
         if row:
             rows.append(row)
-        # Unknown button
         rows.append([{"text": f"❓ Без сектора ({_unknown_count})", "callback_data": "sec_view_unknown"}])
+        rows.append([
+            {"text": "➕ Добавить", "callback_data": "sec_btn_add"},
+            {"text": "🔄 Переместить", "callback_data": "sec_btn_move"},
+        ])
+        rows.append([
+            {"text": "🔍 Найти", "callback_data": "sec_btn_find"},
+            {"text": "🔄 Сверить", "callback_data": "sec_btn_verify"},
+        ])
 
         kb = {"inline_keyboard": rows}
+        clear_sector_state(chat_id)
         await send_response(app_session, chat_id,
             "🏷 *Секторы монет*\n\nНажми на сектор — список монет:",
-            msg_id, parse_mode="Markdown", reply_markup=kb)
-        return
-
-    # ==========================================
-    # /addsector SYMBOL — Add sector to coin
-    # ==========================================
-    if text.startswith("/addsector"):
-        parts = original_text.split()
-        if len(parts) < 2:
-            await send_response(app_session, chat_id,
-                "ℹ️ Использование: `/addsector BTC`", msg_id, parse_mode="Markdown")
-            return
-
-        coin_raw = parts[1].upper().strip()
-        symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
-        short = symbol.replace("USDT", "")
-        current = get_sectors(symbol)
-
-        rows = []
-        row = []
-        for i, sector in enumerate(ALL_SECTORS):
-            if sector in current:
-                continue  # Skip already assigned sectors
-            short_s = SECTOR_SHORT.get(sector, sector)
-            row.append({"text": short_s, "callback_data": f"asec_{short}_{i}"})
-            if len(row) == 3:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-
-        if not rows:
-            await send_response(app_session, chat_id,
-                f"✅ `{short}` уже во всех секторах!", msg_id, parse_mode="Markdown")
-            return
-
-        current_text = " / ".join(current) if current else "❓ нет"
-        kb = {"inline_keyboard": rows}
-        await send_response(app_session, chat_id,
-            f"➕ *Добавить сектор для ${short}*\n\nТекущие: {current_text}\n\nВыбери сектор:",
-            msg_id, parse_mode="Markdown", reply_markup=kb)
-        return
-
-    # ==========================================
-    # /movesector SYMBOL — Replace sectors
-    # ==========================================
-    if text.startswith("/movesector"):
-        parts = original_text.split()
-        if len(parts) < 2:
-            await send_response(app_session, chat_id,
-                "ℹ️ Использование: `/movesector BTC`", msg_id, parse_mode="Markdown")
-            return
-
-        coin_raw = parts[1].upper().strip()
-        symbol = coin_raw + "USDT" if not coin_raw.endswith("USDT") else coin_raw
-        short = symbol.replace("USDT", "")
-        current = get_sectors(symbol)
-
-        if not current:
-            await send_response(app_session, chat_id,
-                f"❓ `{short}` не имеет секторов. Используй `/addsector {short}`",
-                msg_id, parse_mode="Markdown")
-            return
-
-        # Show current sectors with ❌ buttons to remove
-        rows = []
-        for i, sec in enumerate(current):
-            rows.append([{"text": f"❌ {sec}", "callback_data": f"msec_rm_{short}_{ALL_SECTORS.index(sec)}"}])
-        # Add new sector button
-        rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{short}"}])
-        rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{short}"}])
-
-        kb = {"inline_keyboard": rows}
-        await send_response(app_session, chat_id,
-            f"🔄 *Секторы ${short}:*\n\n" + "\n".join([f"• {s}" for s in current]) +
-            "\n\nУбери ненужные или добавь новые:",
             msg_id, parse_mode="Markdown", reply_markup=kb)
         return
 
