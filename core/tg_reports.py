@@ -10,6 +10,7 @@ from config import (load_breakout_log, load_virtual_bank, VIRTUAL_BANK_POSITION_
 from core.signal_pipeline import (check_trailing_stop_from_candles, check_fixed_sl_tp_from_candles,
                                    check_fixed_atr_sl_tp, check_candle_trailing, check_ema_sl,
                                    check_btc_shield)
+from core.categories import get_sector_emoji
 
 
 async def _fetch_5m_candles_after(session: aiohttp.ClientSession, symbol: str,
@@ -246,6 +247,8 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
         ai_leverage = entry.get("ai_leverage", 1) or 1
         ai_deposit_pct = entry.get("ai_deposit_pct")
         short_sym = sym.replace("USDT", "")
+        _sec_emoji = get_sector_emoji(sym)
+        short_sym_display = f"{_sec_emoji}{short_sym}"
         dir_tag = f" {direction}" if direction else ""
 
         # SKIP signals — ⚪
@@ -254,7 +257,7 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             now_price = price_map.get(sym, entry_price)
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             price_icon = "🟢" if now_price >= entry_price else "🔴"
-            trade_lines.append(f"{price_icon}⚪ `{short_sym}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭")
+            trade_lines.append(f"{price_icon}⚪ `{short_sym_display}` {tf} SKIP | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ⏭")
             continue
 
         # No verdict — ⚫
@@ -263,7 +266,7 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             now_price = price_map.get(sym, entry_price)
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             price_icon = "🟢" if now_price >= entry_price else "🔴"
-            trade_lines.append(f"{price_icon}⚫ `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            trade_lines.append(f"{price_icon}⚫ `{short_sym_display}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
         # Duplicate symbol — ©️
@@ -272,7 +275,7 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             now_price = price_map.get(sym, entry_price)
             pct = _calc_pnl(direction, entry_price, now_price)
             price_icon = "🟢" if pct >= 0 else "🔴"
-            trade_lines.append(f"{price_icon}©️ `{short_sym}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            trade_lines.append(f"{price_icon}©️ `{short_sym_display}` {tf}{dir_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
         # 24h pump filter — 💯
@@ -281,7 +284,7 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             now_price = price_map.get(sym, entry_price)
             pct = ((now_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
             price_icon = "🟢" if now_price >= entry_price else "🔴"
-            trade_lines.append(f"{price_icon}💯 `{short_sym}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
+            trade_lines.append(f"{price_icon}💯 `{short_sym_display}` {tf} | `{entry_price:.6f}` → `{now_price:.6f}` ({pct:+.2f}%) ℹ️")
             continue
 
         # === Trailing stop check ===
@@ -358,7 +361,7 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
         day_pnl_dollar += pnl_dollar
         lev_tag = f" {ai_leverage}x" if ai_leverage > 1 else ""
         trade_lines.append(
-            f"{icon}{ai_match} `{short_sym}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
+            f"{icon}{ai_match} `{short_sym_display}` {tf}{dir_tag}{lev_tag} | `{entry_price:.6f}` → `{now_price:.6f}` ({pnl_pct_leveraged:+.2f}% | {'+' if pnl_dollar >= 0 else ''}{pnl_dollar:.2f}$){status_tag}"
         )
 
     # Stats

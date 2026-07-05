@@ -11,6 +11,7 @@ from config import (TREND_STATE_FILE, load_alerts, save_alerts, add_breakout_ent
                      parse_ai_trade_params, GROUP_CHAT_ID,
                      SIGNAL_CONFIDENCE_FULL, load_trend_above_pct)
 from core.binance_api import fetch_klines, get_usdt_futures_symbols, send_status_msg, wait_for_weight, fetch_market_positioning, format_positioning_text, fetch_funding_history
+from core.categories import should_scan
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import send_breakout_notification, delete_telegram_message
 import aiohttp
@@ -172,6 +173,11 @@ async def main():
                 clear_breakout_log()
                 logging.info("🚀 STARTING GLOBAL GEOMETRIC ANALYSIS AND DRAWING (1D, 4H)...")
                 symbols = await get_usdt_futures_symbols()
+                # Filter by sector scan settings
+                _before_filter = len(symbols) if symbols else 0
+                symbols = [s for s in symbols if should_scan(s)] if symbols else []
+                if _before_filter != len(symbols):
+                    logging.info(f"🏷 Sector filter: {_before_filter} → {len(symbols)} symbols")
 
                 if symbols:
                     chunk_size = 6

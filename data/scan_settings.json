@@ -1,0 +1,12 @@
+{
+  "enabled_sectors": [
+    "🤖 AI", "💎 Meme", "🏗 L1", "🔗 L2", "🏦 DeFi",
+    "🎮 Gaming", "👑 Blue Chip", "🖼 NFT", "💰 RWA",
+    "🔮 Oracle", "💾 Infra", "📦 Other", "⚽ Fan Token",
+    "💳 Payments"
+  ],
+  "disabled_sectors": [
+    "📊 Stocks", "🥇 Metals/Commodities", "📈 ETFs"
+  ],
+  "scan_unknown": true
+}

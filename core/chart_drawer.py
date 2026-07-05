@@ -8,8 +8,9 @@ import numpy as np
 import aiohttp
 import pandas as pd
 import logging
+from core.categories import get_sector_label, get_sectors
 import uuid
-from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID
+from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID, CHAT_ID
 
 
 def _fmt_price(price: float) -> str:
@@ -251,11 +252,12 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
     safe_ai_text = _sanitize_tg_markdown(safe_ai_text)
     
     # Build header for photo caption
+    _sector_label = get_sector_label(symbol)
     header = (
         f"${short_symbol} {'📈VOL UP. TREND BREAKOUT' if from_vol_wait else '🎯 TREND BREAKOUT'}\n"
         f"⏳ TF: {tf} | 💰 Price: {_fmt_price(current_price)}\n"
         f"💡 Above trendline by {diff_pct:.2f}%\n\n"
-        f"🤖 AI-Alisa-CopilotClow:\n"
+        f"🏷 Sector: {_sector_label}\n"
     )
 
     # AI text limit for photo caption (header + 813 ≈ 943, within Telegram's 1024 caption limit)
@@ -374,6 +376,23 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
             except Exception as e:
                 logging.error(f"❌ Error sending overflow (Attempt {attempt}): {repr(e)}")
                 await asyncio.sleep(2)
+
+    # === UNKNOWN SECTOR NOTIFICATION: notify admin in private chat ===
+    if send_success and not target_chat_id and CHAT_ID:
+        _coin_sectors = get_sectors(symbol)
+        if not _coin_sectors:
+            _unknown_short = symbol.replace("USDT", "")
+            try:
+                await asyncio.sleep(0.3)
+                async with session.post(msg_url, json={
+                    'chat_id': str(CHAT_ID),
+                    'text': f"⚠️ Монета без сектора: ${_unknown_short}\nДобавь: /addsector {_unknown_short}",
+                    'parse_mode': 'Markdown'
+                }, timeout=10) as _resp:
+                    if _resp.status == 200:
+                        logging.info(f"📨 Unknown sector notification sent for {symbol}")
+            except Exception as _e:
+                logging.error(f"❌ Unknown sector notify error: {repr(_e)}")
 
     # === BOTTOM FILTER: duplicate to second group if signal is from the bottom ===
     if send_success and BOTTOM_GROUP_CHAT_ID and not target_chat_id:

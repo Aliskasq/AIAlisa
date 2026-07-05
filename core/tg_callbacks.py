@@ -12,6 +12,12 @@ from core.tg_state import (
     square_cache_get, square_cache_delete, _fetch_or_free_models,
     track_alert_msg,
 )
+from core.categories import (
+    ALL_SECTORS, SECTOR_SHORT, SECTOR_EMOJI,
+    get_sectors, get_sector_counts, get_symbols_by_sector, get_unknown_symbols,
+    add_sector, remove_sector,
+    toggle_scan_sector, toggle_scan_unknown, load_scan_settings,
+)
 from agent.skills import (
     post_to_binance_square,
     get_smart_money_signals,
@@ -930,6 +936,333 @@ async def handle_callback_query(app_session, update):
             return
 
         return  # unknown malert_ callback
+
+    # ------------------------------------------------------------------ #
+    # 0d. SECTOR CALLBACKS (sec_, asec_, msec_, sflt_)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith(("sec_", "asec_", "msec_", "sflt_")):
+        msg_id_cb = cq.get("message", {}).get("message_id")
+
+        # --- sec_view_X: view sector contents ---
+        if cb_data.startswith("sec_view_"):
+            sub = cb_data.replace("sec_view_", "")
+            if sub == "unknown":
+                # Show unknown coins
+                try:
+                    from core.binance_api import get_usdt_futures_symbols
+                    _all_syms = await get_usdt_futures_symbols()
+                    unknown = get_unknown_symbols(_all_syms)
+                except Exception:
+                    unknown = []
+                if unknown:
+                    _lines = [f"❓ *Монеты без сектора ({len(unknown)}):*\n"]
+                    for s in unknown[:80]:
+                        _lines.append(f"`{s.replace('USDT', '')}`")
+                    if len(unknown) > 80:
+                        _lines.append(f"\n_...и ещё {len(unknown) - 80}_")
+                    text = "\n".join(_lines)
+                else:
+                    text = "✅ Все монеты категоризированы!"
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_back"}]]},
+                    cq_id)
+            else:
+                # View specific sector
+                try:
+                    idx = int(sub)
+                    sector = ALL_SECTORS[idx]
+                except (ValueError, IndexError):
+                    await app_session.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                        json={"callback_query_id": cq_id})
+                    return
+                symbols = get_symbols_by_sector(sector)
+                if symbols:
+                    _lines = [f"🏷 *{sector} ({len(symbols)}):*\n"]
+                    for s in symbols:
+                        _lines.append(f"`{s.replace('USDT', '')}`")
+                    text = "\n".join(_lines)
+                else:
+                    text = f"🏷 *{sector}*\n\n📭 Пусто"
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    text, {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "sec_back"}]]},
+                    cq_id)
+            return
+
+        # --- sec_back: back to sector list ---
+        if cb_data == "sec_back":
+            counts = get_sector_counts()
+            try:
+                from core.binance_api import get_usdt_futures_symbols
+                _all_syms = await get_usdt_futures_symbols()
+                _unknown_count = len(get_unknown_symbols(_all_syms))
+            except Exception:
+                _unknown_count = 0
+            rows = []
+            row = []
+            for i, sector in enumerate(ALL_SECTORS):
+                cnt = counts.get(sector, 0)
+                short = SECTOR_SHORT.get(sector, sector)
+                row.append({"text": f"{short} ({cnt})", "callback_data": f"sec_view_{i}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": f"❓ Без сектора ({_unknown_count})", "callback_data": "sec_view_unknown"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🏷 *Секторы монет*\n\nНажми на сектор — список монет:",
+                {"inline_keyboard": rows}, cq_id)
+            return
+
+        # --- asec_SHORT_IDX: add sector to coin ---
+        if cb_data.startswith("asec_"):
+            parts = cb_data.split("_")
+            # asec_SHORT_IDX
+            if len(parts) >= 3:
+                coin_short = parts[1]
+                try:
+                    sector_idx = int(parts[2])
+                    sector = ALL_SECTORS[sector_idx]
+                except (ValueError, IndexError):
+                    await app_session.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                        json={"callback_query_id": cq_id})
+                    return
+                symbol = coin_short + "USDT"
+                added = add_sector(symbol, sector)
+                toast = f"✅ {coin_short} → {sector}" if added else f"ℹ️ Уже есть"
+
+                # Show updated state with option to add more
+                current = get_sectors(symbol)
+                current_text = " / ".join(current) if current else "❓ нет"
+
+                rows = []
+                row = []
+                for i, s in enumerate(ALL_SECTORS):
+                    if s in current:
+                        continue
+                    short_s = SECTOR_SHORT.get(s, s)
+                    row.append({"text": short_s, "callback_data": f"asec_{coin_short}_{i}"})
+                    if len(row) == 3:
+                        rows.append(row)
+                        row = []
+                if row:
+                    rows.append(row)
+
+                if rows:
+                    rows.append([{"text": "✅ Готово", "callback_data": f"asec_done_{coin_short}"}])
+                    text = f"➕ *${coin_short}*\n\nТекущие: {current_text}\n\nДобавить ещё?"
+                else:
+                    text = f"✅ *${coin_short}*\n\nСекторы: {current_text}"
+
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    text, {"inline_keyboard": rows}, cq_id, toast)
+            return
+
+        # --- asec_done_SHORT: done adding ---
+        if cb_data.startswith("asec_done_"):
+            coin_short = cb_data.replace("asec_done_", "")
+            current = get_sectors(coin_short + "USDT")
+            current_text = " / ".join(current) if current else "❓"
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"✅ *${coin_short}*\n\nСекторы: {current_text}",
+                {"inline_keyboard": []}, cq_id, f"✅ {coin_short} готово")
+            return
+
+        # --- msec_rm_SHORT_IDX: remove sector from coin ---
+        if cb_data.startswith("msec_rm_"):
+            parts = cb_data.split("_")
+            # msec_rm_SHORT_IDX
+            if len(parts) >= 4:
+                coin_short = parts[2]
+                try:
+                    sector_idx = int(parts[3])
+                    sector = ALL_SECTORS[sector_idx]
+                except (ValueError, IndexError):
+                    await app_session.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                        json={"callback_query_id": cq_id})
+                    return
+                symbol = coin_short + "USDT"
+                removed = remove_sector(symbol, sector)
+                toast = f"❌ {sector} удалён" if removed else "ℹ️"
+
+                # Refresh move menu
+                current = get_sectors(symbol)
+                if current:
+                    rows = []
+                    for sec in current:
+                        rows.append([{"text": f"❌ {sec}",
+                                      "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
+                    rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
+                    rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
+                    text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+                else:
+                    rows = [[{"text": "➕ Добавить сектор", "callback_data": f"msec_add_{coin_short}"}]]
+                    text = f"🔄 *${coin_short}:*\n\n❓ Нет секторов"
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    text, {"inline_keyboard": rows}, cq_id, toast)
+            return
+
+        # --- msec_add_SHORT: show add-sector buttons from movesector ---
+        if cb_data.startswith("msec_add_"):
+            coin_short = cb_data.replace("msec_add_", "")
+            symbol = coin_short + "USDT"
+            current = get_sectors(symbol)
+            rows = []
+            row = []
+            for i, s in enumerate(ALL_SECTORS):
+                if s in current:
+                    continue
+                short_s = SECTOR_SHORT.get(s, s)
+                row.append({"text": short_s, "callback_data": f"msec_addpick_{coin_short}_{i}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": "⬅️ Назад", "callback_data": f"msec_back_{coin_short}"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"➕ *Добавить сектор для ${coin_short}:*",
+                {"inline_keyboard": rows}, cq_id)
+            return
+
+        # --- msec_addpick_SHORT_IDX: pick sector to add from movesector ---
+        if cb_data.startswith("msec_addpick_"):
+            parts = cb_data.split("_")
+            # msec_addpick_SHORT_IDX
+            if len(parts) >= 4:
+                coin_short = parts[2]
+                try:
+                    sector_idx = int(parts[3])
+                    sector = ALL_SECTORS[sector_idx]
+                except (ValueError, IndexError):
+                    await app_session.post(
+                        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                        json={"callback_query_id": cq_id})
+                    return
+                symbol = coin_short + "USDT"
+                add_sector(symbol, sector)
+                # Fall through to msec_back to show updated move menu
+                cb_data = f"msec_back_{coin_short}"
+                toast = f"✅ {sector}"
+                # Refresh move menu
+                current = get_sectors(symbol)
+                rows = []
+                for sec in current:
+                    rows.append([{"text": f"❌ {sec}",
+                                  "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
+                rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
+                rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
+                text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    text, {"inline_keyboard": rows}, cq_id, toast)
+            return
+
+        # --- msec_back_SHORT: back to move menu ---
+        if cb_data.startswith("msec_back_"):
+            coin_short = cb_data.replace("msec_back_", "")
+            symbol = coin_short + "USDT"
+            current = get_sectors(symbol)
+            if current:
+                rows = []
+                for sec in current:
+                    rows.append([{"text": f"❌ {sec}",
+                                  "callback_data": f"msec_rm_{coin_short}_{ALL_SECTORS.index(sec)}"}])
+                rows.append([{"text": "➕ Добавить новый сектор", "callback_data": f"msec_add_{coin_short}"}])
+                rows.append([{"text": "✅ Готово", "callback_data": f"msec_done_{coin_short}"}])
+                text = f"🔄 *${coin_short}:*\n\n" + "\n".join([f"• {s}" for s in current])
+            else:
+                rows = [[{"text": "➕ Добавить сектор", "callback_data": f"msec_add_{coin_short}"}]]
+                text = f"🔄 *${coin_short}:*\n\n❓ Нет секторов"
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                text, {"inline_keyboard": rows}, cq_id)
+            return
+
+        # --- msec_done_SHORT: done editing ---
+        if cb_data.startswith("msec_done_"):
+            coin_short = cb_data.replace("msec_done_", "")
+            current = get_sectors(coin_short + "USDT")
+            current_text = " / ".join(current) if current else "❓"
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"✅ *${coin_short}*\n\nСекторы: {current_text}",
+                {"inline_keyboard": []}, cq_id, f"✅ Готово")
+            return
+
+        # --- sflt_t_IDX: toggle sector in scan filter ---
+        if cb_data.startswith("sflt_t_"):
+            try:
+                idx = int(cb_data.replace("sflt_t_", ""))
+                sector = ALL_SECTORS[idx]
+            except (ValueError, IndexError):
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id})
+                return
+            now_enabled = toggle_scan_sector(sector)
+            toast = f"{'✅' if now_enabled else '❌'} {SECTOR_SHORT.get(sector, sector)}"
+
+            # Rebuild filter menu
+            settings = load_scan_settings()
+            enabled = set(settings.get("enabled_sectors", []))
+            scan_unknown = settings.get("scan_unknown", True)
+            rows = []
+            row = []
+            for i, s in enumerate(ALL_SECTORS):
+                is_on = s in enabled
+                icon = "✅" if is_on else "❌"
+                short_s = SECTOR_SHORT.get(s, s)
+                row.append({"text": f"{icon} {short_s}", "callback_data": f"sflt_t_{i}"})
+                if len(row) == 2:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            unk_icon = "✅" if scan_unknown else "❌"
+            rows.append([{"text": f"{unk_icon} ❓ Без сектора", "callback_data": "sflt_unk"}])
+
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "⚙️ *Фильтр сканера по секторам*\n\n"
+                "✅ = сканируется | ❌ = пропускается\n"
+                "Нажми чтобы переключить:",
+                {"inline_keyboard": rows}, cq_id, toast)
+            return
+
+        # --- sflt_unk: toggle scan unknown ---
+        if cb_data == "sflt_unk":
+            now_on = toggle_scan_unknown()
+            toast = f"{'✅' if now_on else '❌'} Без сектора"
+
+            settings = load_scan_settings()
+            enabled = set(settings.get("enabled_sectors", []))
+            rows = []
+            row = []
+            for i, s in enumerate(ALL_SECTORS):
+                is_on = s in enabled
+                icon = "✅" if is_on else "❌"
+                short_s = SECTOR_SHORT.get(s, s)
+                row.append({"text": f"{icon} {short_s}", "callback_data": f"sflt_t_{i}"})
+                if len(row) == 2:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            unk_icon = "✅" if now_on else "❌"
+            rows.append([{"text": f"{unk_icon} ❓ Без сектора", "callback_data": "sflt_unk"}])
+
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "⚙️ *Фильтр сканера по секторам*\n\n"
+                "✅ = сканируется | ❌ = пропускается\n"
+                "Нажми чтобы переключить:",
+                {"inline_keyboard": rows}, cq_id, toast)
+            return
+
+        # Fallback for unrecognized sector callbacks
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id})
+        return
 
     # ------------------------------------------------------------------ #
     # 1. Square Integration (Admin check)
