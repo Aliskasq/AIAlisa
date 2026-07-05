@@ -56,6 +56,7 @@ from core.tg_state import (
     build_model_category_kb,
     get_sector_state, set_sector_state, clear_sector_state,
     get_autopost_state, set_autopost_state, clear_autopost_state,
+    get_scansetting_state, set_scansetting_state, clear_scansetting_state,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -274,6 +275,65 @@ async def handle_message(app_session, update):
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
         return
+
+    # ==========================================
+    # SCANSETTING STATE MACHINE (awaiting input from user)
+    # ==========================================
+    _ss_state = get_scansetting_state(chat_id)
+    if _ss_state and _ss_state.get("step") == "awaiting_input":
+        action = _ss_state.get("action")
+
+        if action == "time":
+            import re as _re
+            raw = text.strip().replace(",", ":").replace(".", ":").replace(" ", ":")
+            # Try to parse HH:MM or HH MM
+            parts = _re.split(r'[:\s]+', raw)
+            try:
+                if len(parts) >= 2:
+                    new_h, new_m = int(parts[0]), int(parts[1])
+                elif len(parts) == 1 and len(parts[0]) == 4:
+                    new_h, new_m = int(parts[0][:2]), int(parts[0][2:])
+                else:
+                    new_h, new_m = int(parts[0]), 0
+                if 0 <= new_h < 24 and 0 <= new_m < 60:
+                    SCAN_SCHEDULE["hour"] = new_h
+                    SCAN_SCHEDULE["minute"] = new_m
+                    SCAN_SCHEDULE["force_rescan"] = True
+                    _save_scan_schedule()
+                    clear_scansetting_state(chat_id)
+                    kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ss_main"}]]}
+                    await send_response(app_session, chat_id,
+                        f"✅ Время скана: *{new_h:02d}:{new_m:02d}* (UTC+3)",
+                        msg_id, parse_mode="Markdown", reply_markup=kb)
+                else:
+                    await send_response(app_session, chat_id,
+                        "⚠️ Неверное время. Пример: `18:30` или `15.00`", msg_id, parse_mode="Markdown")
+            except (ValueError, IndexError):
+                await send_response(app_session, chat_id,
+                    "⚠️ Неверный формат. Пример: `18:30` или `15,00`", msg_id, parse_mode="Markdown")
+            return
+
+        elif action == "threshold":
+            try:
+                new_pct = float(text.replace("%", "").replace(",", "."))
+                if new_pct < 0 or new_pct > 50:
+                    await send_response(app_session, chat_id, "❌ Допустимый диапазон: 0–50%", msg_id)
+                    return
+                save_trend_above_pct(new_pct)
+                gcm_pct = new_pct + 1
+                clear_scansetting_state(chat_id)
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ss_main"}]]}
+                await send_response(app_session, chat_id,
+                    f"✅ *Порог обновлён*\n\n"
+                    f"📐 PEAK-TO-PEAK: `{new_pct}%`\n"
+                    f"📐 GROWING-CANDLE: `{gcm_pct}%` (+1%)",
+                    msg_id, parse_mode="Markdown", reply_markup=kb)
+            except ValueError:
+                await send_response(app_session, chat_id,
+                    "❌ Укажите число, например: `5` или `2.53`", msg_id, parse_mode="Markdown")
+            return
+
+        clear_scansetting_state(chat_id)
 
     # ==========================================
     # AUTOPOST STATE MACHINE (awaiting input from user)
@@ -1121,15 +1181,13 @@ async def handle_message(app_session, update):
             welcome_text += (
                 "\n\n🔐 *Admin:*\n"
                 "🏆 `signals` — банк + снапшот + тренд (меню)\n"
-                "📐 `порог 5%` — порог пробития трендлайна\n"
-                "📐 `расширенные настройки линии 4ч`\n"
+                "⚙️ `scansetting` — настройки сканера (меню)\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
                 "📐 `/smc` — настройки SMC: режим, OB блоки\n"
 
                 "🧠 `/model` — AI модель, фоллбэк, старт дня\n"
 
-                "🏷 `/sec` — секторы монет (меню)\n"
-                "🏷 `/scanfilter` — вкл/выкл секторы в скане\n\n"
+                "🏷 `/sec` — секторы монет (меню)\n\n"
 
                 "⏰ `/time 18:30` — scan schedule\n"
                 "📢 `autopost` — настройки автопоста (меню)\n"
@@ -2042,7 +2100,49 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
-    # /scanfilter — Manage scan filter
+    # scansetting — Unified scan settings menu
+    # ==========================================
+    if text in ("scansetting", "scansettings", "настройки скана", "/scansetting"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Только для админа", msg_id)
+            return
+
+        import datetime as _dt
+        _h = SCAN_SCHEDULE["hour"]
+        _m = SCAN_SCHEDULE["minute"]
+        current_pct = load_trend_above_pct()
+        gcm_pct = current_pct + 1
+        s = load_line_4h_settings()
+        l4h_mode = "Стандарт" if s["mode"] == "standard" else "Пользовательский"
+
+        settings = load_scan_settings()
+        enabled_cnt = len(settings.get("enabled_sectors", []))
+        disabled_cnt = len(settings.get("disabled_sectors", []))
+
+        msg_text = (
+            f"⚙️ *Настройки сканера*\n\n"
+            f"⏰ Время скана: *{_h:02d}:{_m:02d}* (UTC+3)\n"
+            f"🏷 Секторы: *{enabled_cnt}* вкл / *{disabled_cnt}* выкл\n"
+            f"📐 Порог пробития: *{current_pct}%* (GCM: {gcm_pct}%)\n"
+            f"⚙️ Линии 4Ч: *{l4h_mode}*"
+        )
+        kb = {"inline_keyboard": [
+            [
+                {"text": "⏰ Время скана", "callback_data": "ss_time"},
+                {"text": "🏷 Секторы скана", "callback_data": "ss_sectors"},
+            ],
+            [
+                {"text": "📐 Порог пробития", "callback_data": "ss_threshold"},
+                {"text": "⚙️ Линии 4Ч", "callback_data": "ss_l4h"},
+            ],
+        ]}
+        clear_scansetting_state(chat_id)
+        await send_response(app_session, chat_id, msg_text, msg_id,
+            parse_mode="Markdown", reply_markup=kb)
+        return
+
+    # ==========================================
+    # /scanfilter — Manage scan filter (legacy, still works)
     # ==========================================
     if text == "/scanfilter" or text == "сканфильтр":
         settings = load_scan_settings()

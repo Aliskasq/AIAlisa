@@ -47,6 +47,20 @@ def set_model_menu_state(chat_id, state):
 def clear_model_menu_state(chat_id):
     _model_menu_state.pop(chat_id, None)
 
+# --- SCANSETTING STATE (for scansetting multi-step flow) ---
+# {chat_id: {"action": "time"|"threshold", "step": "awaiting_input"}}
+_scansetting_state = {}
+
+def get_scansetting_state(chat_id):
+    return _scansetting_state.get(chat_id)
+
+def set_scansetting_state(chat_id, state):
+    _scansetting_state[chat_id] = state
+
+def clear_scansetting_state(chat_id):
+    _scansetting_state.pop(chat_id, None)
+
+
 # --- AUTOPOST STATE (for autopost multi-step flow) ---
 # {chat_id: {"action": "coins"|"time"|"hashtags", "step": "awaiting_input"}}
 _autopost_state = {}

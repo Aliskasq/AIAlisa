@@ -451,6 +451,7 @@ async def handle_callback_query(app_session, update):
     # 0c. Line 4H Settings (l4h_ prefix)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("l4h_"):
+        msg_id_cb = cq.get("message", {}).get("message_id")
         user_id = cq.get("from", {}).get("id", 0)
         if user_id != ADMIN_ID:
             await app_session.post(
@@ -939,7 +940,186 @@ async def handle_callback_query(app_session, update):
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #
-    # 0d. AUTOPOST CALLBACKS (ap_)
+    # 0d. SCANSETTING CALLBACKS (ss_)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("ss_"):
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True})
+            return
+
+        from config import (load_line_4h_settings, save_line_4h_settings,
+                            load_trend_above_pct, save_trend_above_pct)
+        from core.tg_state import (set_scansetting_state, clear_scansetting_state,
+                                    SCAN_SCHEDULE, _save_scan_schedule)
+
+        # --- Helper: build main menu ---
+        def _ss_main_content():
+            _h = SCAN_SCHEDULE["hour"]
+            _m = SCAN_SCHEDULE["minute"]
+            current_pct = load_trend_above_pct()
+            gcm_pct = current_pct + 1
+            s = load_line_4h_settings()
+            l4h_mode = "Стандарт" if s["mode"] == "standard" else "Пользовательский"
+            from core.categories import load_scan_settings as _load_ss
+            settings = _load_ss()
+            enabled_cnt = len(settings.get("enabled_sectors", []))
+            disabled_cnt = len(settings.get("disabled_sectors", []))
+            text = (
+                f"⚙️ *Настройки сканера*\n\n"
+                f"⏰ Время скана: *{_h:02d}:{_m:02d}* (UTC+3)\n"
+                f"🏷 Секторы: *{enabled_cnt}* вкл / *{disabled_cnt}* выкл\n"
+                f"📐 Порог пробития: *{current_pct}%* (GCM: {gcm_pct}%)\n"
+                f"⚙️ Линии 4Ч: *{l4h_mode}*"
+            )
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "⏰ Время скана", "callback_data": "ss_time"},
+                    {"text": "🏷 Секторы скана", "callback_data": "ss_sectors"},
+                ],
+                [
+                    {"text": "📐 Порог пробития", "callback_data": "ss_threshold"},
+                    {"text": "⚙️ Линии 4Ч", "callback_data": "ss_l4h"},
+                ],
+            ]}
+            return text, kb
+
+        # --- ss_main: back to main ---
+        if cb_data == "ss_main":
+            clear_scansetting_state(chat_id)
+            text, kb = _ss_main_content()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # --- ss_time: ask for scan time ---
+        if cb_data == "ss_time":
+            _h = SCAN_SCHEDULE["hour"]
+            _m = SCAN_SCHEDULE["minute"]
+            set_scansetting_state(chat_id, {"action": "time", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ss_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"⏰ *Время скана*\n\n"
+                f"Текущее: *{_h:02d}:{_m:02d}* (UTC+3)\n\n"
+                f"Введите новое время:\n"
+                f"Например: `18:30` или `15.00` или `17,01`",
+                kb, cq_id)
+            return
+
+        # --- ss_sectors: show scanfilter ---
+        if cb_data == "ss_sectors":
+            settings = load_scan_settings()
+            enabled = set(settings.get("enabled_sectors", []))
+            scan_unknown = settings.get("scan_unknown", True)
+            rows = []
+            row = []
+            for i, sector in enumerate(ALL_SECTORS):
+                is_on = sector in enabled
+                icon = "✅" if is_on else "❌"
+                short_s = SECTOR_SHORT.get(sector, sector)
+                row.append({"text": f"{icon} {short_s}", "callback_data": f"sflt_t_{i}"})
+                if len(row) == 2:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            unk_icon = "✅" if scan_unknown else "❌"
+            rows.append([{"text": f"{unk_icon} ❓ Без сектора", "callback_data": "sflt_unk"}])
+            rows.append([{"text": "⬅️ Назад", "callback_data": "ss_main"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "⚙️ *Фильтр сканера по секторам*\n\n"
+                "✅ = сканируется | ❌ = пропускается\n"
+                "Нажми чтобы переключить:",
+                {"inline_keyboard": rows}, cq_id)
+            return
+
+        # --- ss_threshold: ask for threshold ---
+        if cb_data == "ss_threshold":
+            current_pct = load_trend_above_pct()
+            gcm_pct = current_pct + 1
+            set_scansetting_state(chat_id, {"action": "threshold", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ss_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"📐 *Порог пробития трендлайна*\n\n"
+                f"Текущий: *{current_pct}%* (GCM: {gcm_pct}%)\n\n"
+                f"Введите новый порог:\n"
+                f"Например: `5` или `2.53` или `1.21%`",
+                kb, cq_id)
+            return
+
+        # --- ss_l4h: show line 4h settings inline ---
+        if cb_data == "ss_l4h":
+            s = load_line_4h_settings()
+            _mode = s["mode"]
+            if _mode == "standard":
+                text = (
+                    "📐 *Настройки линий 4Ч*\n\n"
+                    "Режим: ✅ Стандарт\n"
+                    "_Якорь: ближняя линия, допуск 20%, "
+                    "точка Б >80 свечей → сужение до 10%_"
+                )
+                kb = {"inline_keyboard": [
+                    [{"text": "✅ Стандарт", "callback_data": "l4h_standard"},
+                     {"text": "Пользовательский", "callback_data": "l4h_custom"}],
+                    [{"text": "⬅️ Назад", "callback_data": "ss_main"}],
+                ]}
+            else:
+                _anc = s.get("anchor", "nearest_line")
+                _rpct = s.get("range_pct", 20.0)
+                _pb = s.get("point_b_rule", "narrow_pct")
+                _pb_pct = s.get("point_b_pct", 10.0)
+                _anc_label = "Ближняя линия" if _anc == "nearest_line" else "Верх тела свечи"
+                _pb_labels = {
+                    "no_change": "Без изменений",
+                    "nearest": "Ближняя к цене",
+                    "narrow_pct": f"Сужение до {_pb_pct}%",
+                }
+                _pb_label = _pb_labels.get(_pb, f"Сужение до {_pb_pct}%")
+                text = (
+                    f"📐 *Настройки линий 4Ч*\n\n"
+                    f"Режим: ✅ Пользовательский\n\n"
+                    f"1️⃣ Якорь: `{_anc_label}`\n"
+                    f"2️⃣ Допуск: `{_rpct}%`\n"
+                    f"3️⃣ Точка Б >80 свечей: `{_pb_label}`"
+                )
+                _anc_row = [
+                    {"text": ("✅ " if _anc == "nearest_line" else "") + "Ближняя линия",
+                     "callback_data": "l4h_anc_line"},
+                    {"text": ("✅ " if _anc == "candle_top" else "") + "Верх тела свечи",
+                     "callback_data": "l4h_anc_candle"},
+                ]
+                _pb_row = [
+                    {"text": ("✅ " if _pb == "no_change" else "") + "Без изменений",
+                     "callback_data": "l4h_pb_nochange"},
+                    {"text": ("✅ " if _pb == "nearest" else "") + "Ближняя к цене",
+                     "callback_data": "l4h_pb_nearest"},
+                    {"text": ("✅ " if _pb == "narrow_pct" else "") + f"Ввести % ({_pb_pct}%)",
+                     "callback_data": "l4h_pb_pct"},
+                ]
+                kb = {"inline_keyboard": [
+                    [{"text": "Стандарт", "callback_data": "l4h_standard"},
+                     {"text": "✅ Пользовательский", "callback_data": "l4h_custom"}],
+                    [{"text": "── Якорь ──", "callback_data": "l4h_noop"}],
+                    _anc_row,
+                    [{"text": "── Допуск ──", "callback_data": "l4h_noop"}],
+                    [{"text": f"📏 Изменить ({_rpct}%)", "callback_data": "l4h_range"}],
+                    [{"text": "── Точка Б (>80 свечей) ──", "callback_data": "l4h_noop"}],
+                    _pb_row,
+                    [{"text": "⬅️ Назад", "callback_data": "ss_main"}],
+                ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # Fallback
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id})
+        return
+
+    # ------------------------------------------------------------------ #
+    # 0e. AUTOPOST CALLBACKS (ap_)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("ap_"):
         msg_id_cb = cq.get("message", {}).get("message_id")
@@ -1603,6 +1783,7 @@ async def handle_callback_query(app_session, update):
                 rows.append(row)
             unk_icon = "✅" if scan_unknown else "❌"
             rows.append([{"text": f"{unk_icon} ❓ Без сектора", "callback_data": "sflt_unk"}])
+            rows.append([{"text": "⬅️ Назад", "callback_data": "ss_main"}])
 
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 "⚙️ *Фильтр сканера по секторам*\n\n"
@@ -1632,6 +1813,7 @@ async def handle_callback_query(app_session, update):
                 rows.append(row)
             unk_icon = "✅" if now_on else "❌"
             rows.append([{"text": f"{unk_icon} ❓ Без сектора", "callback_data": "sflt_unk"}])
+            rows.append([{"text": "⬅️ Назад", "callback_data": "ss_main"}])
 
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 "⚙️ *Фильтр сканера по секторам*\n\n"
