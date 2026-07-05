@@ -939,7 +939,125 @@ async def handle_callback_query(app_session, update):
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #
-    # 0d. SIGNALS CALLBACKS (sig_)
+    # 0d. AUTOPOST CALLBACKS (ap_)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("ap_"):
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        import agent.square_publisher
+        from agent.square_publisher import get_coins, get_times, get_hashtags, set_coins, set_times, set_hashtags
+        from core.tg_state import set_autopost_state, clear_autopost_state
+
+        # --- Helper: build main menu text + kb ---
+        def _ap_main_content():
+            status_icon = "✅ ON" if agent.square_publisher.AUTO_SQUARE_ENABLED else "❌ OFF"
+            coins = get_coins()
+            coins_str = ", ".join(coins) if coins else "—"
+            times = get_times()
+            times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d}" for t in times) if times else "—"
+            hashtags = get_hashtags()
+            hashtags_str = hashtags if hashtags else "—"
+            text = (
+                f"📢 *Autopost*\n\n"
+                f"📊 Статус: *{status_icon}*\n"
+                f"🪙 Монеты: `{coins_str}`\n"
+                f"⏰ Время: `{times_str}` UTC\n"
+                f"🏷 Хэштеги: `{hashtags_str}`"
+            )
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "📊 Статус", "callback_data": "ap_status"},
+                    {"text": "🪙 Монеты", "callback_data": "ap_coins"},
+                ],
+                [
+                    {"text": "⏰ Время", "callback_data": "ap_time"},
+                    {"text": "🏷 Хэштеги", "callback_data": "ap_tags"},
+                ],
+            ]}
+            return text, kb
+
+        # --- ap_main: back to main ---
+        if cb_data == "ap_main":
+            clear_autopost_state(chat_id)
+            text, kb = _ap_main_content()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # --- ap_status: on/off buttons ---
+        if cb_data == "ap_status":
+            status_icon = "✅ ON" if agent.square_publisher.AUTO_SQUARE_ENABLED else "❌ OFF"
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "✅ Включить", "callback_data": "ap_on"},
+                    {"text": "❌ Выключить", "callback_data": "ap_off"},
+                ],
+                [{"text": "⬅️ Назад", "callback_data": "ap_main"}],
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"📢 Autopost: *{status_icon}*", kb, cq_id)
+            return
+
+        # --- ap_on / ap_off ---
+        if cb_data == "ap_on":
+            agent.square_publisher.AUTO_SQUARE_ENABLED = True
+            text, kb = _ap_main_content()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, "✅ Включён")
+            return
+        if cb_data == "ap_off":
+            agent.square_publisher.AUTO_SQUARE_ENABLED = False
+            text, kb = _ap_main_content()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, "❌ Выключён")
+            return
+
+        # --- ap_coins: ask for coins input ---
+        if cb_data == "ap_coins":
+            coins = get_coins()
+            coins_str = ", ".join(coins) if coins else "—"
+            set_autopost_state(chat_id, {"action": "coins", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"🪙 *Монеты для автопоста*\n\n"
+                f"Текущие: `{coins_str}`\n\n"
+                f"Введите монеты (через пробел, запятую или точку):\n"
+                f"Например: `BTC, ETH, SOL`",
+                kb, cq_id)
+            return
+
+        # --- ap_time: ask for time input ---
+        if cb_data == "ap_time":
+            times = get_times()
+            times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d}" for t in times) if times else "—"
+            set_autopost_state(chat_id, {"action": "time", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"⏰ *Время автопоста*\n\n"
+                f"Текущее: `{times_str}` UTC\n\n"
+                f"Введите время постинга:\n"
+                f"Например: `09:00 15:00 21:00`",
+                kb, cq_id)
+            return
+
+        # --- ap_tags: ask for hashtags input ---
+        if cb_data == "ap_tags":
+            hashtags = get_hashtags()
+            hashtags_str = hashtags if hashtags else "—"
+            set_autopost_state(chat_id, {"action": "hashtags", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"🏷 *Хэштеги автопоста*\n\n"
+                f"Текущие: `{hashtags_str}`\n\n"
+                f"Введите хэштеги:\n"
+                f"Например: `#crypto #trading #binance`",
+                kb, cq_id)
+            return
+
+        # Fallback
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id})
+        return
+
+    # ------------------------------------------------------------------ #
+    # 0e. SIGNALS CALLBACKS (sig_)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("sig_"):
         msg_id_cb = cq.get("message", {}).get("message_id")

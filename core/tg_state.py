@@ -47,6 +47,20 @@ def set_model_menu_state(chat_id, state):
 def clear_model_menu_state(chat_id):
     _model_menu_state.pop(chat_id, None)
 
+# --- AUTOPOST STATE (for autopost multi-step flow) ---
+# {chat_id: {"action": "coins"|"time"|"hashtags", "step": "awaiting_input"}}
+_autopost_state = {}
+
+def get_autopost_state(chat_id):
+    return _autopost_state.get(chat_id)
+
+def set_autopost_state(chat_id, state):
+    _autopost_state[chat_id] = state
+
+def clear_autopost_state(chat_id):
+    _autopost_state.pop(chat_id, None)
+
+
 # --- SECTOR STATE (for /sec multi-step flow) ---
 # {chat_id: {"action": "add"|"move"|"find"|"verify", "step": str, "symbol": str|None, "msg_id": int|None}}
 _sector_state = {}

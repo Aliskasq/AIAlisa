@@ -55,6 +55,7 @@ from core.tg_state import (
     get_model_menu_state, set_model_menu_state, clear_model_menu_state,
     build_model_category_kb,
     get_sector_state, set_sector_state, clear_sector_state,
+    get_autopost_state, set_autopost_state, clear_autopost_state,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -273,6 +274,90 @@ async def handle_message(app_session, update):
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
         return
+
+    # ==========================================
+    # AUTOPOST STATE MACHINE (awaiting input from user)
+    # ==========================================
+    _ap_state = get_autopost_state(chat_id)
+    if _ap_state and _ap_state.get("step") == "awaiting_input":
+        action = _ap_state.get("action")
+
+        if action == "coins":
+            # Parse coins: split by any punctuation/whitespace
+            import re as _re
+            raw = original_text.upper().strip()
+            coins = [c.strip().replace("$", "").replace("/", "") for c in _re.split(r'[,.\s;|]+', raw) if c.strip()]
+            coins = [c for c in coins if c]  # remove empty
+            if coins:
+                set_coins(coins)
+                coins_str = ", ".join(get_coins())
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+                clear_autopost_state(chat_id)
+                await send_response(app_session, chat_id,
+                    f"✅ Монеты обновлены!\n🪙 `{coins_str}`",
+                    msg_id, parse_mode="Markdown", reply_markup=kb)
+            else:
+                await send_response(app_session, chat_id,
+                    "⚠️ Не удалось распознать монеты. Попробуй ещё раз:\n`BTC, ETH, SOL`",
+                    msg_id, parse_mode="Markdown")
+            return
+
+        elif action == "time":
+            import re as _re
+            raw = text.strip()
+            time_strs = _re.split(r'[,;\s]+', raw)
+            new_times = []
+            parse_ok = True
+            for tp in time_strs:
+                if not tp:
+                    continue
+                try:
+                    tp = tp.replace(".", ":")
+                    h, m = tp.split(":")
+                    h, m = int(h), int(m)
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        new_times.append({"hour": h, "minute": m})
+                    else:
+                        parse_ok = False
+                except Exception:
+                    parse_ok = False
+            if parse_ok and new_times:
+                set_times(new_times)
+                times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d} UTC" for t in new_times)
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+                clear_autopost_state(chat_id)
+                await send_response(app_session, chat_id,
+                    f"✅ Расписание обновлено!\n⏰ `{times_str}`",
+                    msg_id, parse_mode="Markdown", reply_markup=kb)
+            else:
+                await send_response(app_session, chat_id,
+                    "⚠️ Неверный формат. Пример:\n`09:00 15:00 21:00`",
+                    msg_id, parse_mode="Markdown")
+            return
+
+        elif action == "hashtags":
+            import re as _re
+            raw = original_text.strip()
+            # Extract hashtags or just words, rejoin as space-separated
+            tags = _re.split(r'[,;\s]+', raw)
+            tags = [t.strip() for t in tags if t.strip()]
+            # Add # if missing
+            tags = [t if t.startswith("#") else f"#{t}" for t in tags]
+            if tags:
+                new_tags = " ".join(tags)
+                set_hashtags(new_tags)
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "ap_main"}]]}
+                clear_autopost_state(chat_id)
+                await send_response(app_session, chat_id,
+                    f"✅ Хэштеги обновлены!\n🏷 `{new_tags}`",
+                    msg_id, parse_mode="Markdown", reply_markup=kb)
+            else:
+                await send_response(app_session, chat_id,
+                    "⚠️ Не удалось распознать. Пример:\n`#crypto #trading #binance`",
+                    msg_id, parse_mode="Markdown")
+            return
+
+        clear_autopost_state(chat_id)
 
     # ==========================================
     # SECTOR STATE MACHINE (awaiting coin name from user)
@@ -1047,10 +1132,7 @@ async def handle_message(app_session, update):
                 "🏷 `/scanfilter` — вкл/выкл секторы в скане\n\n"
 
                 "⏰ `/time 18:30` — scan schedule\n"
-                "📢 `/autopost on/off` — auto Square\n"
-                "🪙 `/autopost SOL BTC` — coins\n"
-                "⏰ `/autopost time 09:00 15:00 21:00` — post times\n"
-                "🏷 `/autopost hashtags #tag1 #tag2` — hashtags\n"
+                "📢 `autopost` — настройки автопоста (меню)\n"
                 "✏️ `/post text` — post to Square\n"
                 "✏️ reply `/post text` — AI + your opinion\n"
 
@@ -1354,7 +1436,7 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, post_help, msg_id, parse_mode="Markdown")
         return
 
-    if text.startswith("/autopost"):
+    if text.startswith("/autopost") or text in ("autopost", "автопост"):
         if not is_admin(msg):
             await send_response(app_session, chat_id, "⛔️ Admin only.", msg_id)
             return
@@ -1362,58 +1444,84 @@ async def handle_message(app_session, update):
         arg = parts[1].strip() if len(parts) > 1 else ""
         arg_lower = arg.lower()
 
+        # Legacy sub-commands still work
         if arg_lower == "on":
             agent.square_publisher.AUTO_SQUARE_ENABLED = True
             msg_text = "✅ Auto-posting is now **ENABLED**."
+            await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+            return
         elif arg_lower == "off":
             agent.square_publisher.AUTO_SQUARE_ENABLED = False
             msg_text = "⏸ Auto-posting is now **DISABLED**."
-        elif arg_lower.startswith("time"):
+            await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+            return
+        elif arg_lower.startswith("time") and len(arg.split()) > 1:
             time_parts = arg.split()[1:]
-            if not time_parts:
-                times = get_times()
-                times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d}" for t in times)
-                msg_text = f"⏰ Current schedule: `{times_str}` UTC\n\nTo change: `/autopost time 13:30 22:50`"
-            else:
-                new_times = []
-                parse_ok = True
-                for tp in time_parts:
-                    try:
-                        h, m = tp.replace(".", ":").split(":")
-                        h, m = int(h), int(m)
-                        if 0 <= h < 24 and 0 <= m < 60:
-                            new_times.append({"hour": h, "minute": m})
-                        else:
-                            parse_ok = False
-                    except Exception:
+            new_times = []
+            parse_ok = True
+            for tp in time_parts:
+                try:
+                    h, m = tp.replace(".", ":").split(":")
+                    h, m = int(h), int(m)
+                    if 0 <= h < 24 and 0 <= m < 60:
+                        new_times.append({"hour": h, "minute": m})
+                    else:
                         parse_ok = False
-                if parse_ok and new_times:
-                    set_times(new_times)
-                    times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d} UTC" for t in new_times)
-                    msg_text = f"✅ Schedule updated!\n⏰ New times: `{times_str}`"
-                else:
-                    msg_text = "⚠️ Wrong format. Example:\n`/autopost time 09:00 21:30`"
-        elif arg_lower.startswith("hashtags") or arg_lower.startswith("tags"):
-            tag_parts = arg.split(maxsplit=1)
-            if len(tag_parts) > 1 and tag_parts[1].strip():
-                new_tags = tag_parts[1].strip()
-                set_hashtags(new_tags)
-                msg_text = f"✅ Hashtags updated!\n🏷 `{new_tags}`"
+                except Exception:
+                    parse_ok = False
+            if parse_ok and new_times:
+                set_times(new_times)
+                times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d} UTC" for t in new_times)
+                msg_text = f"✅ Schedule updated!\n⏰ New times: `{times_str}`"
             else:
-                current = get_hashtags()
-                msg_text = f"🏷 Current hashtags: `{current}`\n\nTo change: `/autopost hashtags #tag1 #tag2 #tag3`"
-        elif arg_lower in ("", "status"):
-            msg_text = get_status_text()
-        else:
+                msg_text = "⚠️ Wrong format. Example:\n`/autopost time 09:00 21:30`"
+            await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+            return
+        elif (arg_lower.startswith("hashtags") or arg_lower.startswith("tags")) and len(arg.split()) > 1:
+            tag_parts = arg.split(maxsplit=1)
+            new_tags = tag_parts[1].strip()
+            set_hashtags(new_tags)
+            msg_text = f"✅ Hashtags updated!\n🏷 `{new_tags}`"
+            await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+            return
+        elif arg_lower and arg_lower not in ("", "status"):
             coin_args = arg.split()
             if len(coin_args) >= 1:
                 set_coins(coin_args)
                 coins_str = ", ".join(get_coins())
                 msg_text = f"✅ Coins updated!\n🪙 Auto-post list: `{coins_str}`"
-            else:
-                msg_text = get_status_text()
+                await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+                return
 
-        await send_response(app_session, chat_id, msg_text, msg_id, parse_mode="Markdown")
+        # Default: show status with buttons
+        status_icon = "✅ ON" if agent.square_publisher.AUTO_SQUARE_ENABLED else "❌ OFF"
+        coins = get_coins()
+        coins_str = ", ".join(coins) if coins else "—"
+        times = get_times()
+        times_str = ", ".join(f"{t['hour']:02d}:{t['minute']:02d}" for t in times) if times else "—"
+        hashtags = get_hashtags()
+        hashtags_str = hashtags if hashtags else "—"
+
+        msg_text = (
+            f"📢 *Autopost*\n\n"
+            f"📊 Статус: *{status_icon}*\n"
+            f"🪙 Монеты: `{coins_str}`\n"
+            f"⏰ Время: `{times_str}` UTC\n"
+            f"🏷 Хэштеги: `{hashtags_str}`"
+        )
+        kb = {"inline_keyboard": [
+            [
+                {"text": "📊 Статус", "callback_data": "ap_status"},
+                {"text": "🪙 Монеты", "callback_data": "ap_coins"},
+            ],
+            [
+                {"text": "⏰ Время", "callback_data": "ap_time"},
+                {"text": "🏷 Хэштеги", "callback_data": "ap_tags"},
+            ],
+        ]}
+        clear_autopost_state(chat_id)
+        await send_response(app_session, chat_id, msg_text, msg_id,
+            parse_mode="Markdown", reply_markup=kb)
         return
 
     # ==========================================
