@@ -940,7 +940,168 @@ async def handle_callback_query(app_session, update):
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #
-    # 0d. SCANSETTING CALLBACKS (ss_)
+    # 0d. ALERT CALLBACKS (alt_)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("alt_"):
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        from config import load_price_alerts, save_price_alerts
+        from core.tg_state import set_alert_state, clear_alert_state
+
+        # --- Helper: main menu ---
+        def _alt_main_kb():
+            alerts = load_price_alerts()
+            user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+            count = len(user_alerts)
+            text = f"🔔 *Price Alerts*\n\nАктивных: *{count}*"
+            kb = {"inline_keyboard": [
+                [{"text": "➕ Установить алерт", "callback_data": "alt_set"}],
+                [
+                    {"text": f"📋 Активные ({count})", "callback_data": "alt_list"},
+                    {"text": "🗑 Удалить алерт", "callback_data": "alt_delete"},
+                ],
+                [{"text": "🗑 Очистить все", "callback_data": "alt_clear_ask"}],
+            ]}
+            return text, kb
+
+        # --- alt_main: back to main ---
+        if cb_data == "alt_main":
+            clear_alert_state(chat_id)
+            text, kb = _alt_main_kb()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id)
+            return
+
+        # --- alt_set: ask for coin + price ---
+        if cb_data == "alt_set":
+            set_alert_state(chat_id, {"action": "set", "step": "awaiting_input"})
+            kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "➕ *Установить алерт*\n\n"
+                "Введите монету и цену:\n"
+                "Например: `BTC 69500`",
+                kb, cq_id)
+            return
+
+        # --- alt_list: show active alerts ---
+        if cb_data == "alt_list":
+            alerts = load_price_alerts()
+            user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+            if not user_alerts:
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "📭 Нет активных алертов.", kb, cq_id)
+            else:
+                lines = ["🔔 *Активные алерты:*\n"]
+                for i, a in enumerate(user_alerts, 1):
+                    short = a["symbol"].replace("USDT", "")
+                    arrow = "↗️" if a["direction"] == "above" else "↘️"
+                    lines.append(f"{i}. {arrow} `${short}` → `${a['target_price']:.6f}`")
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "\n".join(lines), kb, cq_id)
+            return
+
+        # --- alt_delete: show alerts with individual delete buttons ---
+        if cb_data == "alt_delete":
+            alerts = load_price_alerts()
+            user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+            if not user_alerts:
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "📭 Нет алертов для удаления.", kb, cq_id)
+            else:
+                rows = []
+                for i, a in enumerate(user_alerts):
+                    short = a["symbol"].replace("USDT", "")
+                    arrow = "↗️" if a["direction"] == "above" else "↘️"
+                    rows.append([{"text": f"🗑 {arrow} ${short} → ${a['target_price']:.6f}",
+                                  "callback_data": f"alt_rm_{i}"}])
+                rows.append([{"text": "⬅️ Назад", "callback_data": "alt_main"}])
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "🗑 *Удалить алерт:*\n\nНажми чтобы удалить:",
+                    {"inline_keyboard": rows}, cq_id)
+            return
+
+        # --- alt_rm_IDX: remove individual alert ---
+        if cb_data.startswith("alt_rm_"):
+            try:
+                idx = int(cb_data.replace("alt_rm_", ""))
+            except ValueError:
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id})
+                return
+
+            alerts = load_price_alerts()
+            user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+
+            if 0 <= idx < len(user_alerts):
+                removed = user_alerts[idx]
+                short = removed["symbol"].replace("USDT", "")
+                # Remove from full list
+                alerts.remove(removed)
+                save_price_alerts(alerts)
+                toast = f"🗑 ${short} удалён"
+
+                # Refresh delete list
+                user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+                if user_alerts:
+                    rows = []
+                    for i, a in enumerate(user_alerts):
+                        s = a["symbol"].replace("USDT", "")
+                        arrow = "↗️" if a["direction"] == "above" else "↘️"
+                        rows.append([{"text": f"🗑 {arrow} ${s} → ${a['target_price']:.6f}",
+                                      "callback_data": f"alt_rm_{i}"}])
+                    rows.append([{"text": "⬅️ Назад", "callback_data": "alt_main"}])
+                    await _slm_edit(app_session, chat_id, msg_id_cb,
+                        f"🗑 *Удалить алерт:*\n\nОсталось: {len(user_alerts)}",
+                        {"inline_keyboard": rows}, cq_id, toast)
+                else:
+                    kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+                    await _slm_edit(app_session, chat_id, msg_id_cb,
+                        "✅ Все алерты удалены!", kb, cq_id, toast)
+            else:
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": "⚠️ Алерт не найден"})
+            return
+
+        # --- alt_clear_ask: confirm clear all ---
+        if cb_data == "alt_clear_ask":
+            alerts = load_price_alerts()
+            user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+            if not user_alerts:
+                kb = {"inline_keyboard": [[{"text": "⬅️ Назад", "callback_data": "alt_main"}]]}
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "📭 Нет алертов для удаления.", kb, cq_id)
+                return
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "✅ Да, удалить все", "callback_data": "alt_clear_yes"},
+                    {"text": "❌ Нет", "callback_data": "alt_main"},
+                ],
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"🗑 *Удалить все {len(user_alerts)} алертов?*",
+                kb, cq_id)
+            return
+
+        # --- alt_clear_yes: actually clear ---
+        if cb_data == "alt_clear_yes":
+            alerts = load_price_alerts()
+            remaining = [a for a in alerts if a["chat_id"] != chat_id]
+            save_price_alerts(remaining)
+            text, kb = _alt_main_kb()
+            await _slm_edit(app_session, chat_id, msg_id_cb, text, kb, cq_id, "✅ Все удалены")
+            return
+
+        # Fallback
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id})
+        return
+
+    # ------------------------------------------------------------------ #
+    # 0e. SCANSETTING CALLBACKS (ss_)
     # ------------------------------------------------------------------ #
     if cb_data.startswith("ss_"):
         msg_id_cb = cq.get("message", {}).get("message_id")

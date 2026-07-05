@@ -57,6 +57,7 @@ from core.tg_state import (
     get_sector_state, set_sector_state, clear_sector_state,
     get_autopost_state, set_autopost_state, clear_autopost_state,
     get_scansetting_state, set_scansetting_state, clear_scansetting_state,
+    get_alert_state, set_alert_state, clear_alert_state,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -275,6 +276,73 @@ async def handle_message(app_session, update):
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
         return
+
+    # ==========================================
+    # ALERT STATE MACHINE (awaiting coin+price from user)
+    # ==========================================
+    _alt_state = get_alert_state(chat_id)
+    if _alt_state and _alt_state.get("step") == "awaiting_input":
+        import re as _re
+        # Parse: "BTC 69500" or "BTC,69500" or "BTC.69500" etc.
+        raw = original_text.strip().replace(",", " ").replace(";", " ")
+        parts = raw.split()
+        if len(parts) >= 2:
+            coin_raw = parts[0].upper().replace("$", "").replace("/", "")
+            if coin_raw.endswith("USDT"):
+                coin_raw = coin_raw[:-4]
+            symbol = coin_raw + "USDT"
+            try:
+                target_price = float(parts[1].replace(",", "."))
+            except ValueError:
+                await send_response(app_session, chat_id,
+                    "⚠️ Неверная цена. Пример: `BTC 69500`", msg_id, parse_mode="Markdown")
+                return
+
+            current_price = 0
+            try:
+                async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}", timeout=5) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        current_price = float(data["price"])
+            except Exception:
+                pass
+
+            if current_price == 0:
+                await send_response(app_session, chat_id,
+                    f"⚠️ Пара `{symbol}` не найдена на Binance Futures.", msg_id, parse_mode="Markdown")
+                return
+
+            direction = "above" if target_price > current_price else "below"
+            arrow = "📈" if direction == "above" else "📉"
+            dir_text = "поднимется" if direction == "above" else "опустится"
+
+            alerts = load_price_alerts()
+            alerts.append({
+                "symbol": symbol,
+                "target_price": target_price,
+                "direction": direction,
+                "chat_id": chat_id,
+                "user_id": msg.get("from", {}).get("id", 0),
+                "set_price": current_price,
+                "time": datetime.now(timezone.utc).isoformat()
+            })
+            save_price_alerts(alerts)
+            clear_alert_state(chat_id)
+
+            short = symbol.replace("USDT", "")
+            kb = {"inline_keyboard": [[{"text": "⬅️ К алертам", "callback_data": "alt_main"}]]}
+            await send_response(app_session, chat_id,
+                f"✅ Алерт установлен!\n\n"
+                f"🪙 `${short}`\n"
+                f"💰 Сейчас: `${current_price:.6f}`\n"
+                f"{arrow} Цель: `${target_price:.6f}`\n"
+                f"📩 Уведомлю когда цена {dir_text} до цели.",
+                msg_id, parse_mode="Markdown", reply_markup=kb)
+            return
+        else:
+            await send_response(app_session, chat_id,
+                "⚠️ Введите монету и цену. Пример: `BTC 69500`", msg_id, parse_mode="Markdown")
+            return
 
     # ==========================================
     # SCANSETTING STATE MACHINE (awaiting input from user)
@@ -1163,10 +1231,8 @@ async def handle_message(app_session, update):
 
             "📊 `/vol`\n"
             "    _Volume waitlist / Ожидание объёма_\n\n"
-            "🔔 `/alert BTC 69500`\n"
-            "    _Price alert / Алерт на цену_\n"
-            "🔔 `/alert list` — _active / активные_\n"
-            "🔔 `/alert clear` — _remove all / удалить все_\n\n"
+            "🔔 `/alert` — алерты на цену (меню)\n"
+            "🔔 `/alert BTC 69500` — быстрый алерт\n\n"
             "📐 `алерт BTC` / `alert BTC`\n"
             "    _Ручная линия + алерт касания_\n"
             "📐 `алерт список` — _активные линии_\n"
@@ -2004,17 +2070,23 @@ async def handle_message(app_session, update):
                     msg_id, parse_mode="Markdown")
             return
 
-        if lang_pref == "en":
-            alert_help = ("🔔 *Price Alert:*\n\n"
-                "Set: `/alert BTC 69500`\n"
-                "List: `/alert list`\n"
-                "Clear all: `/alert clear`")
-        else:
-            alert_help = ("🔔 *Price Alert:*\n\n"
-                "Установить: `/alert BTC 69500`\n"
-                "Список: `/alert list`\n"
-                "Удалить все: `/alert clear`")
-        await send_response(app_session, chat_id, alert_help, msg_id, parse_mode="Markdown")
+        # No args — show button menu
+        alerts = load_price_alerts()
+        user_alerts = [a for a in alerts if a["chat_id"] == chat_id]
+        count = len(user_alerts)
+        clear_alert_state(chat_id)
+
+        kb = {"inline_keyboard": [
+            [{"text": "➕ Установить алерт", "callback_data": "alt_set"}],
+            [
+                {"text": f"📋 Активные ({count})", "callback_data": "alt_list"},
+                {"text": "🗑 Удалить алерт", "callback_data": "alt_delete"},
+            ],
+            [{"text": "🗑 Очистить все", "callback_data": "alt_clear_ask"}],
+        ]}
+        await send_response(app_session, chat_id,
+            f"🔔 *Price Alerts*\n\nАктивных: *{count}*",
+            msg_id, parse_mode="Markdown", reply_markup=kb)
         return
 
     # ==========================================

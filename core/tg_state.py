@@ -47,6 +47,20 @@ def set_model_menu_state(chat_id, state):
 def clear_model_menu_state(chat_id):
     _model_menu_state.pop(chat_id, None)
 
+# --- ALERT STATE (for /alert multi-step flow) ---
+# {chat_id: {"action": "set", "step": "awaiting_input"}}
+_alert_state = {}
+
+def get_alert_state(chat_id):
+    return _alert_state.get(chat_id)
+
+def set_alert_state(chat_id, state):
+    _alert_state[chat_id] = state
+
+def clear_alert_state(chat_id):
+    _alert_state.pop(chat_id, None)
+
+
 # --- SCANSETTING STATE (for scansetting multi-step flow) ---
 # {chat_id: {"action": "time"|"threshold", "step": "awaiting_input"}}
 _scansetting_state = {}
