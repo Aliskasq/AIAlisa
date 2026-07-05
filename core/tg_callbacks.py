@@ -939,7 +939,188 @@ async def handle_callback_query(app_session, update):
         return  # unknown malert_ callback
 
     # ------------------------------------------------------------------ #
-    # 0d. SECTOR CALLBACKS (sec_, sflt_)
+    # 0d. SIGNALS CALLBACKS (sig_)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("sig_"):
+        msg_id_cb = cq.get("message", {}).get("message_id")
+
+        # --- sig_close: snapshot (close all) ---
+        if cb_data == "sig_close":
+            try:
+                from core.tg_reports import build_signals_close_text
+                chunks = await build_signals_close_text(app_session, lang="ru")
+                # Edit first message with snapshot, send rest as new
+                if chunks:
+                    kb = {"inline_keyboard": [
+                        [{"text": "⬅️ Назад к банку", "callback_data": "sig_back"}],
+                    ]}
+                    await _slm_edit(app_session, chat_id, msg_id_cb,
+                        chunks[0], {"inline_keyboard": []}, cq_id, "🔒 Снапшот")
+                    for chunk in chunks[1:]:
+                        await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+            except Exception as e:
+                logging.error(f"❌ sig_close error: {e}")
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": f"❌ {e}"})
+            return
+
+        # --- sig_clear_ask: confirm bank reset ---
+        if cb_data == "sig_clear_ask":
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "✅ Да, сбросить", "callback_data": "sig_clear_yes"},
+                    {"text": "❌ Нет", "callback_data": "sig_back"},
+                ],
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🔄 *Сбросить банк на $10,000?*\n\n"
+                "⚠️ All-time статистика будет обнулена\n"
+                "📋 Сегодняшние сигналы останутся в списке",
+                kb, cq_id)
+            return
+
+        # --- sig_clear_yes: actually reset ---
+        if cb_data == "sig_clear_yes":
+            from config import reset_virtual_bank
+            reset_virtual_bank()
+            kb = {"inline_keyboard": [
+                [{"text": "⬅️ Назад к банку", "callback_data": "sig_back"}],
+            ]}
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                "🔄 *Банк сброшен!*\n\n"
+                "💰 Баланс: `$10,000.00`\n"
+                "📊 All-time статистика обнулена\n"
+                "📋 Сегодняшние сигналы остались в списке",
+                kb, cq_id, "🔄 Сброшено")
+            return
+
+        # --- sig_back: back to signals main ---
+        if cb_data == "sig_back":
+            try:
+                from core.tg_reports import build_signals_text
+                chunks = await build_signals_text(app_session, lang="ru")
+                kb = {"inline_keyboard": [
+                    [
+                        {"text": "🔒 Снапшот", "callback_data": "sig_close"},
+                        {"text": "🔄 Сбросить банк", "callback_data": "sig_clear_ask"},
+                    ],
+                    [
+                        {"text": "📊 Все пробития", "callback_data": "sig_trend_all"},
+                        {"text": "📈 Растущие", "callback_data": "sig_trend_up"},
+                    ],
+                ]}
+                if chunks:
+                    await _slm_edit(app_session, chat_id, msg_id_cb,
+                        chunks[0], kb, cq_id)
+                    for chunk in chunks[1:]:
+                        await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+            except Exception as e:
+                logging.error(f"❌ sig_back error: {e}")
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": f"❌ {e}"})
+            return
+
+        # --- sig_trend_all: all breakouts ---
+        # --- sig_trend_up: only growing (price > breakout price) ---
+        if cb_data in ("sig_trend_all", "sig_trend_up"):
+            only_up = (cb_data == "sig_trend_up")
+            from config import load_breakout_log
+            from core.categories import get_sector_emoji
+            log = load_breakout_log()
+            if not log:
+                kb = {"inline_keyboard": [
+                    [{"text": "⬅️ Назад к банку", "callback_data": "sig_back"}],
+                ]}
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    "📭 Нет пробитий с последнего скана.",
+                    kb, cq_id)
+                return
+
+            price_map = {}
+            try:
+                async with app_session.get("https://fapi.binance.com/fapi/v1/ticker/price", timeout=10) as resp:
+                    if resp.status == 200:
+                        for p in await resp.json():
+                            price_map[p["symbol"]] = float(p["price"])
+            except Exception:
+                pass
+
+            hdr = "📈 *Растущие пробития:*\n" if only_up else "📊 *Пробития трендовых линий:*\n"
+            lines = [hdr]
+            count = 0
+            for entry in log:
+                sym = entry["symbol"]
+                short = sym.replace("USDT", "")
+                _sec_em = get_sector_emoji(sym)
+                short_display = f"{_sec_em}{short}"
+                tf = entry["tf"]
+                bp = entry["breakout_price"]
+                now_price = price_map.get(sym, entry.get("current_price", 0))
+                diff_pct = ((now_price / bp) - 1) * 100 if bp > 0 else 0
+
+                if only_up and diff_pct < 0:
+                    continue
+
+                arrow = "🟢" if diff_pct >= 0 else "🔴"
+                ai_dir = entry.get("ai_direction", "")
+                ai_mark = ""
+                if ai_dir:
+                    ai_ok = (ai_dir == "LONG" and diff_pct >= 0) or (ai_dir == "SHORT" and diff_pct < 0)
+                    ai_mark = "✅" if ai_ok else "❌"
+
+                lines.append(
+                    f"{arrow}{ai_mark} `${short_display}` ({tf})\n"
+                    f"    Пробитие: `${bp:.6f}`\n"
+                    f"    Сейчас: `${now_price:.6f}` (*{diff_pct:+.2f}%*)"
+                )
+                count += 1
+
+            if count == 0:
+                lines = ["📈 *Растущие пробития:*\n\n📭 Нет растущих монет"]
+
+            lines.append(f"\n_Всего: {count} монет_")
+
+            full = "\n".join(lines)
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "📊 Все пробития", "callback_data": "sig_trend_all"},
+                    {"text": "📈 Растущие", "callback_data": "sig_trend_up"},
+                ],
+                [{"text": "⬅️ Назад к банку", "callback_data": "sig_back"}],
+            ]}
+
+            if len(full) <= 4000:
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    full, kb, cq_id)
+            else:
+                # Too long for edit — send as new message, edit original to minimal
+                await _slm_edit(app_session, chat_id, msg_id_cb,
+                    hdr + f"\n_Всего: {count} монет (см. ниже)_",
+                    kb, cq_id)
+                chunks = []
+                cur = ""
+                for line in lines:
+                    if len(cur) + len(line) + 1 > 3900:
+                        chunks.append(cur)
+                        cur = line
+                    else:
+                        cur += "\n" + line if cur else line
+                if cur:
+                    chunks.append(cur)
+                for chunk in chunks:
+                    await send_response(app_session, chat_id, chunk, parse_mode="Markdown")
+            return
+
+        # Fallback for unrecognized sig_ callbacks
+        await app_session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": cq_id})
+        return
+
+    # ------------------------------------------------------------------ #
+    # 0e. SECTOR CALLBACKS (sec_, sflt_)
     # ------------------------------------------------------------------ #
     if cb_data.startswith(("sec_", "sflt_")):
         msg_id_cb = cq.get("message", {}).get("message_id")

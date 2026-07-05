@@ -1035,9 +1035,7 @@ async def handle_message(app_session, update):
         if is_admin(msg):
             welcome_text += (
                 "\n\n🔐 *Admin:*\n"
-                "🏆 `/signals` — signal winrate & bank\n"
-                "🔒 `/signals close` — snapshot: close all open now\n"
-                "🔄 `/signals clear` — reset bank to $10k\n"
+                "🏆 `signals` — банк + снапшот + тренд (меню)\n"
                 "📐 `порог 5%` — порог пробития трендлайна\n"
                 "📐 `расширенные настройки линии 4ч`\n"
                 "⚙️ `/stoploss` — режим SL: StopAI / Trail\n"
@@ -1688,14 +1686,15 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
-    # SIGNALS (/signals)
+    # SIGNALS (signals / /signals) — unified with buttons
     # ==========================================
-    if text.startswith("/signal"):
+    if text.startswith("/signal") or text in ("signals", "сигналы"):
         if not is_admin(msg):
             deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
             await send_response(app_session, chat_id, deny, msg_id)
             return
 
+        # Legacy sub-commands still work (for compatibility)
         sig_parts = text.split()
         if len(sig_parts) >= 2 and sig_parts[1] in ("clear", "reset", "сброс"):
             reset_virtual_bank()
@@ -1726,11 +1725,25 @@ async def handle_message(app_session, update):
                 await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
             return
 
+        # Default: show signals with action buttons
         try:
             chunks = await build_signals_text(app_session, lang=lang_pref)
+            # Add buttons to the last chunk
+            kb = {"inline_keyboard": [
+                [
+                    {"text": "🔒 Снапшот", "callback_data": "sig_close"},
+                    {"text": "🔄 Сбросить банк", "callback_data": "sig_clear_ask"},
+                ],
+                [
+                    {"text": "📊 Все пробития", "callback_data": "sig_trend_all"},
+                    {"text": "📈 Растущие", "callback_data": "sig_trend_up"},
+                ],
+            ]}
             for i, chunk in enumerate(chunks):
                 rid = msg_id if i == 0 else None
-                await send_response(app_session, chat_id, chunk, rid, parse_mode="Markdown")
+                is_last = (i == len(chunks) - 1)
+                await send_response(app_session, chat_id, chunk, rid,
+                    parse_mode="Markdown", reply_markup=kb if is_last else None)
         except Exception as e:
             logging.error(f"❌ /signals error: {e}")
             await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
@@ -1955,7 +1968,7 @@ async def handle_message(app_session, update):
     # ==========================================
     # /trend — breakout list
     # ==========================================
-    if text.startswith("/trend") or text in ["тренд", "тренды", "пробития"]:
+    if text.startswith("/trend") or text in ["тренд", "тренды", "пробития", "trend"]:
         log = load_breakout_log()
         if not log:
             no_brk = "📭 No breakouts since last scan." if lang_pref == "en" else "📭 Нет пробитий с последнего скана."
