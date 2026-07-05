@@ -948,6 +948,11 @@ async def handle_message(app_session, update):
 
                 "🧠 `/model` — AI модель, фоллбэк, старт дня\n"
 
+                "🏷 `/sector BTC` — секторы монеты\n"
+                "🏷 `/addsector BTC AI` — добавить сектор\n"
+                "🏷 `/movesector BTC AI Meme` — переместить в другой\n"
+                "🏷 `/scanfilter` — вкл/выкл секторы в скане\n\n"
+
                 "⏰ `/time 18:30` — scan schedule\n"
                 "📢 `/autopost on/off` — auto Square\n"
                 "🪙 `/autopost SOL BTC` — coins\n"
