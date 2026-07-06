@@ -278,6 +278,126 @@ async def handle_message(app_session, update):
         return
 
     # ==========================================
+    # INDICATOR COMMAND (индикатор BTC 4ч / indicator BTC 15m+1h)
+    # ==========================================
+    _ind_prefixes = ["индикатор ", "indicator ", "инд "]
+    _ind_match = next((p for p in _ind_prefixes if text.startswith(p)), None)
+    if _ind_match:
+        remaining = original_text[len(_ind_match):].strip()
+        parts = remaining.split()
+        if len(parts) < 2:
+            await send_response(app_session, chat_id,
+                "ℹ️ Использование: `индикатор BTC 4ч`\n"
+                "Таймфреймы: `15m` `1h` `4h` `1d`\n"
+                "Несколько: `индикатор BTC 15m+1h+4h`",
+                msg_id, parse_mode="Markdown")
+            return
+
+        coin_raw = parts[0].upper().replace("$", "").replace("/", "")
+        if coin_raw.endswith("USDT"):
+            coin_raw = coin_raw[:-4]
+        symbol = coin_raw + "USDT"
+
+        # Parse timeframes from second arg (support + separator)
+        tf_aliases = {
+            "15m": "15m", "15м": "15m", "15min": "15m",
+            "1h": "1h", "1ч": "1h", "1час": "1h",
+            "4h": "4h", "4ч": "4h", "4час": "4h",
+            "1d": "1d", "1д": "1d", "1день": "1d", "1day": "1d",
+        }
+        tf_raw = " ".join(parts[1:]).lower().replace(",", "+").replace(" ", "+")
+        tf_parts = [t.strip() for t in tf_raw.split("+") if t.strip()]
+        timeframes = []
+        for t in tf_parts:
+            resolved = tf_aliases.get(t)
+            if resolved and resolved not in timeframes:
+                timeframes.append(resolved)
+        if not timeframes:
+            await send_response(app_session, chat_id,
+                "⚠️ Неверный таймфрейм. Доступные: `15m` `1h` `4h` `1d`",
+                msg_id, parse_mode="Markdown")
+            return
+
+        # Binance interval map
+        tf_binance = {"15m": ("15m", "15m"), "1h": ("1h", "1H"), "4h": ("4h", "4H"), "1d": ("1d", "1D")}
+        from core.indicators import format_tf_summary
+
+        # Fetch current price
+        current_price = 0
+        try:
+            async with app_session.get(f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}", timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    current_price = float(data["price"])
+        except Exception:
+            pass
+
+        if current_price == 0:
+            await send_response(app_session, chat_id,
+                f"⚠️ Пара `{symbol}` не найдена на Binance Futures.", msg_id, parse_mode="Markdown")
+            return
+
+        # Funding + positioning for header
+        funding = await fetch_funding_rate(app_session, symbol)
+        positioning = await fetch_market_positioning(app_session, symbol)
+
+        hdr_lines = [f"📊 *{symbol}* — `${current_price:.6f}`"]
+        if funding:
+            hdr_lines.append(f"💰 Funding: `{funding}`")
+        if positioning:
+            pos_text = format_positioning_text(positioning)
+            if pos_text:
+                hdr_lines.append(f"📊 {pos_text}")
+        header = "\n".join(hdr_lines)
+
+        await send_response(app_session, chat_id,
+            f"⏳ Загружаю индикаторы {coin_raw} ({', '.join(timeframes)})...", msg_id)
+
+        # Process each timeframe
+        for tf in timeframes:
+            binance_interval, tf_label = tf_binance[tf]
+            try:
+                raw_df = await fetch_klines(app_session, symbol, binance_interval, 250)
+                if not raw_df:
+                    await send_response(app_session, chat_id,
+                        f"⚠️ Нет данных для {symbol} {tf_label}")
+                    continue
+                df = pd.DataFrame(raw_df)
+                indic, _ = calculate_binance_indicators(df, tf_label)
+
+                full_text = format_tf_summary(indic, tf_label)
+
+                # Strip scorecard (everything from "📊 5-GROUP SCORECARD" to end)
+                score_idx = full_text.find("📊 5-GROUP SCORECARD")
+                if score_idx > 0:
+                    full_text = full_text[:score_idx].rstrip()
+
+                # Prepend header only to first TF
+                if tf == timeframes[0]:
+                    full_text = header + "\n\n" + full_text
+
+                # Split if too long for Telegram (4096 limit)
+                if len(full_text) <= 4000:
+                    await send_response(app_session, chat_id, full_text, parse_mode=None)
+                else:
+                    # Split by double newline (indicator blocks)
+                    blocks = full_text.split("\n\n")
+                    chunk = ""
+                    for block in blocks:
+                        if len(chunk) + len(block) + 2 > 3900:
+                            if chunk:
+                                await send_response(app_session, chat_id, chunk, parse_mode=None)
+                            chunk = block
+                        else:
+                            chunk = chunk + "\n\n" + block if chunk else block
+                    if chunk:
+                        await send_response(app_session, chat_id, chunk, parse_mode=None)
+            except Exception as e:
+                logging.error(f"❌ indicator {symbol} {tf_label} error: {e}")
+                await send_response(app_session, chat_id, f"❌ Ошибка {tf_label}: {e}")
+        return
+
+    # ==========================================
     # ALERT STATE MACHINE (awaiting coin+price from user)
     # ==========================================
     _alt_state = get_alert_state(chat_id)
@@ -1231,6 +1351,8 @@ async def handle_message(app_session, update):
 
             "📊 `/vol`\n"
             "    _Volume waitlist / Ожидание объёма_\n\n"
+            "📐 `индикатор BTC 4ч` — индикаторы\n"
+            "    _ТФ: 15m, 1h, 4h, 1d | Сразу несколько: 15m+1h+4h_\n\n"
             "🔔 `/alert` — алерты на цену (меню)\n"
             "🔔 `/alert BTC 69500` — быстрый алерт\n\n"
             "📐 `алерт BTC` / `alert BTC`\n"
