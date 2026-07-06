@@ -23,7 +23,7 @@ import agent.analyzer
 import agent.square_publisher
 from agent.square_publisher import set_coins, set_times, get_coins, get_times, get_status_text, set_hashtags, get_hashtags
 from agent.skills import post_to_binance_square
-from core.binance_api import fetch_klines, fetch_funding_rate, fetch_funding_history, fetch_market_positioning, format_positioning_text
+from core.binance_api import fetch_klines, fetch_funding_rate, fetch_funding_history, fetch_market_positioning, format_positioning_text, fetch_liquidations, format_liquidations_text
 from core.indicators import calculate_binance_indicators
 from core.categories import (get_sector_emoji, get_sector_label, get_sectors,
                               get_sector_counts, get_symbols_by_sector, get_unknown_symbols,
@@ -268,6 +268,52 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id,
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
+        return
+
+    # ==========================================
+    # LIQUIDATION COMMAND (ликвидации BTC / liquidation BTC)
+    # ==========================================
+    _liq_prefixes = ["ликвидации ", "ликвидация ", "liquidation ", "liquidations ", "лик "]
+    _liq_match = None
+    for _lp in _liq_prefixes:
+        if text.startswith(_lp):
+            _liq_match = text[len(_lp):].strip().upper()
+            break
+    if _liq_match:
+        coin = _liq_match.replace("USDT", "").replace("/", "").strip()
+        if not coin:
+            await send_response(app_session, chat_id,
+                "ℹ️ Использование: `ликвидации BTC`\n"
+                "Показывает реальные ликвидации + горячие зоны",
+                msg_id, parse_mode="Markdown")
+            return
+        symbol = coin + "USDT"
+        wait_msg = await send_and_get_msg_id(app_session, chat_id,
+            f"⏳ Загружаю ликвидации {coin}...", msg_id)
+        try:
+            liqs = await fetch_liquidations(app_session, symbol, limit=100)
+            # Get current price
+            cur_price = 0.0
+            try:
+                async with app_session.get(
+                    f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}", timeout=5
+                ) as resp:
+                    if resp.status == 200:
+                        cur_price = float((await resp.json()).get("price", 0))
+            except Exception:
+                pass
+            report = format_liquidations_text(liqs, symbol, cur_price)
+            # Delete wait message
+            try:
+                await app_session.post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                    json={"chat_id": chat_id, "message_id": wait_msg})
+            except Exception:
+                pass
+            await send_response(app_session, chat_id, report, msg_id, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"❌ liquidation command error: {e}")
+            await send_response(app_session, chat_id, f"❌ Ошибка: {e}", msg_id)
         return
 
     # ==========================================
@@ -1304,6 +1350,8 @@ async def handle_message(app_session, update):
             "    _Volume waitlist / Ожидание объёма_\n\n"
             "📐 `индикатор BTC 4ч` — индикаторы\n"
             "    _ТФ: 15m, 1h, 4h, 1d | Сразу несколько: 15m+1h+4h_\n\n"
+            "🐋 `ликвидации BTC` — ликвидации китов\n"
+            "    _Горячие зоны + крупнейшие ликвидации_\n\n"
             "🔔 `/alert` — алерты на цену (меню)\n"
             "🔔 `/alert BTC 69500` — быстрый алерт\n\n"
             "📐 `алерт BTC` / `alert BTC`\n"

@@ -275,3 +275,141 @@ def format_positioning_text(pos: dict, current_price: float = 0) -> str:
         lines.extend(liq_lines)
 
     return "\n".join(lines)
+
+
+# =========================================================
+# LIQUIDATIONS — Real force orders from Binance Futures
+# =========================================================
+
+async def fetch_liquidations(session, symbol: str, limit: int = 100) -> list:
+    """Fetch recent forced liquidations for a symbol from Binance Futures.
+    Returns list of dicts: {time, symbol, side, price, qty, quoteQty}
+    """
+    url = f"https://fapi.binance.com/fapi/v1/forceOrders?symbol={symbol}&limit={limit}"
+    try:
+        async with session.get(url, timeout=10) as resp:
+            if resp.status != 200:
+                logging.error(f"❌ fetch_liquidations {symbol}: HTTP {resp.status}")
+                return []
+            data = await resp.json()
+            results = []
+            for order in data:
+                price = float(order.get("price", 0))
+                qty = float(order.get("origQty", 0))
+                results.append({
+                    "time": order.get("time", 0),
+                    "symbol": order.get("symbol", symbol),
+                    "side": order.get("side", ""),  # BUY = short liq, SELL = long liq
+                    "price": price,
+                    "qty": qty,
+                    "quoteQty": price * qty,
+                })
+            return results
+    except Exception as e:
+        logging.error(f"❌ fetch_liquidations {symbol}: {e}")
+        return []
+
+
+def format_liquidations_text(liquidations: list, symbol: str, current_price: float = 0) -> str:
+    """Format liquidation data into a readable report.
+    side=SELL means a LONG position was liquidated.
+    side=BUY means a SHORT position was liquidated.
+    """
+    if not liquidations:
+        short = symbol.replace("USDT", "")
+        return f"📭 Нет ликвидаций по {short} за последние 7 дней."
+
+    short = symbol.replace("USDT", "")
+
+    # Separate by type
+    long_liqs = [l for l in liquidations if l["side"] == "SELL"]   # SELL = long liquidated
+    short_liqs = [l for l in liquidations if l["side"] == "BUY"]   # BUY = short liquidated
+
+    total_long_vol = sum(l["quoteQty"] for l in long_liqs)
+    total_short_vol = sum(l["quoteQty"] for l in short_liqs)
+    total_vol = total_long_vol + total_short_vol
+
+    # Time range
+    from datetime import datetime, timezone
+    times = [l["time"] for l in liquidations if l["time"] > 0]
+    if times:
+        oldest = datetime.fromtimestamp(min(times) / 1000, tz=timezone.utc)
+        newest = datetime.fromtimestamp(max(times) / 1000, tz=timezone.utc)
+        hours_span = (max(times) - min(times)) / 3600000
+        time_str = f"{hours_span:.0f}ч" if hours_span >= 1 else f"{(max(times) - min(times)) / 60000:.0f}м"
+    else:
+        time_str = "?"
+
+    # Price clustering — group by price zones
+    def cluster_by_price(liqs, zone_pct=0.5):
+        """Group liquidations into price zones (default 0.5% width)."""
+        if not liqs:
+            return []
+        sorted_l = sorted(liqs, key=lambda x: x["price"])
+        clusters = []
+        cur_cluster = [sorted_l[0]]
+        for l in sorted_l[1:]:
+            center = sum(x["price"] for x in cur_cluster) / len(cur_cluster)
+            if abs(l["price"] - center) / center * 100 <= zone_pct:
+                cur_cluster.append(l)
+            else:
+                clusters.append(cur_cluster)
+                cur_cluster = [l]
+        clusters.append(cur_cluster)
+        # Sort by total volume desc
+        clusters.sort(key=lambda c: sum(x["quoteQty"] for x in c), reverse=True)
+        return clusters
+
+    lines = [f"🐋 *Ликвидации {short}* (последние {time_str}, {len(liquidations)} шт)\n"]
+
+    # Summary
+    long_pct = (total_long_vol / total_vol * 100) if total_vol > 0 else 0
+    short_pct = (total_short_vol / total_vol * 100) if total_vol > 0 else 0
+    lines.append(f"📊 *Итого:* `${total_vol:,.0f}`")
+    lines.append(f"🔴 LONG ликвидировано: `${total_long_vol:,.0f}` ({long_pct:.0f}%) — {len(long_liqs)} шт")
+    lines.append(f"🟢 SHORT ликвидировано: `${total_short_vol:,.0f}` ({short_pct:.0f}%) — {len(short_liqs)} шт")
+
+    if current_price > 0:
+        lines.append(f"💵 Текущая цена: `{current_price:.6f}`")
+
+    # Top clusters (hot zones)
+    lines.append(f"\n🔥 *Горячие зоны:*")
+
+    if long_liqs:
+        long_clusters = cluster_by_price(long_liqs)
+        top_long = long_clusters[:3]
+        for i, cl in enumerate(top_long, 1):
+            avg_price = sum(x["price"] for x in cl) / len(cl)
+            vol = sum(x["quoteQty"] for x in cl)
+            lines.append(f"  🔴 `{avg_price:.6f}` — {len(cl)} LONG лик. (`${vol:,.0f}`)")
+
+    if short_liqs:
+        short_clusters = cluster_by_price(short_liqs)
+        top_short = short_clusters[:3]
+        for i, cl in enumerate(top_short, 1):
+            avg_price = sum(x["price"] for x in cl) / len(cl)
+            vol = sum(x["quoteQty"] for x in cl)
+            lines.append(f"  🟢 `{avg_price:.6f}` — {len(cl)} SHORT лик. (`${vol:,.0f}`)")
+
+    if not long_liqs and not short_liqs:
+        lines.append("  📭 Нет данных")
+
+    # Top 5 biggest individual liquidations
+    biggest = sorted(liquidations, key=lambda x: x["quoteQty"], reverse=True)[:5]
+    if biggest and biggest[0]["quoteQty"] > 0:
+        lines.append(f"\n💀 *Крупнейшие:*")
+        for l in biggest:
+            side_emoji = "🔴" if l["side"] == "SELL" else "🟢"
+            side_text = "LONG" if l["side"] == "SELL" else "SHORT"
+            t = datetime.fromtimestamp(l["time"] / 1000, tz=timezone.utc)
+            lines.append(f"  {side_emoji} {side_text} `${l['quoteQty']:,.0f}` @ `{l['price']:.6f}` ({t.strftime('%d.%m %H:%M')})")
+
+    # Theoretical liquidation zones
+    if current_price > 0:
+        lines.append(f"\n📐 *Теоретические зоны* (от текущей цены):")
+        for lev in [5, 10, 20, 50]:
+            long_liq = current_price * (1 - 1/lev)
+            short_liq = current_price * (1 + 1/lev)
+            lines.append(f"  {lev}x: LONG лик ≈`{long_liq:.6f}` | SHORT лик ≈`{short_liq:.6f}`")
+
+    return "\n".join(lines)

@@ -1256,9 +1256,34 @@ SKIP RULES:
     funding_text = f"Funding Rate: {funding} (INFO ONLY — funding does NOT predict direction. Coins with -0.5% or +1% funding can move explosively in either direction. Use for context, NOT for LONG/SHORT decision.)"
 
     # Market Positioning (OI, L/S Ratio, Taker Volume)
-    from core.binance_api import format_positioning_text
+    from core.binance_api import format_positioning_text, fetch_liquidations
     positioning = clean_indic.get("positioning", {})
     positioning_text = format_positioning_text(positioning, price) if positioning else ""
+
+    # Whale Liquidations (real force orders)
+    liq_context = ""
+    try:
+        import aiohttp as _aio
+        async with _aio.ClientSession() as _liq_sess:
+            liqs = await fetch_liquidations(_liq_sess, symbol, limit=100)
+        if liqs:
+            long_liqs = [l for l in liqs if l["side"] == "SELL"]
+            short_liqs = [l for l in liqs if l["side"] == "BUY"]
+            total_long_vol = sum(l["quoteQty"] for l in long_liqs)
+            total_short_vol = sum(l["quoteQty"] for l in short_liqs)
+            liq_context = (
+                f"\n[WHALE LIQUIDATIONS — last {len(liqs)} force orders]\n"
+                f"LONG liquidated: ${total_long_vol:,.0f} ({len(long_liqs)} orders)\n"
+                f"SHORT liquidated: ${total_short_vol:,.0f} ({len(short_liqs)} orders)\n"
+            )
+            # Top 3 biggest
+            biggest = sorted(liqs, key=lambda x: x["quoteQty"], reverse=True)[:3]
+            for b in biggest:
+                side = "LONG" if b["side"] == "SELL" else "SHORT"
+                liq_context += f"  💀 {side} ${b['quoteQty']:,.0f} @ {b['price']:.6f}\n"
+            liq_context += "Use liquidation clusters as potential support/resistance and price magnets.\n"
+    except Exception as e:
+        logging.error(f"❌ Liquidation fetch for AI context: {e}")
 
     user_prompt = f"""Evaluate {symbol}. {user_risk_text}
 
@@ -1268,12 +1293,13 @@ SKIP RULES:
 {smc_text}
 
 {positioning_text}
-
+{liq_context}
 [ADDITIONAL]
 {funding_text}
 INSTRUCTIONS: The SCORECARD at the bottom of each TF already counts bullish vs bearish indicators.
 SMC SCORECARD counts structure, order blocks, FVG, zones separately.
 MARKET POSITIONING shows crowd behavior (OI, L/S ratio, taker volume) — use to confirm or question your direction.
+WHALE LIQUIDATIONS show where positions were force-closed — clusters indicate support/resistance zones and price magnets.
 Combine ALL scorecards to derive your final LONG/SHORT %. DO NOT invent percentages — base them on actual indicator counts.
 Cross-TF divergences = pullback risk. Entry = current price. Safe Entry = better entry from support/OB.
 For SL/TP: cross-reference ALL data — find where indicators CONVERGE. Confluence = strongest levels. Use liquidation zones to identify potential price magnets.
