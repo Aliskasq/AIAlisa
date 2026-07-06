@@ -393,6 +393,15 @@ async def handle_message(app_session, update):
             f"⏳ Загружаю индикаторы {coin_raw} ({', '.join(timeframes)})...", msg_id)
 
         # Process each timeframe
+        # --- Fetch liquidations once (shared across all TFs) ---
+        liq_text = ""
+        try:
+            liqs = await fetch_liquidations(app_session, symbol, limit=100)
+            if liqs:
+                liq_text = format_liquidations_text(liqs, symbol, current_price)
+        except Exception as e:
+            logging.error(f"❌ indicator liquidations error: {e}")
+
         for tf in timeframes:
             binance_interval, tf_label = tf_binance[tf]
             try:
@@ -411,9 +420,44 @@ async def handle_message(app_session, update):
                 if score_idx > 0:
                     full_text = full_text[:score_idx].rstrip()
 
+                # Strip CONFLUENCES section
+                conf_idx = full_text.find(". CONFLUENCES DETECTED")
+                if conf_idx > 0:
+                    # Find the line start (go back to last newline)
+                    line_start = full_text.rfind("\n", 0, conf_idx)
+                    if line_start > 0:
+                        full_text = full_text[:line_start].rstrip()
+
+                # Strip opinion lines (→ 🟢/🔴/⚪/⚠️ BULLISH/BEARISH etc.)
+                cleaned_lines = []
+                for line in full_text.split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("→"):
+                        continue
+                    cleaned_lines.append(line)
+                full_text = "\n".join(cleaned_lines)
+
+                # --- SMC analysis for this TF ---
+                smc_text = ""
+                try:
+                    from core.smc import analyze_smc, get_smc_mode, get_smc_settings
+                    strict = get_smc_mode()
+                    smc_data = analyze_smc(df, tf_label, strict_luxalgo=strict, symbol=symbol)
+                    smc_summary = smc_data.get("summary", "")
+                    if smc_summary and "error" not in smc_summary.lower():
+                        smc_text = "\n\n📐 SMC:\n" + smc_summary
+                except Exception as e:
+                    logging.error(f"❌ indicator SMC {symbol} {tf_label}: {e}")
+
+                full_text += smc_text
+
                 # Prepend header only to first TF
                 if tf == timeframes[0]:
                     full_text = header + "\n\n" + full_text
+
+                # Append liquidations after last TF
+                if tf == timeframes[-1] and liq_text:
+                    full_text += "\n\n" + liq_text
 
                 # Split if too long for Telegram (4096 limit)
                 if len(full_text) <= 4000:
