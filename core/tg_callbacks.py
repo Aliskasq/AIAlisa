@@ -19,15 +19,7 @@ from core.categories import (
     add_sector, remove_sector,
     toggle_scan_sector, toggle_scan_unknown, load_scan_settings,
 )
-from agent.skills import (
-    post_to_binance_square,
-    get_smart_money_signals,
-    get_unified_token_rank,
-    get_social_hype_leaderboard,
-    get_smart_money_inflow_rank,
-    get_meme_rank,
-    get_address_pnl_rank,
-)
+from agent.skills import post_to_binance_square
 
 
 # ============================
@@ -2034,33 +2026,7 @@ async def handle_callback_query(app_session, update):
             )
         return
 
-    # ------------------------------------------------------------------ #
-    # 2. Binance Web3 Skills Buttons
-    # ------------------------------------------------------------------ #
-    if cb_data.startswith("sk_"):
-        await app_session.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-            json={"callback_query_id": cq_id, "text": "⏳ Fetching Web3 data..." if cb_lang == "en" else "⏳ Загружаю Web3 данные..."},
-        )
 
-        result_text = ""
-        if cb_data == "sk_sm_BTC":
-            result_text = await get_smart_money_signals("BTC")
-        elif cb_data == "sk_sm_ETH":
-            result_text = await get_smart_money_signals("ETH")
-        elif cb_data == "sk_hype":
-            result_text = await get_social_hype_leaderboard()
-        elif cb_data == "sk_inflow":
-            result_text = await get_smart_money_inflow_rank()
-        elif cb_data == "sk_meme":
-            result_text = await get_meme_rank()
-        elif cb_data == "sk_rank":
-            result_text = await get_unified_token_rank(10)
-        elif cb_data == "sk_trader":
-            result_text = await get_address_pnl_rank()
-
-        await send_response(app_session, chat_id, f"🛠 *Binance Web3 Skill:*\n{result_text}", parse_mode="Markdown")
-        return
 
     # ------------------------------------------------------------------ #
     # 3. Unified Model Menu (mdm_*) + Legacy Provider Buttons (Admin only)

@@ -785,15 +785,7 @@ async def _progressive_display(text, telegram_stream):
         logging.info(f"⚙️ Progressive display error ({e}), skipping...")
 
 
-# Load the FULL arsenal of Native Binance Skills
-from agent.skills import (
-    get_smart_money_signals,
-    get_unified_token_rank,
-    get_social_hype_leaderboard,
-    get_smart_money_inflow_rank,
-    get_meme_rank,
-    get_address_pnl_rank
-)
+
 
 async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price: float = None, user_margin: dict = None, lang: str = "en", telegram_stream: dict = None, extended: bool = False, square: bool = False, mtf_data: dict = None, smc_data: dict = None, mode: str = "scan", api_key_override: str = None, model_override: str = None) -> str:
     """
@@ -858,26 +850,7 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     else:
         lang_directive = "Respond strictly in RUSSIAN. Translate all output labels (like Current Price, VERDICT, LOGIC, TRADE, RISK, REC) to Russian."
 
-    # =========================================================
-    # AGENTIC ACTION: NATIVELY CALLING BINANCE SKILLS
-    # =========================================================
-    # Forced initialization logs for Architectural visibility
     logging.info(f"🤖 AiAlisa Agent initialized for {symbol}...")
-    logging.info(f"⚙️ [AiAlisa] Executing Agentic Binance Skills...")
-
-    smart_money_context = await get_smart_money_signals(symbol)
-    hype_context = await get_social_hype_leaderboard()
-
-    # Only include Smart Money / Hype in prompt if they have real data
-    skills_block = ""
-    if smart_money_context and "no data" not in smart_money_context.lower() and "error" not in smart_money_context.lower() and "none" not in smart_money_context.lower():
-        skills_block += f"\n- SMART MONEY ACTIVITY: {smart_money_context}"
-    if hype_context and "no data" not in hype_context.lower() and "error" not in hype_context.lower() and "none" not in hype_context.lower():
-        skills_block += f"\n- SOCIAL HYPE TRENDS: {hype_context}"
-
-    skills_note = ""
-    if skills_block:
-        skills_note = f"\nWeb3 Plugin Results:{skills_block}\n"
 
     # =========================================================
     # 1. SYSTEM SETUP — UNIFIED MULTI-TF FORMAT
@@ -898,7 +871,7 @@ async def ask_ai_analysis(symbol: str, tf_key: str, indicators: dict, line_price
     if extended:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
-{skills_note}
+
 You receive MULTI-TIMEFRAME data: {tf_list_str}. You MUST analyze EVERY indicator on EVERY timeframe.
 
 HOW TO CALCULATE LONG/SHORT PERCENTAGE PER TIMEFRAME:
@@ -1023,7 +996,7 @@ SKIP RULES:
     elif square:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
-{skills_note}
+
 You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
 
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.
@@ -1121,7 +1094,7 @@ SKIP RULES:
     else:
         system_instruction = f"""You are AiAlisa, an advanced AI Agent and Binance Crypto Influencer. PAPER TRADING SIMULATION. NO REAL MONEY.
 {lang_directive}
-{skills_note}
+
 You receive MULTI-TIMEFRAME data: {tf_list_str}. Analyze EVERY indicator on EVERY timeframe.
 
 The SCORECARD at the bottom of each TF already pre-counts weighted bullish vs bearish indicators.

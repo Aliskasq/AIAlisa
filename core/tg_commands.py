@@ -31,14 +31,7 @@ from core.categories import (get_sector_emoji, get_sector_label, get_sectors,
                               toggle_scan_sector, toggle_scan_unknown,
                               load_scan_settings, ALL_SECTORS, SECTOR_SHORT, SECTOR_EMOJI)
 from agent.analyzer import ask_ai_analysis
-from agent.skills import (
-    get_smart_money_signals,
-    get_unified_token_rank,
-    get_social_hype_leaderboard,
-    get_smart_money_inflow_rank,
-    get_meme_rank,
-    get_address_pnl_rank,
-)
+
 from core.geometry_scanner import find_trend_line
 from core.chart_drawer import draw_scan_chart, draw_simple_chart, draw_alert_chart
 
@@ -1291,44 +1284,7 @@ async def handle_message(app_session, update):
         await send_response(app_session, chat_id, menu_text, msg_id, reply_markup=menu_kb, parse_mode="Markdown")
         return
 
-    # ==========================================
-    # BINANCE WEB3 SKILLS MENU
-    # ==========================================
-    if text.startswith("/skills") or text in ["skills", "скиллы"]:
-        skills_menu_text = "🛠 *Select Binance Web3 Agent Skill:*"
-        skills_markup = {
-            "inline_keyboard": [
-                [{"text": "🐋 Smart Money (BTC)", "callback_data": "sk_sm_BTC"}, {"text": "🐋 SM (ETH)", "callback_data": "sk_sm_ETH"}],
-                [{"text": "🔥 Social Hype", "callback_data": "sk_hype"}, {"text": "💸 Net Inflow", "callback_data": "sk_inflow"}],
-                [{"text": "🏆 Top Tokens", "callback_data": "sk_rank"}, {"text": "🐶 Meme Rank", "callback_data": "sk_meme"}],
-                [{"text": "👨‍💻 Top Traders PnL", "callback_data": "sk_trader"}]
-            ]
-        }
-        await send_response(app_session, chat_id, skills_menu_text, reply_to_msg_id=msg_id, reply_markup=skills_markup, parse_mode="Markdown")
-        return
 
-    if text.startswith("skill ") or text.startswith("скилл ") or text.startswith("скил "):
-        cmd_body = text.split(" ", 1)[1].strip()
-        result_text = ""
-        if "smart money" in cmd_body or "смарт мани" in cmd_body:
-            parts = cmd_body.split()
-            coin = parts[-1].upper() if parts[-1] not in ["money", "мани"] else "BTC"
-            result_text = await get_smart_money_signals(coin)
-        elif "hype" in cmd_body or "хайп" in cmd_body:
-            result_text = await get_social_hype_leaderboard()
-        elif "inflow" in cmd_body or "приток" in cmd_body:
-            result_text = await get_smart_money_inflow_rank()
-        elif "meme" in cmd_body or "мем" in cmd_body:
-            result_text = await get_meme_rank()
-        elif "rank" in cmd_body or "рейтинг" in cmd_body:
-            result_text = await get_unified_token_rank(10)
-        elif "trader" in cmd_body or "трейдер" in cmd_body:
-            result_text = await get_address_pnl_rank()
-        else:
-            result_text = "⚠️ Unknown skill. Available: `smart money [coin]`, `hype`, `inflow`, `meme`, `rank`, `traders`"
-
-        await send_response(app_session, chat_id, f"🛠 *Binance Web3 Skill:*\n{result_text}", msg_id, parse_mode="Markdown")
-        return
 
     # ==========================================
     # BASIC COMMANDS (/start, /help, /time, /autopost)
@@ -1342,8 +1298,6 @@ async def handle_message(app_session, update):
 
             "💰 `margin 100 leverage 10 max 20%`\n"
             "    _Stop-loss calculator / Расчёт стоп-лосса_\n\n"
-            "🛠 `/skills`\n"
-            "    _Web3 Skills menu / Меню Web3 навыков_\n\n"
             "📈 `/top gainers` · 📉 `/top losers`\n"
             "    _Top 10 growth/drops 24h / Топ 10 рост/падение_\n\n"
             "📊 `/vol`\n"
