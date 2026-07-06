@@ -1524,15 +1524,18 @@ async def handle_callback_query(app_session, update):
 
                 arrow = "🟢" if diff_pct >= 0 else "🔴"
                 ai_dir = entry.get("ai_direction", "")
-                ai_mark = ""
-                if ai_dir:
+                if ai_dir == "SKIP":
+                    ai_mark = "⚪"
+                elif not ai_dir:
+                    ai_mark = "⚫"
+                else:
                     ai_ok = (ai_dir == "LONG" and diff_pct >= 0) or (ai_dir == "SHORT" and diff_pct < 0)
                     ai_mark = "✅" if ai_ok else "❌"
 
                 lines.append(
-                    f"{arrow}{ai_mark} `${short_display}` ({tf})\n"
-                    f"    Пробитие: `${bp:.6f}`\n"
-                    f"    Сейчас: `${now_price:.6f}` (*{diff_pct:+.2f}%*)"
+                    f"{arrow}{ai_mark} `{short_display}` ({tf})\n"
+                    f"    Пробитие: `{bp:.6f}`\n"
+                    f"    Сейчас: `{now_price:.6f}` (*{diff_pct:+.2f}%*)"
                 )
                 count += 1
 

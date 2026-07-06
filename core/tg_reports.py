@@ -310,52 +310,45 @@ def _build_bank_report(log: list, bank: dict, trailing_results: dict, price_map:
             position_size = VIRTUAL_BANK_POSITION_SIZE
         pnl_dollar = (pnl_pct_leveraged / 100) * position_size
 
-        # Direction match icon
+        # First circle: price went up (🟢) or down (🔴) — always based on price movement
         price_up = now_price >= entry_price
+        icon = "🟢" if price_up else "🔴"
+
+        # Second circle: AI direction match
         ai_correct = (direction == "LONG" and price_up) or (direction == "SHORT" and not price_up)
         ai_match = "✅" if ai_correct else "❌"
 
         if status == "sl":
             day_losses += 1
-            icon = "🔴"
             status_tag = " 🚫SL"
         elif status == "tp":
             day_wins += 1
-            icon = "🟢"
             status_tag = " ✅TP"
         elif status == "trail":
             if pnl_pct >= 0:
                 day_wins += 1
-                icon = "🟢"
             else:
                 day_losses += 1
-                icon = "🔴"
             status_tag = " 🔄TRAIL"
         elif status == "ema":
             if pnl_pct >= 0:
                 day_wins += 1
-                icon = "🟢"
             else:
                 day_losses += 1
-                icon = "🔴"
             status_tag = " 📈EMA"
         elif status == "btc":
             day_losses += 1
-            icon = "🔴"
             status_tag = " 🅱️"
         elif is_close:
             # Close view: everything closed at market
             if pnl_pct >= 0:
                 day_wins += 1
-                icon = "🟢"
             else:
                 day_losses += 1
-                icon = "🔴"
             status_tag = " 📊MKT"
         else:
             # Live view: still open
             day_pending += 1
-            icon = "🟡" if pnl_pct >= 0 else "🟠"
             status_tag = " ⏳"
 
         day_pnl_dollar += pnl_dollar

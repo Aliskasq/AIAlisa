@@ -1346,9 +1346,6 @@ async def handle_message(app_session, update):
             "    _Web3 Skills menu / Меню Web3 навыков_\n\n"
             "📈 `/top gainers` · 📉 `/top losers`\n"
             "    _Top 10 growth/drops 24h / Топ 10 рост/падение_\n\n"
-            "📊 `/trend`\n"
-            "    _All breakouts since scan / Все пробития_\n\n"
-
             "📊 `/vol`\n"
             "    _Volume waitlist / Ожидание объёма_\n\n"
             "📐 `индикатор BTC 4ч` — индикаторы\n"
@@ -2079,25 +2076,24 @@ async def handle_message(app_session, update):
                 await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
             return
 
-        # Default: show signals with action buttons
+        # Default: show action buttons only (no bank text)
         try:
-            chunks = await build_signals_text(app_session, lang=lang_pref)
-            # Add buttons to the last chunk
             kb = {"inline_keyboard": [
                 [
+                    {"text": "🏦 Банк", "callback_data": "sig_back"},
                     {"text": "🔒 Снапшот", "callback_data": "sig_close"},
-                    {"text": "🔄 Сбросить банк", "callback_data": "sig_clear_ask"},
                 ],
                 [
                     {"text": "📊 Все пробития", "callback_data": "sig_trend_all"},
                     {"text": "📈 Растущие", "callback_data": "sig_trend_up"},
                 ],
+                [
+                    {"text": "🔄 Сбросить банк", "callback_data": "sig_clear_ask"},
+                ],
             ]}
-            for i, chunk in enumerate(chunks):
-                rid = msg_id if i == 0 else None
-                is_last = (i == len(chunks) - 1)
-                await send_response(app_session, chat_id, chunk, rid,
-                    parse_mode="Markdown", reply_markup=kb if is_last else None)
+            menu_text = "🏆 *Signals* — выберите действие:"
+            await send_response(app_session, chat_id, menu_text, msg_id,
+                parse_mode="Markdown", reply_markup=kb)
         except Exception as e:
             logging.error(f"❌ /signals error: {e}")
             await send_response(app_session, chat_id, f"❌ Error: {e}", msg_id)
