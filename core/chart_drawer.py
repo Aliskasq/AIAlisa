@@ -10,7 +10,7 @@ import pandas as pd
 import logging
 from core.categories import get_sector_label, get_sectors
 import uuid
-from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID, CHAT_ID
+from config import BOT_TOKEN, GROUP_CHAT_ID, BOTTOM_GROUP_CHAT_ID, WAVE_GROUP_CHAT_ID, CHAT_ID
 
 
 def _fmt_price(price: float) -> str:
@@ -491,6 +491,90 @@ async def send_breakout_notification(symbol, df, line, tf, line_type, session, t
                 pass  # logging.info(f"⏭️ BOTTOM FILTER SKIP: {symbol} ({tf}) — third={_price_in_bottom_third} quarter={_price_in_bottom_quarter} b_not_recent={_b_not_recent} (B view idx: {_idx_b_view}/{_last_idx}, price: {_current_close:.6f}, 1/3={_lower_third_ceiling:.6f}, 1/4={_lower_quarter_ceiling:.6f})")
         except Exception as _e:
             logging.error(f"❌ Bottom filter error for {symbol}: {repr(_e)}")
+
+    # === WAVE FILTER: duplicate to third group if 20%+ growth from 30d body low, pullback <70% ===
+    if send_success and WAVE_GROUP_CHAT_ID and not target_chat_id:
+        try:
+            _view_w = min(len(df), 250)
+            _plot_w = df.iloc[-_view_w:].copy().reset_index(drop=True)
+
+            # How many candles = 30 days
+            _candles_30d = 180 if tf == "4H" else 30  # 4H: 6 per day × 30 = 180; 1D: 30
+            _candles_30d = min(_candles_30d, len(_plot_w))
+            _slice_30d = _plot_w.iloc[-_candles_30d:]
+
+            # Body low and body high for each candle
+            _body_lows = _slice_30d[['open', 'close']].min(axis=1)
+            _body_highs = _slice_30d[['open', 'close']].max(axis=1)
+
+            # Step 1: Find bottom — lowest body low across 30 days
+            _bottom_idx = _body_lows.idxmin()  # index in _plot_w coordinates
+            _bottom = float(_body_lows.loc[_bottom_idx])
+
+            # Step 2: Find top — highest body high AFTER bottom
+            _after_bottom = _body_highs.loc[_bottom_idx:]
+            _top = float(_after_bottom.max())
+
+            # Step 3: Check growth >= 20%
+            _growth = _top - _bottom
+            _wave_pass = False
+            if _bottom > 0 and _growth >= _bottom * 0.20:
+                # Step 4: Current price not below 30% of growth from bottom
+                _current_close_w = float(_plot_w['close'].iloc[-1])
+                _min_allowed = _bottom + _growth * 0.30  # pullback max 70%
+                if _current_close_w >= _min_allowed:
+                    _wave_pass = True
+
+            if _wave_pass:
+                _growth_pct = (_growth / _bottom) * 100
+                _pullback_pct = ((_top - _current_close_w) / _growth) * 100 if _growth > 0 else 0
+                logging.info(f"🌊 WAVE FILTER PASS: {symbol} ({tf}) — growth {_growth_pct:.1f}% from {_bottom:.6f} to {_top:.6f}, pullback {_pullback_pct:.1f}%, price {_current_close_w:.6f}")
+
+                # Re-send chart to wave group
+                if os.path.exists(file_path):
+                    _wave_caption = photo_caption
+                    for _attempt in range(1, 4):
+                        try:
+                            with open(file_path, 'rb') as _f:
+                                _data = aiohttp.FormData()
+                                _data.add_field('chat_id', str(WAVE_GROUP_CHAT_ID))
+                                _data.add_field('caption', _wave_caption)
+                                _data.add_field('parse_mode', 'Markdown')
+                                _data.add_field('photo', _f, filename=f"{symbol}_wave.png", content_type='image/png')
+                                async with session.post(photo_url, data=_data, timeout=30) as _resp:
+                                    if _resp.status == 200:
+                                        logging.info(f"✅ Wave signal sent: {symbol} ({tf})")
+                                        break
+                                    elif _resp.status == 429:
+                                        _ra = 5
+                                        try:
+                                            _rj = await _resp.json()
+                                            _ra = _rj.get('parameters', {}).get('retry_after', 5)
+                                        except: pass
+                                        await asyncio.sleep(_ra + 1)
+                                    else:
+                                        _rt = await _resp.text()
+                                        logging.error(f"❌ Wave group send error ({_attempt}): {_resp.status} - {_rt}")
+                                        await asyncio.sleep(2)
+                        except Exception as _e:
+                            logging.error(f"❌ Wave group error ({_attempt}): {repr(_e)}")
+                            await asyncio.sleep(2)
+
+                    # Send overflow to wave group too
+                    if overflow_text:
+                        await asyncio.sleep(0.5)
+                        try:
+                            async with session.post(msg_url, json={
+                                'chat_id': str(WAVE_GROUP_CHAT_ID),
+                                'text': overflow_text,
+                                'parse_mode': 'Markdown'
+                            }, timeout=30) as _resp:
+                                if _resp.status == 200:
+                                    logging.info(f"✅ Wave overflow sent: {symbol} ({tf})")
+                        except Exception as _e:
+                            logging.error(f"❌ Wave overflow error: {repr(_e)}")
+        except Exception as _e:
+            logging.error(f"❌ Wave filter error for {symbol}: {repr(_e)}")
 
     try:
         if os.path.exists(file_path):
