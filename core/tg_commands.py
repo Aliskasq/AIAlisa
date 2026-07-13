@@ -51,6 +51,7 @@ from core.tg_state import (
     get_autopost_state, set_autopost_state, clear_autopost_state,
     get_scansetting_state, set_scansetting_state, clear_scansetting_state,
     get_alert_state, set_alert_state, clear_alert_state,
+    get_people_state, set_people_state, clear_people_state,
 )
 from core.tg_reports import (
     build_signals_text, build_signals_close_text,
@@ -269,6 +270,87 @@ async def handle_message(app_session, update):
                 "❌ Введите число, например: `15` или `23.55`", msg_id, parse_mode="Markdown")
         clear_line4h_input_state(chat_id)
         return
+
+    # ==========================================
+    # PEOPLE STATE: awaiting username or daily_max input
+    # ==========================================
+    _people_st = get_people_state(chat_id)
+    if _people_st:
+        from core.user_limits import set_user_setting, get_user_settings, remove_user_limits
+        user_id_sender = msg.get("from", {}).get("id", 0)
+        if user_id_sender != ADMIN_ID:
+            clear_people_state(chat_id)
+        elif _people_st.get("step") == "awaiting_username":
+            # Parse username — accept @username or plain username or forwarded user_id
+            _input = original_text.strip().lstrip("@").lower()
+            # Try to resolve as user_id (number)
+            _target_uid = None
+            _target_name = _input
+            try:
+                _target_uid = int(_input)
+                _target_name = str(_target_uid)
+            except ValueError:
+                _target_uid = None
+                _target_name = _input
+
+            if not _target_uid and not _target_name:
+                await send_response(app_session, chat_id,
+                    "❌ Введите username или user ID", msg_id)
+                clear_people_state(chat_id)
+                return
+
+            # Show current limits + 3 action buttons
+            existing = get_user_settings(_target_uid or 0) or {}
+            _lines = [f"👤 *Пользователь:* `{_target_name}`"]
+            if _target_uid:
+                _lines.append(f"🆔 ID: `{_target_uid}`")
+            if existing:
+                if existing.get("cooldown_min"):
+                    _lines.append(f"⏱ Кулдаун: {existing['cooldown_min']} мин")
+                if existing.get("daily_max"):
+                    _lines.append(f"📊 Лимит в сутки: {existing['daily_max']}")
+                if existing.get("ticker_cooldown_min"):
+                    _lines.append(f"🪙 Тикер кулдаун: {existing['ticker_cooldown_min']} мин")
+            else:
+                _lines.append("📋 Ограничений нет")
+
+            _text = "\n".join(_lines)
+            _kb = {"inline_keyboard": [
+                [{"text": "⏱ По времени", "callback_data": f"ppl_cool_{_target_uid or _target_name}"},
+                 {"text": "📊 В сутки", "callback_data": f"ppl_daily_{_target_uid or _target_name}"}],
+                [{"text": "🪙 По тикеру", "callback_data": f"ppl_tick_{_target_uid or _target_name}"},
+                 {"text": "🗑 Снять всё", "callback_data": f"ppl_rm_{_target_uid or _target_name}"}],
+            ]}
+            set_people_state(chat_id, {
+                "step": "menu",
+                "target_user_id": _target_uid,
+                "target_name": _target_name,
+            })
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": _text, "parse_mode": "Markdown",
+                      "reply_markup": _kb})
+            return
+
+        elif _people_st.get("step") == "awaiting_daily_max":
+            try:
+                val = int(text.strip())
+                if val < 1 or val > 1000:
+                    await send_response(app_session, chat_id, "❌ Введите число от 1 до 1000", msg_id)
+                    clear_people_state(chat_id)
+                    return
+                _uid = _people_st.get("target_user_id")
+                if _uid:
+                    set_user_setting(_uid, "daily_max", val)
+                    await send_response(app_session, chat_id,
+                        f"✅ Лимит сообщений в сутки для `{_people_st.get('target_name', _uid)}`: *{val}*",
+                        msg_id, parse_mode="Markdown")
+                else:
+                    await send_response(app_session, chat_id, "❌ User ID не найден", msg_id)
+            except ValueError:
+                await send_response(app_session, chat_id, "❌ Введите число", msg_id)
+            clear_people_state(chat_id)
+            return
 
     # ==========================================
     # LIQUIDATION COMMAND (ликвидации BTC / liquidation BTC)
@@ -1997,6 +2079,36 @@ async def handle_message(app_session, update):
             await send_response(app_session, chat_id, resp_text, msg_id, parse_mode="Markdown")
         return
 
+    # ==========================================
+    # PEOPLE — User rate limit management
+    # ==========================================
+    if text in ("/people", "people", "/лимиты"):
+        if not is_admin(msg):
+            await send_response(app_session, chat_id, "⛔️ Только для админа", msg_id)
+            return
+
+        from core.user_limits import get_all_limited_users
+        limited = get_all_limited_users()
+        if limited:
+            _lines = ["👥 *Ограниченные пользователи:*\n"]
+            for uid, s in limited.items():
+                parts = []
+                if s.get("cooldown_min"):
+                    parts.append(f"⏱{s['cooldown_min']}м")
+                if s.get("daily_max"):
+                    parts.append(f"📊{s['daily_max']}/сут")
+                if s.get("ticker_cooldown_min"):
+                    parts.append(f"🪙{s['ticker_cooldown_min']}м")
+                _name = s.get("display_name", uid)
+                _lines.append(f"• `{_name}` ({uid}) — {' | '.join(parts)}")
+            _lines.append("\nВведите username или ID для настройки:")
+        else:
+            _lines = ["👥 Ограниченных пользователей нет.\n\nВведите username или user ID:"]
+
+        set_people_state(chat_id, {"step": "awaiting_username"})
+        await send_response(app_session, chat_id, "\n".join(_lines), msg_id, parse_mode="Markdown")
+        return
+
     if text.startswith("/stoploss"):
         if not is_admin(msg):
             deny = "⛔️ Admin only" if lang_pref == "en" else "⛔️ Только для админа"
@@ -2514,6 +2626,16 @@ async def handle_message(app_session, update):
 
         symbol = symbol_raw + "USDT" if not symbol_raw.endswith("USDT") else symbol_raw
 
+        # --- USER RATE LIMIT CHECK ---
+        _sender_id = msg.get("from", {}).get("id", 0)
+        if _sender_id and _sender_id != ADMIN_ID:
+            from core.user_limits import check_limits, record_usage
+            _limit_msg = check_limits(_sender_id, ticker=symbol)
+            if _limit_msg:
+                await send_response(app_session, chat_id, _limit_msg, msg_id)
+                return
+            record_usage(_sender_id, ticker=symbol)
+
         fetch_msg = f"⏳ Fetching chart data + building trend line... ({symbol} {tf_label})" if lang_pref == "en" else f"⏳ Загружаю график + строю трендовую линию... ({symbol} {tf_label})"
         stream_msg_id = await send_and_get_msg_id(app_session, chat_id, fetch_msg, msg_id)
 
@@ -2726,6 +2848,16 @@ async def handle_message(app_session, update):
     is_margin_ru = ("маржа" in text or "маржу" in text) and "плечо" in text
 
     if is_margin_en or is_margin_ru:
+        # --- USER RATE LIMIT CHECK (margin) ---
+        _sender_id_m = msg.get("from", {}).get("id", 0)
+        if _sender_id_m and _sender_id_m != ADMIN_ID:
+            from core.user_limits import check_limits, record_usage
+            _limit_msg_m = check_limits(_sender_id_m)
+            if _limit_msg_m:
+                await send_response(app_session, chat_id, _limit_msg_m, msg_id)
+                return
+            record_usage(_sender_id_m)
+
         nums = re.findall(r'\d+', text)
         if len(nums) >= 2:
             margin = float(nums[0])

@@ -2660,3 +2660,155 @@ async def handle_callback_query(app_session, update):
             return
 
         return
+
+    # ------------------------------------------------------------------ #
+    # PEOPLE — User rate limit callbacks (ppl_ prefix)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("ppl_"):
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True},
+            )
+            return
+
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        from core.user_limits import set_user_setting, remove_user_limits, get_user_settings
+        from core.tg_state import set_people_state
+
+        parts = cb_data.split("_", 2)  # ppl_cool_12345 or ppl_rm_12345
+        if len(parts) < 3:
+            return
+        action = parts[1]
+        target = parts[2]
+        # Try to parse target as int (user_id)
+        try:
+            target_uid = int(target)
+        except ValueError:
+            target_uid = None
+
+        if action == "rm":
+            # Remove all limits
+            if target_uid:
+                remove_user_limits(target_uid)
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"✅ Все ограничения сняты для `{target}`",
+                {"inline_keyboard": []}, cq_id, "✅ Снято")
+            return
+
+        if action == "cool":
+            # Show cooldown time options
+            _times = [10, 20, 30, 60, 90, 120]
+            existing = get_user_settings(target_uid) if target_uid else {}
+            current = (existing or {}).get("cooldown_min", 0)
+            rows = []
+            row = []
+            for t in _times:
+                label = f"✅ {t} мин" if t == current else f"{t} мин"
+                row.append({"text": label, "callback_data": f"pplset_cool_{target}_{t}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": "🚫 Выкл", "callback_data": f"pplset_cool_{target}_0"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"⏱ *Кулдаун между сообщениями* для `{target}`\nВыберите интервал:",
+                {"inline_keyboard": rows}, cq_id)
+            return
+
+        if action == "daily":
+            # Ask for daily count input
+            if target_uid:
+                set_people_state(chat_id, {
+                    "step": "awaiting_daily_max",
+                    "target_user_id": target_uid,
+                    "target_name": target,
+                })
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"📊 *Лимит сообщений в сутки* для `{target}`\n\nВведите число (например 5, 10, 15):",
+                {"inline_keyboard": []}, cq_id)
+            return
+
+        if action == "tick":
+            # Show ticker cooldown time options
+            _times = [10, 20, 30, 60, 90, 120]
+            existing = get_user_settings(target_uid) if target_uid else {}
+            current = (existing or {}).get("ticker_cooldown_min", 0)
+            rows = []
+            row = []
+            for t in _times:
+                label = f"✅ {t} мин" if t == current else f"{t} мин"
+                row.append({"text": label, "callback_data": f"pplset_tick_{target}_{t}"})
+                if len(row) == 3:
+                    rows.append(row)
+                    row = []
+            if row:
+                rows.append(row)
+            rows.append([{"text": "🚫 Выкл", "callback_data": f"pplset_tick_{target}_0"}])
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"🪙 *Кулдаун по тикеру* для `{target}`\nВыберите интервал:",
+                {"inline_keyboard": rows}, cq_id)
+            return
+
+    # ------------------------------------------------------------------ #
+    # PEOPLE SET — Apply setting (pplset_ prefix)
+    # ------------------------------------------------------------------ #
+    if cb_data.startswith("pplset_"):
+        user_id = cq.get("from", {}).get("id", 0)
+        if user_id != ADMIN_ID:
+            await app_session.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                json={"callback_query_id": cq_id, "text": "⛔️ Admin only.", "show_alert": True},
+            )
+            return
+
+        msg_id_cb = cq.get("message", {}).get("message_id")
+        from core.user_limits import set_user_setting, get_user_settings
+
+        # pplset_cool_12345_60 or pplset_tick_12345_30
+        parts = cb_data.split("_")  # ['pplset', 'cool', '12345', '60']
+        if len(parts) < 4:
+            return
+        setting_type = parts[1]
+        target = parts[2]
+        try:
+            target_uid = int(target)
+        except ValueError:
+            target_uid = None
+        try:
+            value = int(parts[3])
+        except ValueError:
+            return
+
+        key_map = {"cool": "cooldown_min", "tick": "ticker_cooldown_min"}
+        key = key_map.get(setting_type)
+        if not key or not target_uid:
+            return
+
+        if value == 0:
+            # Remove this specific setting
+            existing = get_user_settings(target_uid) or {}
+            existing.pop(key, None)
+            if existing:
+                from core.user_limits import _save_settings, _load_settings
+                data = _load_settings()
+                data[str(target_uid)] = existing
+                _save_settings(data)
+            else:
+                from core.user_limits import remove_user_limits
+                remove_user_limits(target_uid)
+            label = "⏱ Кулдаун" if setting_type == "cool" else "🪙 Тикер кулдаун"
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"✅ {label} выключен для `{target}`",
+                {"inline_keyboard": []}, cq_id, "✅ Выкл")
+        else:
+            set_user_setting(target_uid, key, value)
+            # Save display name
+            set_user_setting(target_uid, "display_name", target)
+            label = "⏱ Кулдаун" if setting_type == "cool" else "🪙 Тикер кулдаун"
+            await _slm_edit(app_session, chat_id, msg_id_cb,
+                f"✅ {label}: *{value} мин* для `{target}`",
+                {"inline_keyboard": []}, cq_id, f"✅ {value} мин")
+        return

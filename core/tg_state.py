@@ -89,6 +89,20 @@ def clear_autopost_state(chat_id):
     _autopost_state.pop(chat_id, None)
 
 
+# --- PEOPLE STATE (for /people user-limit flow) ---
+# {chat_id: {"step": str, "target_user_id": int, "target_name": str, "msg_id": int|None}}
+_people_state = {}
+
+def get_people_state(chat_id):
+    return _people_state.get(chat_id)
+
+def set_people_state(chat_id, state):
+    _people_state[chat_id] = state
+
+def clear_people_state(chat_id):
+    _people_state.pop(chat_id, None)
+
+
 # --- SECTOR STATE (for /sec multi-step flow) ---
 # {chat_id: {"action": "add"|"move"|"find"|"verify", "step": str, "symbol": str|None, "msg_id": int|None}}
 _sector_state = {}
