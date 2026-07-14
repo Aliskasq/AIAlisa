@@ -2688,10 +2688,11 @@ async def handle_callback_query(app_session, update):
         except ValueError:
             target_uid = None
 
+        storage_key = target_uid if target_uid else target
+
         if action == "rm":
             # Remove all limits
-            if target_uid:
-                remove_user_limits(target_uid)
+            remove_user_limits(storage_key)
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 f"✅ Все ограничения сняты для `{target}`",
                 {"inline_keyboard": []}, cq_id, "✅ Снято")
@@ -2700,7 +2701,7 @@ async def handle_callback_query(app_session, update):
         if action == "cool":
             # Show cooldown time options
             _times = [10, 20, 30, 60, 90, 120]
-            existing = get_user_settings(target_uid) if target_uid else {}
+            existing = get_user_settings(storage_key) or {}
             current = (existing or {}).get("cooldown_min", 0)
             rows = []
             row = []
@@ -2720,12 +2721,11 @@ async def handle_callback_query(app_session, update):
 
         if action == "daily":
             # Ask for daily count input
-            if target_uid:
-                set_people_state(chat_id, {
-                    "step": "awaiting_daily_max",
-                    "target_user_id": target_uid,
-                    "target_name": target,
-                })
+            set_people_state(chat_id, {
+                "step": "awaiting_daily_max",
+                "target_user_id": storage_key,
+                "target_name": target,
+            })
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 f"📊 *Лимит сообщений в сутки* для `{target}`\n\nВведите число (например 5, 10, 15):",
                 {"inline_keyboard": []}, cq_id)
@@ -2734,7 +2734,7 @@ async def handle_callback_query(app_session, update):
         if action == "tick":
             # Show ticker cooldown time options
             _times = [10, 20, 30, 60, 90, 120]
-            existing = get_user_settings(target_uid) if target_uid else {}
+            existing = get_user_settings(storage_key) or {}
             current = (existing or {}).get("ticker_cooldown_min", 0)
             rows = []
             row = []
@@ -2767,46 +2767,49 @@ async def handle_callback_query(app_session, update):
         msg_id_cb = cq.get("message", {}).get("message_id")
         from core.user_limits import set_user_setting, get_user_settings
 
-        # pplset_cool_12345_60 or pplset_tick_12345_30
-        parts = cb_data.split("_")  # ['pplset', 'cool', '12345', '60']
+        # pplset_cool_12345_60 or pplset_tick_some_user_30
+        # Value is always the last segment; target may contain underscores
+        parts = cb_data.split("_")
         if len(parts) < 4:
             return
         setting_type = parts[1]
-        target = parts[2]
+        try:
+            value = int(parts[-1])
+        except ValueError:
+            return
+        target = "_".join(parts[2:-1])  # everything between type and value
         try:
             target_uid = int(target)
         except ValueError:
             target_uid = None
-        try:
-            value = int(parts[3])
-        except ValueError:
-            return
 
         key_map = {"cool": "cooldown_min", "tick": "ticker_cooldown_min"}
         key = key_map.get(setting_type)
-        if not key or not target_uid:
+        if not key:
             return
+        # For non-numeric targets, use target string as key
+        storage_key = target_uid if target_uid else target
 
         if value == 0:
             # Remove this specific setting
-            existing = get_user_settings(target_uid) or {}
+            existing = get_user_settings(storage_key) or {}
             existing.pop(key, None)
             if existing:
                 from core.user_limits import _save_settings, _load_settings
                 data = _load_settings()
-                data[str(target_uid)] = existing
+                data[str(storage_key)] = existing
                 _save_settings(data)
             else:
                 from core.user_limits import remove_user_limits
-                remove_user_limits(target_uid)
+                remove_user_limits(storage_key)
             label = "⏱ Кулдаун" if setting_type == "cool" else "🪙 Тикер кулдаун"
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 f"✅ {label} выключен для `{target}`",
                 {"inline_keyboard": []}, cq_id, "✅ Выкл")
         else:
-            set_user_setting(target_uid, key, value)
+            set_user_setting(storage_key, key, value)
             # Save display name
-            set_user_setting(target_uid, "display_name", target)
+            set_user_setting(storage_key, "display_name", target)
             label = "⏱ Кулдаун" if setting_type == "cool" else "🪙 Тикер кулдаун"
             await _slm_edit(app_session, chat_id, msg_id_cb,
                 f"✅ {label}: *{value} мин* для `{target}`",

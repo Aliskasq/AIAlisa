@@ -35,14 +35,16 @@ def _save_settings(data: dict):
         logging.error(f"Error writing user limits: {e}")
 
 
-def get_user_settings(user_id: int) -> dict | None:
-    """Get limit settings for a user, or None if no limits set."""
+def get_user_settings(user_id) -> dict | None:
+    """Get limit settings for a user, or None if no limits set.
+    user_id can be int (Telegram ID) or str (username)."""
     data = _load_settings()
     return data.get(str(user_id))
 
 
-def set_user_setting(user_id: int, key: str, value):
-    """Set a single limit setting for a user."""
+def set_user_setting(user_id, key: str, value):
+    """Set a single limit setting for a user.
+    user_id can be int (Telegram ID) or str (username)."""
     data = _load_settings()
     uid = str(user_id)
     if uid not in data:
@@ -51,8 +53,9 @@ def set_user_setting(user_id: int, key: str, value):
     _save_settings(data)
 
 
-def remove_user_limits(user_id: int):
-    """Remove all limits for a user."""
+def remove_user_limits(user_id):
+    """Remove all limits for a user.
+    user_id can be int (Telegram ID) or str (username)."""
     data = _load_settings()
     data.pop(str(user_id), None)
     _save_settings(data)

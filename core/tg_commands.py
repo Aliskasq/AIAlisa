@@ -1500,7 +1500,8 @@ async def handle_message(app_session, update):
 
                 "🧠 `/model` — AI модель, фоллбэк, старт дня\n"
 
-                "🏷 `/sec` — секторы монет (меню)\n\n"
+                "🏷 `/sec` — секторы монет (меню)\n"
+                "👥 `/people` — лимиты пользователей\n\n"
 
                 "⏰ `/time 18:30` — scan schedule\n"
                 "📢 `autopost` — настройки автопоста (меню)\n"
