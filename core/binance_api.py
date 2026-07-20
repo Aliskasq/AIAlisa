@@ -1,6 +1,8 @@
 import logging
 import time
 import asyncio
+import hmac
+import hashlib
 import aiohttp
 from config import BOT_TOKEN, CHAT_ID
 
@@ -283,11 +285,21 @@ def format_positioning_text(pos: dict, current_price: float = 0) -> str:
 
 async def fetch_liquidations(session, symbol: str, limit: int = 100) -> list:
     """Fetch recent forced liquidations for a symbol from Binance Futures.
+    Requires API key + signature (USER_DATA endpoint).
     Returns list of dicts: {time, symbol, side, price, qty, quoteQty}
     """
-    url = f"https://fapi.binance.com/fapi/v1/forceOrders?symbol={symbol}&limit={limit}"
+    from config import BINANCE_API_KEY, BINANCE_SECRET_KEY
+    if not BINANCE_API_KEY or not BINANCE_SECRET_KEY:
+        logging.warning(f"⚠️ fetch_liquidations {symbol}: no Binance API keys configured")
+        return []
+    
+    timestamp = int(time.time() * 1000)
+    query = f"symbol={symbol}&limit={limit}&timestamp={timestamp}"
+    signature = hmac.new(BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256).hexdigest()
+    url = f"https://fapi.binance.com/fapi/v1/forceOrders?{query}&signature={signature}"
+    headers = {"X-MBX-APIKEY": BINANCE_API_KEY}
     try:
-        async with session.get(url, timeout=10) as resp:
+        async with session.get(url, headers=headers, timeout=10) as resp:
             if resp.status != 200:
                 logging.error(f"❌ fetch_liquidations {symbol}: HTTP {resp.status}")
                 return []

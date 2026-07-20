@@ -723,8 +723,9 @@ async def main():
                         _price_log_lines.append(f"🗑️ {sym} {tf}: no price (delisted?)")
                         continue
                     elif not line_data:
-                        _price_log_lines.append(f"⚠️ {sym} {tf}: no line_data")
-                        logging.warning(f"⚠️ VOL WAITLIST {sym}: no line_data for {tf}, skipping")
+                        _price_log_lines.append(f"⚠️ {sym} {tf}: no line_data, removing from waitlist")
+                        logging.warning(f"⚠️ VOL WAITLIST {sym}: no line_data for {tf}, removing")
+                        remove_from_volume_waitlist(vw_item["key"])
                         continue
 
                     vw_item["_current_price"] = cur_price
