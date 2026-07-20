@@ -33,15 +33,27 @@ def _ck(val, current, label):
 
 async def _slm_edit(session, chat_id, msg_id, text, kb, cq_id, toast=""):
     """Edit message + answer callback in one call."""
-    await session.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
-        json={"chat_id": chat_id, "message_id": msg_id,
-              "text": text, "parse_mode": "Markdown", "reply_markup": kb},
-    )
-    await session.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
-        json={"callback_query_id": cq_id, "text": toast or "✅"},
-    )
+    try:
+        async with session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+            json={"chat_id": chat_id, "message_id": msg_id,
+                  "text": text, "parse_mode": "Markdown", "reply_markup": kb},
+        ) as resp:
+            r = await resp.json()
+            if not r.get("ok"):
+                logging.warning(f"⚠️ _slm_edit editMessageText: {r.get('description','?')}")
+    except Exception as e:
+        logging.error(f"❌ _slm_edit editMessageText: {e}")
+    try:
+        cq_payload = {"callback_query_id": cq_id, "text": toast or "✅"}
+        if toast:
+            cq_payload["show_alert"] = True
+        await session.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json=cq_payload,
+        )
+    except Exception as e:
+        logging.error(f"❌ _slm_edit answerCallbackQuery: {e}")
 
 
 def _slm_bank_prefix(bank_key):
